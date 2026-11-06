@@ -15,20 +15,24 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /** Tek bir video izini donanım çözücüsüyle bir Surface'e çözer (senkron API). */
-class TrackDecoder(fd: FileDescriptor, track: Int, surface: Surface, realtime: Boolean) {
+class TrackDecoder(fd: FileDescriptor, track: Int, private val surface: Surface, realtime: Boolean) {
     private val extractor = MediaExtractor()
     private val codec: MediaCodec
     private val info = MediaCodec.BufferInfo()
+    private val format: MediaFormat
     private var inputEos = false
     var outputEos = false
         private set
     var lastPts = -1L
         private set
+    /** Çözücü henüz çıktı vermediyse flush() codec-specific veriyi kaybettirir; bu durumda flush yapılmaz. */
+    private var gotOutput = false
+    private var queuedInput = false
 
     init {
         extractor.setDataSource(fd)
         extractor.selectTrack(track)
-        val format = extractor.getTrackFormat(track)
+        format = extractor.getTrackFormat(track)
         // Önizleme: gerçek zamanlı öncelik; dışa aktarım: olabildiğince hızlı.
         format.setInteger(MediaFormat.KEY_PRIORITY, if (realtime) 0 else 1)
         codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
@@ -52,11 +56,14 @@ class TrackDecoder(fd: FileDescriptor, track: Int, surface: Surface, realtime: B
                     } else {
                         codec.queueInputBuffer(ii, 0, n, extractor.sampleTime, 0)
                         extractor.advance()
+                        queuedInput = true
                     }
                 }
             }
             val oi = codec.dequeueOutputBuffer(info, 2000)
+            if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) gotOutput = true
             if (oi >= 0) {
+                gotOutput = true
                 if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0 && info.size == 0) {
                     codec.releaseOutputBuffer(oi, false)
                     outputEos = true
@@ -77,7 +84,11 @@ class TrackDecoder(fd: FileDescriptor, track: Int, surface: Surface, realtime: B
 
     fun seek(us: Long) {
         extractor.seekTo(us, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-        codec.flush()
+        // Başlangıçta (henüz giriş/çıkış yokken) flush gereksiz ve zararlı.
+        if (gotOutput || queuedInput) {
+            if (gotOutput) codec.flush() else { codec.stop(); codec.configure(format, surface, null, 0); codec.start() }
+        }
+        queuedInput = false
         inputEos = false
         outputEos = false
         lastPts = -1
