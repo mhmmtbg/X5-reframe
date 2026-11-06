@@ -23,17 +23,22 @@ jobs:
 
       - name: Araçlar
         run: |
+          echo "started $(date -u)"
           sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
           pip install -q gdown
 
       - name: Drive'dan indir
+        timeout-minutes: 15
         run: |
-          mkdir -p media
-          gdown -q "$INSV_ID" -O media/clip.insv
-          gdown -q "$LRV_ID" -O media/clip.lrv
-          ls -la media
+          mkdir -p media out
+          dl() {
+            curl -sSL --retry 3 -o "$2" "https://drive.usercontent.google.com/download?id=$1&export=download&confirm=t" \
+              || gdown -q "$1" -O "$2"
+          }
+          { dl "$INSV_ID" media/clip.insv; dl "$LRV_ID" media/clip.lrv; ls -la media; file media/*; } 2>&1 | tee out/download.log
 
       - name: Analiz
+        timeout-minutes: 15
         run: |
           set -x
           mkdir -p out
