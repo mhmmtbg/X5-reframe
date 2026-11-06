@@ -59,6 +59,7 @@ class Exporter(
         /** Siyahtan açılma / siyaha kararma süreleri. */
         val fadeInUs: Long = 0,
         val fadeOutUs: Long = 0,
+        val layers: List<com.mhmmtbg.x5reframe.model.Layer> = emptyList(),
     ) {
         val outputDurationUs: Long get() = ((endUs - startUs) / speed).toLong()
     }
@@ -148,6 +149,7 @@ class Exporter(
             egl = EglCore()
             val win = egl.createWindowSurface(inputSurface)
             egl.makeCurrent(win)
+            val overlay = com.mhmmtbg.x5reframe.gl.OverlayRenderer()
 
             val totalOut = jobs.sumOf { it.outputDurationUs }.coerceAtLeast(1)
             var timeline = 0L
@@ -177,6 +179,7 @@ class Exporter(
                         program.fade = fadeFactor(job, tOut)
                         val pts = source.currentPts
                         program.drawScene(output.width, output.height, job.layoutRects, job.sceneAt(pts), source, job.baseAt(pts))
+                        overlay.draw(output.width, output.height, job.layers, pts)
                         egl.setPresentationTime(win, (timeline + tOut) * 1000)
                         egl.swap(win)
                         drain(false)
@@ -198,6 +201,7 @@ class Exporter(
                     runCatching { program.release() }
                 }
             }
+            overlay.release()
             if (cancelled) throw InterruptedException("İptal edildi")
 
             encoder.signalEndOfInputStream()

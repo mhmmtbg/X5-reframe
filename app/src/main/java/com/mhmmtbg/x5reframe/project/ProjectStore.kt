@@ -140,6 +140,13 @@ class ProjectStore(context: Context) {
             put("stabMode", e.stabMode.name); put("stabStrength", e.stabStrength)
             put("stitchDistance", e.stitchDistance)
             put("layout", e.layout.name)
+            put("layers", JSONArray().apply {
+                e.layers.forEach { l ->
+                    put(JSONObject().put("id", l.id).put("kind", l.kind.name).put("content", l.content)
+                        .put("x", l.x.toDouble()).put("y", l.y.toDouble()).put("scale", l.scale.toDouble()).put("opacity", l.opacity.toDouble())
+                        .put("startUs", l.startUs).put("endUs", l.endUs).put("visible", l.visible).put("style", l.style.name))
+                }
+            })
             put("extraPanes", JSONArray().apply {
                 e.extraPanes.forEach { p ->
                     put(JSONObject().put("baseView", viewToJson(p.baseView)).put("keyframes", JSONArray().apply {
@@ -164,6 +171,20 @@ class ProjectStore(context: Context) {
                     .getOrDefault(com.mhmmtbg.x5reframe.stab.StabMode.OFF),
                 stabStrength = o.optDouble("stabStrength", 0.5),
                 stitchDistance = o.optDouble("stitchDistance", 0.0),
+                layers = (o.optJSONArray("layers") ?: JSONArray()).let { arr ->
+                    (0 until arr.length()).mapNotNull { i ->
+                        val l = arr.getJSONObject(i)
+                        runCatching {
+                            com.mhmmtbg.x5reframe.model.Layer(
+                                l.getString("id"), com.mhmmtbg.x5reframe.model.Layer.Kind.valueOf(l.getString("kind")), l.getString("content"),
+                                l.optDouble("x", 0.5).toFloat(), l.optDouble("y", 0.85).toFloat(), l.optDouble("scale", 0.5).toFloat(),
+                                l.optDouble("opacity", 1.0).toFloat(), l.optLong("startUs"), l.optLong("endUs", -1), l.optBoolean("visible", true),
+                                runCatching { com.mhmmtbg.x5reframe.model.Layer.TextStyle.valueOf(l.optString("style")) }
+                                    .getOrDefault(com.mhmmtbg.x5reframe.model.Layer.TextStyle.WHITE),
+                            )
+                        }.getOrNull()
+                    }
+                },
                 layout = runCatching { com.mhmmtbg.x5reframe.model.Layout.valueOf(o.optString("layout")) }
                     .getOrDefault(com.mhmmtbg.x5reframe.model.Layout.SINGLE),
                 extraPanes = (o.optJSONArray("extraPanes") ?: JSONArray()).let { arr ->

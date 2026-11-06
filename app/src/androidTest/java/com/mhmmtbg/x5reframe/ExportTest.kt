@@ -155,6 +155,30 @@ class ExportTest {
     }
 
     @Test
+    fun overlayDrawsTextLayer() {
+        val egl = com.mhmmtbg.x5reframe.gl.EglCore()
+        try {
+            val pb = egl.createPbuffer(320, 180)
+            egl.makeCurrent(pb)
+            val ov = com.mhmmtbg.x5reframe.gl.OverlayRenderer()
+            val layer = com.mhmmtbg.x5reframe.model.Layer("t", com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, "Merhaba", x = 0.5f, y = 0.5f, scale = 0.8f)
+            android.opengl.GLES30.glClearColor(0f, 0f, 0f, 1f)
+            android.opengl.GLES30.glClear(android.opengl.GLES30.GL_COLOR_BUFFER_BIT)
+            ov.draw(320, 180, listOf(layer), 0)
+            val px = java.nio.ByteBuffer.allocateDirect(320 * 180 * 4)
+            android.opengl.GLES30.glReadPixels(0, 0, 320, 180, android.opengl.GLES30.GL_RGBA, android.opengl.GLES30.GL_UNSIGNED_BYTE, px)
+            var bright = 0
+            for (i in 0 until 320 * 180) if ((px.get(i * 4).toInt() and 0xff) > 200) bright++
+            log("overlay bright pixels=$bright")
+            assertTrue("metin çizilmedi", bright > 200)
+            ov.release()
+        } finally {
+            egl.release()
+            writeReport()
+        }
+    }
+
+    @Test
     fun lrvPreviewDecodes() {
         val lrvFile = File("/data/local/tmp/clip.lrv")
         assumeTrue("örnek LRV yok", clipFile.exists() && lrvFile.exists())

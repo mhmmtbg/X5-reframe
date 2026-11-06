@@ -61,6 +61,29 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private var surfW = 0
     private var surfH = 0
 
+    private val imagePicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) importImage(uri)
+    }
+
+    /** Seçilen görseli uygulamanın kendi klasörüne (en fazla 1024 px) kopyala ve katman yap. */
+    private fun importImage(uri: Uri) {
+        lifecycleScope.launch {
+            val path = withContext(Dispatchers.IO) {
+                runCatching {
+                    val src = contentResolver.openInputStream(uri)!!.use { android.graphics.BitmapFactory.decodeStream(it) }
+                    val k = minOf(1f, 1024f / maxOf(src.width, src.height))
+                    val bmp = if (k < 1f) android.graphics.Bitmap.createScaledBitmap(src, (src.width * k).toInt(), (src.height * k).toInt(), true) else src
+                    val dir = java.io.File(filesDir, "layers").apply { mkdirs() }
+                    val f = java.io.File(dir, java.util.UUID.randomUUID().toString() + ".png")
+                    f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                    f.absolutePath
+                }.getOrNull()
+            }
+            val c = controller ?: return@launch
+            if (path == null) c.say("Görsel açılamadı", false) else c.addLayer(com.mhmmtbg.x5reframe.model.Layer.Kind.IMAGE, path)
+        }
+    }
+
     private val addClipPicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -128,6 +151,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.sceneProvider = { t -> c.sceneAt(t) }
             p.layoutProvider = { c.snapshotState.layout.rects }
             p.baseProvider = { t -> c.baseAt(t) }
+            p.layersProvider = { c.snapshotState.layers }
             p.setStitchInv(c.state.stitchInv)
             c.onChanged = {
                 p.setStitchInv(c.state.stitchInv)
@@ -281,6 +305,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             )
         },
         setMuted = { player?.setMuted(it) },
+        pickImage = { imagePicker.launch("image/*") },
         step = { fwd -> c.clearLive(); player?.step(fwd) },
     )
 
@@ -309,6 +334,18 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         })
         sv.setOnTouchListener { v, e ->
             val c = controller ?: return@setOnTouchListener false
+            if (c.layerTool && c.currentLayer != null) {
+                // Katman sekmesi: seçili katmanı parmakla taşı.
+                when (e.actionMasked) {
+                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                        if (player?.playing == true) player?.pause()
+                        val nx = (e.x / v.width).coerceIn(0f, 1f); val ny = (e.y / v.height).coerceIn(0f, 1f)
+                        c.updateLayerLive { it.copy(x = nx, y = ny) }
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> c.endLayerGesture()
+                }
+                return@setOnTouchListener true
+            }
             scale.onTouchEvent(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
@@ -414,6 +451,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                         clip, e.inUs, e.outUs, { t -> e.sceneAt(t) },
                         { t -> stab?.base(t / 1e6, e.stabMode, e.stabStrength, e.inUs / 1e6) },
                         e.layout.rects, e.stitchInv, seg.speed,
+                        layers = e.layers,
                         fadeInUs = if (i > 0 && segs[i - 1].transitionOut == com.mhmmtbg.x5reframe.project.Transition.FADE) fade else 0,
                         fadeOutUs = if (i < segs.size - 1 && seg.transitionOut == com.mhmmtbg.x5reframe.project.Transition.FADE) fade else 0,
                     )

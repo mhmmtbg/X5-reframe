@@ -73,10 +73,11 @@ class EditorActions(
     val open: (Uri) -> Unit,
     val share: (Uri) -> Unit,
     val setMuted: (Boolean) -> Unit,
+    val pickImage: () -> Unit,
     val step: (Boolean) -> Unit,
 )
 
-private enum class Tool(val label: String) { FRAME("Kadraj"), MULTI("Çoklu"), TRIM("Kes"), STAB("Sabit"), AUDIO("Ses") }
+private enum class Tool(val label: String) { FRAME("Kadraj"), MULTI("Çoklu"), TRIM("Kes"), STAB("Sabit"), LAYER("Katman"), AUDIO("Ses") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,6 +89,7 @@ fun EditorScreen(
     seq: SequenceUi,
 ) {
     var tool by rememberSaveable { mutableStateOf(Tool.FRAME) }
+    LaunchedEffect(tool) { c.layerTool = tool == Tool.LAYER }
     var showExport by remember { mutableStateOf(false) }
     val s = c.state
 
@@ -150,6 +152,7 @@ fun EditorScreen(
                 Tool.TRIM -> TrimPanel(c)
                 Tool.STAB -> StabPanel(c)
                 Tool.MULTI -> MultiPanel(c)
+                Tool.LAYER -> LayerPanel(c, actions)
                 Tool.AUDIO -> AudioPanel(c, actions)
             }
         }
@@ -418,6 +421,100 @@ private fun TrimPanel(c: EditorController) {
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
         )
     }
+}
+
+@Composable
+private fun LayerPanel(c: EditorController, a: EditorActions) {
+    val s = c.state
+    var editing by remember { mutableStateOf(false) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("+ Metin", Modifier.weight(1f), primary = true) { editing = true }
+            ActionButton("+ Görsel", Modifier.weight(1f), primary = true) { a.pickImage() }
+        }
+        if (s.layers.isEmpty()) {
+            Text("Başlık, alt yazı ya da logo ekle. Seçili katmanı önizlemede sürükleyerek taşıyabilirsin.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            if (editing) TextDialog("", com.mhmmtbg.x5reframe.model.Layer.TextStyle.WHITE, { editing = false }) { t, _ -> c.addLayer(com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, t); editing = false }
+            return
+        }
+        // Katman listesi (üstteki en önde)
+        s.layers.asReversed().forEach { l ->
+            val sel = l.id == c.selectedLayer
+            Row(
+                Modifier.fillMaxWidth().background(if (sel) Palette.SurfaceHigh else Color.Transparent, RoundedCornerShape(8.dp))
+                    .border(1.dp, if (sel) Palette.Accent else Palette.Outline, RoundedCornerShape(8.dp))
+                    .clickable { c.selectedLayer = l.id }.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) "T" else "▣", color = Palette.Accent, modifier = Modifier.width(20.dp))
+                Text(
+                    if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) l.content.replace('\n', ' ') else "Görsel",
+                    Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
+                )
+                Text(
+                    fmt(l.startUs) + " – " + (if (l.endUs < 0) "son" else fmt(l.endUs)),
+                    color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
+                )
+            }
+        }
+        val l = c.currentLayer
+        if (l != null) {
+            LabeledRow("Boyut") {
+                Slider(
+                    value = l.scale, onValueChange = { v -> c.updateLayerLive { it.copy(scale = v) } }, onValueChangeFinished = { c.endLayerGesture() },
+                    valueRange = 0.05f..1f, modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                )
+            }
+            LabeledRow("Saydamlık") {
+                Slider(
+                    value = l.opacity, onValueChange = { v -> c.updateLayerLive { it.copy(opacity = v) } }, onValueChangeFinished = { c.endLayerGesture() },
+                    valueRange = 0.1f..1f, modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                )
+            }
+            if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) {
+                LabeledRow("Stil") {
+                    Segmented(com.mhmmtbg.x5reframe.model.Layer.TextStyle.values().toList(), l.style, { it.label }, { st -> c.updateLayer { it.copy(style = st) } }, Modifier.weight(1f))
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ActionButton("Baş: şimdi", Modifier.weight(1f)) { c.updateLayer { it.copy(startUs = c.positionUs) }; c.say("Katman ${fmt(c.positionUs)}'de başlar") }
+                ActionButton("Son: şimdi", Modifier.weight(1f)) {
+                    val p = c.positionUs
+                    if (p <= l.startUs) c.say("Bitiş başlangıçtan sonra olmalı", false) else { c.updateLayer { it.copy(endUs = p) }; c.say("Katman ${fmt(p)}'de biter") }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) ActionButton("Düzenle", Modifier.weight(1f)) { editing = true }
+                ActionButton("Öne", Modifier.weight(0.8f)) { c.moveLayer(1) }
+                ActionButton("Arkaya", Modifier.weight(0.8f)) { c.moveLayer(-1) }
+                ActionButton(if (l.visible) "Gizle" else "Göster", Modifier.weight(0.8f)) { c.updateLayer { it.copy(visible = !it.visible) } }
+                ActionButton("Sil", Modifier.weight(0.7f)) { c.deleteLayer() }
+            }
+            if (editing) {
+                TextDialog(if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) l.content else "", l.style, { editing = false }) { t, _ ->
+                    if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) c.updateLayer { it.copy(content = t) } else c.addLayer(com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, t)
+                    editing = false
+                }
+            }
+        } else if (editing) {
+            TextDialog("", com.mhmmtbg.x5reframe.model.Layer.TextStyle.WHITE, { editing = false }) { t, _ -> c.addLayer(com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, t); editing = false }
+        }
+    }
+}
+
+@Composable
+private fun TextDialog(initial: String, style: com.mhmmtbg.x5reframe.model.Layer.TextStyle, onDismiss: () -> Unit, onOk: (String, com.mhmmtbg.x5reframe.model.Layer.TextStyle) -> Unit) {
+    var text by remember { mutableStateOf(initial) }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Metin") },
+        text = { androidx.compose.material3.OutlinedTextField(text, { text = it }, minLines = 1, maxLines = 4) },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { if (text.isNotBlank()) onOk(text.trim(), style) }) { Text("Tamam", color = Palette.Accent) } },
+        dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Vazgeç") } },
+        containerColor = Palette.Surface, tonalElevation = 0.dp,
+    )
 }
 
 @Composable

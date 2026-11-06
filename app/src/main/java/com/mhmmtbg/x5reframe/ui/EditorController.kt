@@ -196,6 +196,69 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         say("Düzen: ${l.label}")
     }
 
+    // ---- Katmanlar ----
+
+    var selectedLayer by mutableStateOf<String?>(null)
+    /** Katman sekmesi açıkken önizlemede sürükleme katmanı taşır. */
+    var layerTool by mutableStateOf(false)
+
+    val currentLayer: com.mhmmtbg.x5reframe.model.Layer? get() = state.layers.firstOrNull { it.id == selectedLayer }
+
+    fun addLayer(kind: com.mhmmtbg.x5reframe.model.Layer.Kind, content: String) {
+        val l = com.mhmmtbg.x5reframe.model.Layer(
+            java.util.UUID.randomUUID().toString(), kind, content,
+            y = if (kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) 0.85f else 0.15f,
+            x = if (kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) 0.5f else 0.85f,
+            scale = if (kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) 0.6f else 0.2f,
+            startUs = state.inUs, endUs = -1,
+        )
+        commit(state.copy(layers = state.layers + l))
+        selectedLayer = l.id
+        say(if (kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) "Metin eklendi" else "Görsel eklendi")
+    }
+
+    private var layerGestureStart: EditState? = null
+
+    /** Sürekli değişiklik (sürükleme, kaydırıcı): geçmişe tek adım olarak yazılır. */
+    fun updateLayerLive(transform: (com.mhmmtbg.x5reframe.model.Layer) -> com.mhmmtbg.x5reframe.model.Layer) {
+        val id = selectedLayer ?: return
+        if (layerGestureStart == null) layerGestureStart = state
+        history.replace(state.copy(layers = state.layers.map { if (it.id == id) transform(it) else it }))
+        state = history.current
+        snapshotState = state
+        onChanged()
+    }
+
+    fun endLayerGesture() {
+        val before = layerGestureStart ?: return
+        layerGestureStart = null
+        val after = state
+        if (before != after) { history.replace(before); history.push(after); sync() }
+    }
+
+    fun updateLayer(transform: (com.mhmmtbg.x5reframe.model.Layer) -> com.mhmmtbg.x5reframe.model.Layer) {
+        val id = selectedLayer ?: return
+        commit(state.copy(layers = state.layers.map { if (it.id == id) transform(it) else it }))
+    }
+
+    fun deleteLayer() {
+        val id = selectedLayer ?: return
+        commit(state.copy(layers = state.layers.filterNot { it.id == id }))
+        selectedLayer = state.layers.lastOrNull()?.id
+        say("Katman silindi")
+    }
+
+    fun moveLayer(dir: Int) {
+        val id = selectedLayer ?: return
+        val list = state.layers.toMutableList()
+        val i = list.indexOfFirst { it.id == id }
+        val j = i + dir
+        if (i < 0 || j !in list.indices) return
+        java.util.Collections.swap(list, i, j)
+        commit(state.copy(layers = list))
+        say(if (dir > 0) "Katman öne alındı" else "Katman arkaya alındı")
+    }
+
     // ---- Kesme ----
 
     fun setIn() {

@@ -51,6 +51,8 @@ data class EditState(
     val layout: Layout = Layout.SINGLE,
     /** Bölme 1..3 (bölme 0 = keyframes + baseView). */
     val extraPanes: List<Pane> = emptyList(),
+    /** Üst katmanlar (metin, görsel); listede sonraki üstte çizilir. */
+    val layers: List<Layer> = emptyList(),
 ) {
     fun pane(i: Int): Pane = if (i == 0) Pane(keyframes, baseView)
         else extraPanes.getOrNull(i - 1) ?: Pane(baseView = baseView.copy(yaw = ViewParams.wrap(baseView.yaw + defaultPaneYaw[i % 4])))
