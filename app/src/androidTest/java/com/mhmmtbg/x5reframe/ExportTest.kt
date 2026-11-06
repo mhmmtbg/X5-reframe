@@ -85,7 +85,7 @@ class ExportTest {
         var error: String? = null
         val view = ViewParams(projection = com.mhmmtbg.x5reframe.model.Projection.EQUIRECT, fov = 360.0)
         val settings = Exporter.Settings(1920, 960, false, 10_000_000, 1_000_000, 2_000_000, true, spherical = true)
-        val ex = Exporter(ctx, clip, settings, { view }, object : Exporter.Listener {
+        val ex = Exporter(ctx, clip, settings, { listOf(view) }, object : Exporter.Listener {
             override fun onProgress(fraction: Float, speed: Float) {}
             override fun onDone(uri: Uri, seconds: Float) { outUri = uri; done.countDown() }
             override fun onFailed(message: String) { error = message; done.countDown() }
@@ -104,6 +104,27 @@ class ExportTest {
         log("360 out tracks=${mx.trackCount}")
         assertTrue("360 dosyası okunamıyor", mx.trackCount >= 1)
         mx.release()
+    }
+
+    @Test
+    fun exportsQuadLayout() {
+        assumeTrue("örnek klip yok", clipFile.exists())
+        val clip = ClipInfo.load(ctx, Uri.fromFile(clipFile))
+        val done = CountDownLatch(1)
+        var error: String? = null
+        val layout = com.mhmmtbg.x5reframe.model.Layout.QUAD
+        val views = listOf(0.0, 180.0, 90.0, -90.0).map { ViewParams(yaw = it, fov = 100.0) }
+        val settings = Exporter.Settings(1280, 720, false, 8_000_000, 0, 1_000_000, true, layoutRects = layout.rects)
+        val ex = Exporter(ctx, clip, settings, { views }, object : Exporter.Listener {
+            override fun onProgress(fraction: Float, speed: Float) {}
+            override fun onDone(uri: Uri, seconds: Float) { done.countDown() }
+            override fun onFailed(message: String) { error = message; done.countDown() }
+        })
+        Thread { ex.run() }.start()
+        assertTrue("zaman aşımı", done.await(10, TimeUnit.MINUTES))
+        log("quad export error=$error frames=${ex.videoWritten}")
+        writeReport()
+        assertTrue("çoklu açı dışa aktarım hatası: $error", error == null && ex.videoWritten >= 25)
     }
 
     @Test
@@ -147,7 +168,7 @@ class ExportTest {
             // Tezgâh tarafına bakan sabit kadraj.
             val view = ViewParams(yaw = 180.0, pitch = 0.0, fov = 100.0)
             val settings = Exporter.Settings(1280, 720, false, 8_000_000, 0, 3_000_000)
-            val ex = Exporter(ctx, clip, settings, { view }, object : Exporter.Listener {
+            val ex = Exporter(ctx, clip, settings, { listOf(view) }, object : Exporter.Listener {
                 override fun onProgress(fraction: Float, speed: Float) {}
                 override fun onDone(uri: Uri, seconds: Float) { outUri = uri; done.countDown() }
                 override fun onFailed(message: String) { error = message; done.countDown() }

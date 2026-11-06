@@ -31,7 +31,9 @@ class Player(
     }
 
     /** Görüntülenecek kadrajı veren fonksiyon (anahtar kareler zamana bağlı). */
-    @Volatile var viewProvider: (Long) -> ViewParams = { ViewParams() }
+    @Volatile var sceneProvider: (Long) -> List<ViewParams> = { listOf(ViewParams()) }
+    /** Çoklu açı düzeninin bölmeleri (normalize dikdörtgenler). */
+    @Volatile var layoutProvider: () -> List<FloatArray> = { listOf(floatArrayOf(0f, 0f, 1f, 1f)) }
     /** Sabitleme temel dönüşü (yoksa null). */
     @Volatile var baseProvider: (Long) -> DoubleArray? = { null }
 
@@ -200,8 +202,8 @@ class Player(
     private fun drawNow() {
         if (window == EGL14.EGL_NO_SURFACE || !::source.isInitialized || !source.hasFrame) return
         egl.makeCurrent(window)
-        val view = viewProvider(source.currentPts)
-        program.draw(winW, winH, view, source, baseProvider(source.currentPts))
+        val t = source.currentPts
+        program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))
         egl.swap(window)
     }
 
@@ -211,7 +213,7 @@ class Player(
         runCatching {
             val pb = egl.createPbuffer(w, h)
             egl.makeCurrent(pb)
-            program.draw(w, h, viewProvider(source.currentPts), source, baseProvider(source.currentPts))
+            program.drawScene(w, h, layoutProvider(), sceneProvider(source.currentPts), source, baseProvider(source.currentPts))
             val buf = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder())
             GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
             if (window != EGL14.EGL_NO_SURFACE) egl.makeCurrent(window) else egl.makeNothingCurrent()

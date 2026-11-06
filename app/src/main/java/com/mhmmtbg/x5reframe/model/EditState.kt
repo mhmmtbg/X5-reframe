@@ -1,12 +1,36 @@
 package com.mhmmtbg.x5reframe.model
 
 enum class Aspect(val label: String, val w: Int, val h: Int) {
-    LANDSCAPE("16:9", 16, 9), PORTRAIT("9:16", 9, 16), SQUARE("1:1", 1, 1), FOUR_FIVE("4:5", 4, 5)
+    LANDSCAPE("16:9", 16, 9), PORTRAIT("9:16", 9, 16), SQUARE("1:1", 1, 1), FOUR_FIVE("4:5", 4, 5), PANO("2:1", 2, 1)
 }
 
 enum class Quality(val label: String, val longSide: Int, val mbpsAvc: Int) {
     FHD("1080p", 1920, 18), QHD("2.7K", 2704, 32), UHD("4K", 3840, 55)
 }
+
+/** Çoklu açı düzeni: bölmelerin normalize dikdörtgenleri (x, y, w, h; sol üst köşe). */
+enum class Layout(val label: String, val rects: List<FloatArray>) {
+    SINGLE("Tek", listOf(floatArrayOf(0f, 0f, 1f, 1f))),
+    SIDE("Yan yana", listOf(floatArrayOf(0f, 0f, .5f, 1f), floatArrayOf(.5f, 0f, .5f, 1f))),
+    STACK("Üst-alt", listOf(floatArrayOf(0f, 0f, 1f, .5f), floatArrayOf(0f, .5f, 1f, .5f))),
+    PIP("Resim içinde", listOf(floatArrayOf(0f, 0f, 1f, 1f), floatArrayOf(.62f, .04f, .34f, .34f))),
+    TRIPLE("Üçlü", listOf(floatArrayOf(0f, 0f, 1f, .5f), floatArrayOf(0f, .5f, .5f, .5f), floatArrayOf(.5f, .5f, .5f, .5f))),
+    QUAD("Dörtlü", listOf(floatArrayOf(0f, 0f, .5f, .5f), floatArrayOf(.5f, 0f, .5f, .5f), floatArrayOf(0f, .5f, .5f, .5f), floatArrayOf(.5f, .5f, .5f, .5f)));
+
+    val count get() = rects.size
+}
+
+/** Bir bölmenin kadrajı: anahtar kareler ve sabit görünüm. */
+data class Pane(val keyframes: List<Keyframe> = emptyList(), val baseView: ViewParams = ViewParams()) {
+    fun viewAt(t: Long) = keyframes.viewAt(t, baseView)
+    fun keyframeNear(t: Long, tolUs: Long = 300_000): Keyframe? =
+        keyframes.minByOrNull { kotlin.math.abs(it.timeUs - t) }?.takeIf { kotlin.math.abs(it.timeUs - t) <= tolUs }
+    fun withKeyframe(k: Keyframe) =
+        copy(keyframes = (keyframes.filter { kotlin.math.abs(it.timeUs - k.timeUs) >= 40_000 } + k).sortedBy { it.timeUs })
+}
+
+/** Yeni bölmelerin varsayılan bakış yönleri: ön, arka, sağ, sol. */
+private val defaultPaneYaw = doubleArrayOf(0.0, 180.0, 90.0, -90.0)
 
 /** Geri alınabilir düzenleme durumu (değişmez). */
 data class EditState(
@@ -24,7 +48,24 @@ data class EditState(
     val stabStrength: Double = 0.5,
     /** Dikiş mesafesi (m); 0 = uzak (sonsuz). */
     val stitchDistance: Double = 0.0,
+    val layout: Layout = Layout.SINGLE,
+    /** Bölme 1..3 (bölme 0 = keyframes + baseView). */
+    val extraPanes: List<Pane> = emptyList(),
 ) {
+    fun pane(i: Int): Pane = if (i == 0) Pane(keyframes, baseView)
+        else extraPanes.getOrNull(i - 1) ?: Pane(baseView = baseView.copy(yaw = ViewParams.wrap(baseView.yaw + defaultPaneYaw[i % 4])))
+
+    fun withPane(i: Int, p: Pane): EditState = if (i == 0) copy(keyframes = p.keyframes, baseView = p.baseView) else {
+        val list = (0 until maxOf(extraPanes.size, i)).map { j -> extraPanes.getOrNull(j) ?: pane(j + 1) }.toMutableList()
+        list[i - 1] = p
+        copy(extraPanes = list)
+    }
+
+    fun viewAt(t: Long, pane: Int): ViewParams = pane(pane).viewAt(t)
+
+    /** Düzendeki tüm bölmelerin o anki kadrajları. */
+    fun sceneAt(t: Long): List<ViewParams> = (0 until layout.count).map { viewAt(t, it) }
+
     val stitchInv: Float get() = if (stitchDistance <= 0) 0f else (1.0 / stitchDistance).toFloat()
 
     fun viewAt(t: Long): ViewParams = keyframes.viewAt(t, baseView)
@@ -37,7 +78,7 @@ data class EditState(
 
     /** Çıktı 360° mi (tüm anahtar kareler ve sabit kadraj equirect ise). */
     val isSpherical: Boolean get() = aspect == Aspect.PANO &&
-        (keyframes.map { it.view } + baseView).all { it.projection == Projection.EQUIRECT }
+        layout == Layout.SINGLE && (keyframes.map { it.view } + baseView).all { it.projection == Projection.EQUIRECT }
 
     fun outputSize(): Pair<Int, Int> {
         fun even(x: Int) = x / 2 * 2

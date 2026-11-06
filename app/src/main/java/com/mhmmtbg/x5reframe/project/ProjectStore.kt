@@ -103,6 +103,14 @@ class ProjectStore(context: Context) {
             put("hevc", e.hevc); put("includeAudio", e.includeAudio)
             put("stabMode", e.stabMode.name); put("stabStrength", e.stabStrength)
             put("stitchDistance", e.stitchDistance)
+            put("layout", e.layout.name)
+            put("extraPanes", JSONArray().apply {
+                e.extraPanes.forEach { p ->
+                    put(JSONObject().put("baseView", viewToJson(p.baseView)).put("keyframes", JSONArray().apply {
+                        p.keyframes.forEach { k -> put(JSONObject().put("t", k.timeUs).put("view", viewToJson(k.view))) }
+                    }))
+                }
+            })
         }
 
         fun editFromJson(o: JSONObject): EditState {
@@ -120,6 +128,18 @@ class ProjectStore(context: Context) {
                     .getOrDefault(com.mhmmtbg.x5reframe.stab.StabMode.OFF),
                 stabStrength = o.optDouble("stabStrength", 0.5),
                 stitchDistance = o.optDouble("stitchDistance", 0.0),
+                layout = runCatching { com.mhmmtbg.x5reframe.model.Layout.valueOf(o.optString("layout")) }
+                    .getOrDefault(com.mhmmtbg.x5reframe.model.Layout.SINGLE),
+                extraPanes = (o.optJSONArray("extraPanes") ?: JSONArray()).let { arr ->
+                    (0 until arr.length()).map { i ->
+                        val po = arr.getJSONObject(i)
+                        val ks = po.optJSONArray("keyframes") ?: JSONArray()
+                        com.mhmmtbg.x5reframe.model.Pane(
+                            (0 until ks.length()).map { j -> val k = ks.getJSONObject(j); Keyframe(k.getLong("t"), viewFromJson(k.getJSONObject("view"))) },
+                            po.optJSONObject("baseView")?.let(::viewFromJson) ?: ViewParams(),
+                        )
+                    }
+                },
             )
         }
 

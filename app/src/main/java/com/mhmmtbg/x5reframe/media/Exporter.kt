@@ -28,7 +28,7 @@ class Exporter(
     private val context: Context,
     private val clip: ClipInfo,
     private val settings: Settings,
-    private val viewAt: (Long) -> ViewParams,
+    private val sceneAt: (Long) -> List<ViewParams>,
     private val listener: Listener,
     private val baseAt: (Long) -> DoubleArray? = { null },
 ) {
@@ -44,6 +44,8 @@ class Exporter(
         val spherical: Boolean = false,
         /** 1 / dikiş mesafesi (m). */
         val stitchInv: Float = 0f,
+        /** Çoklu açı bölmeleri (normalize x, y, w, h). */
+        val layoutRects: List<FloatArray> = listOf(floatArrayOf(0f, 0f, 1f, 1f)),
     )
 
     interface Listener {
@@ -109,7 +111,7 @@ class Exporter(
             var frames = 0
             var lastReport = 0L
             while (pts in 0..end && !cancelled) {
-                program.draw(settings.width, settings.height, viewAt(pts), source, baseAt(pts))
+                program.drawScene(settings.width, settings.height, settings.layoutRects, sceneAt(pts), source, baseAt(pts))
                 egl.setPresentationTime(win, (pts - start).coerceAtLeast(0) * 1000)
                 egl.swap(win)
                 frames++

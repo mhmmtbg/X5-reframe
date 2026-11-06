@@ -76,7 +76,7 @@ class EditorActions(
     val step: (Boolean) -> Unit,
 )
 
-private enum class Tool(val label: String) { FRAME("Kadraj"), TRIM("Kes"), STAB("Sabitleme"), AUDIO("Ses") }
+private enum class Tool(val label: String) { FRAME("Kadraj"), MULTI("Çoklu"), TRIM("Kes"), STAB("Sabit"), AUDIO("Ses") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -111,6 +111,15 @@ fun EditorScreen(
             val w = if (ratio > boxRatio) maxWidth else maxHeight * ratio
             val h = if (ratio > boxRatio) maxWidth / ratio else maxHeight
             AndroidView(factory = surfaceFactory, modifier = Modifier.size(w, h))
+            if (s.layout.count > 1) {
+                val r = s.layout.rects[c.activePane.coerceIn(0, s.layout.count - 1)]
+                Box(Modifier.size(w, h)) {
+                    Box(
+                        Modifier.padding(start = w * r[0], top = h * r[1]).size(w * r[2], h * r[3])
+                            .border(2.dp, Palette.Accent)
+                    )
+                }
+            }
             FeedbackPill(c, Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
             ViewHud(c, Modifier.align(Alignment.BottomStart).padding(10.dp))
         }
@@ -124,7 +133,7 @@ fun EditorScreen(
                 t.durationUs = c.clip.durationUs
                 t.inUs = s.inUs
                 t.outUs = s.outUs
-                t.keyframes = s.keyframes.map { it.timeUs }
+                t.keyframes = c.activeKeyframes.map { it.timeUs }
                 t.positionUs = c.positionUs
             },
         )
@@ -138,6 +147,7 @@ fun EditorScreen(
                 Tool.FRAME -> FramePanel(c)
                 Tool.TRIM -> TrimPanel(c)
                 Tool.STAB -> StabPanel(c)
+                Tool.MULTI -> MultiPanel(c)
                 Tool.AUDIO -> AudioPanel(c, actions)
             }
         }
@@ -368,18 +378,18 @@ private fun FramePanel(c: EditorController) {
                 Modifier.weight(1f),
             )
         }
-        val near = s.keyframeNear(c.positionUs) != null
+        val near = c.activeKeyframeNear(c.positionUs) != null
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ActionButton(if (near) "Kareyi güncelle" else "Anahtar kare ekle", Modifier.weight(1.4f), primary = true) { c.addOrUpdateKeyframe() }
             ActionButton("Sil", Modifier.weight(0.8f), enabled = near) { c.deleteKeyframe() }
             ActionButton("Ufku sıfırla", Modifier.weight(1f)) { c.changeView { it.copy(pitch = 0.0, roll = 0.0) }; c.say("Ufuk sıfırlandı") }
         }
         Text(
-            if (s.keyframes.isEmpty()) "Önizlemede sürükle: yön · iki parmak: yakınlaştır. Anahtar kare eklersen kamera kareler arasında yumuşakça hareket eder."
-            else "${s.keyframes.size} anahtar kare. Değiştirdiğin kadraj, Kareyi güncelle / ekle ile kaydedilir.",
+            if (c.activeKeyframes.isEmpty()) "Önizlemede sürükle: yön · iki parmak: yakınlaştır. Anahtar kare eklersen kamera kareler arasında yumuşakça hareket eder."
+            else "${c.activeKeyframes.size} anahtar kare. Değiştirdiğin kadraj, Kareyi güncelle / ekle ile kaydedilir.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
         )
-        if (s.keyframes.isNotEmpty()) {
+        if (c.activeKeyframes.isNotEmpty()) {
             Text(
                 "Tüm anahtar kareleri temizle", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.clickable { c.clearKeyframes() }.padding(vertical = 6.dp),
@@ -405,6 +415,27 @@ private fun TrimPanel(c: EditorController) {
             "Düğmeler oynatma çizgisinin olduğu yeri kullanır. Zaman çizelgesindeki sarı tutamakları sürükleyerek de ayarlayabilirsin.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+@Composable
+private fun MultiPanel(c: EditorController) {
+    val s = c.state
+    val layouts = com.mhmmtbg.x5reframe.model.Layout.values().toList()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Segmented(layouts.take(3), s.layout, { it.label }, { c.setLayout(it) }, Modifier.fillMaxWidth())
+        Segmented(layouts.drop(3), s.layout, { it.label }, { c.setLayout(it) }, Modifier.fillMaxWidth())
+        if (s.layout.count > 1) {
+            LabeledRow("Bölme") {
+                Segmented((0 until s.layout.count).toList(), c.activePane, { "${it + 1}" }, { c.selectPane(it) }, Modifier.weight(1f))
+            }
+            Text(
+                "Önizlemede bir bölmeye dokunarak da seçebilirsin. Kadraj, anahtar kare ve açı ayarları seçili bölmeye uygulanır.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
+            )
+        } else {
+            Text("Aynı 360° çekimden birden fazla açıyı tek videoda göstermek için bir düzen seç.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 

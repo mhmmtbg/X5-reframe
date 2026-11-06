@@ -62,8 +62,35 @@ class ReframeProgram(private val rig: Rig) {
     }
 
     /** @param base sabitlemeden gelen rig_from_view temel dönüşü (yoksa kamera çerçevesi) */
-    fun draw(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray? = null) {
+    fun draw(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray? = null) =
+        drawPane(0, 0, width, height, view, src, base)
+
+    /**
+     * Çoklu açı: her bölme kendi kadrajıyla aynı dokulardan çizilir.
+     * @param rects normalize (x, y, w, h), sol üst köşe başlangıçlı
+     */
+    fun drawScene(width: Int, height: Int, rects: List<FloatArray>, views: List<ViewParams>, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?) {
+        if (rects.size <= 1) { draw(width, height, views.first(), src, base); return }
         GLES30.glViewport(0, 0, width, height)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        val gap = maxOf(2, width / 400)
+        for (i in rects.indices) {
+            val r = rects[i]
+            var x = (r[0] * width).toInt(); var w = (r[2] * width).toInt()
+            var yTop = (r[1] * height).toInt(); var h = (r[3] * height).toInt()
+            // Bölmeler arasında ince ayraç
+            if (r[0] > 0f) { x += gap / 2; w -= gap / 2 }
+            if (r[0] + r[2] < 1f) w -= gap / 2
+            if (r[1] > 0f) { yTop += gap / 2; h -= gap / 2 }
+            if (r[1] + r[3] < 1f) h -= gap / 2
+            val y = height - yTop - h // GL'de başlangıç sol alt
+            drawPane(x, y, w, h, views.getOrElse(i) { views.first() }, src, base)
+        }
+    }
+
+    fun drawPane(x: Int, y: Int, width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?) {
+        GLES30.glViewport(x, y, width, height)
         GLES30.glUseProgram(program)
         for (i in 0..1) {
             val lens: Lens = rig.lenses[i]

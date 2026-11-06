@@ -83,7 +83,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 project = proj
                 val c = EditorController(clip, proj.name, proj.edit)
                 val p = Player(this@EditorActivity, clip, this@EditorActivity)
-                p.viewProvider = { t -> c.displayedView(t) }
+                p.sceneProvider = { t -> c.sceneAt(t) }
+                p.layoutProvider = { c.snapshotState.layout.rects }
                 p.baseProvider = { t -> c.baseAt(t) }
                 p.setStitchInv(c.state.stitchInv)
                 c.onChanged = {
@@ -164,11 +165,21 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     if (player?.playing == true) player?.pause()
+                    // Çoklu açıda dokunulan bölmeyi seç (küçük bölmeler üstte olduğundan sondan başla).
+                    val rects = c.state.layout.rects
+                    if (rects.size > 1) {
+                        val nx = e.x / v.width; val ny = e.y / v.height
+                        val hit = rects.indices.reversed().firstOrNull { i ->
+                            val r = rects[i]; nx >= r[0] && nx <= r[0] + r[2] && ny >= r[1] && ny <= r[1] + r[3]
+                        }
+                        if (hit != null) c.selectPane(hit)
+                    }
                     c.beginViewGesture()
                     lastX = e.x; lastY = e.y; scaling = false
                 }
                 MotionEvent.ACTION_MOVE -> if (!scaling && e.pointerCount == 1) {
-                    val degPerPx = c.currentView.fov / max(v.width, v.height)
+                    val r = c.state.layout.rects[c.activePane.coerceIn(0, c.state.layout.count - 1)]
+                    val degPerPx = c.currentView.fov / max(v.width * r[2], v.height * r[3])
                     val dx = e.x - lastX
                     val dy = e.y - lastY
                     c.updateView { it.copy(yaw = it.yaw - dx * degPerPx, pitch = it.pitch + dy * degPerPx) }
@@ -214,9 +225,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val s = c.state // dışa aktarım sırasında yapılan düzenlemeler bu işi etkilemesin
         val (w, h) = s.outputSize()
         val mbps = if (s.hevc) s.quality.mbpsAvc * 7 / 10 else s.quality.mbpsAvc
-        val settings = Exporter.Settings(w, h, s.hevc, mbps * 1_000_000, s.inUs, s.outUs, s.includeAudio, s.isSpherical, s.stitchInv)
+        val settings = Exporter.Settings(w, h, s.hevc, mbps * 1_000_000, s.inUs, s.outUs, s.includeAudio, s.isSpherical, s.stitchInv, s.layout.rects)
         c.exportUi = EditorController.ExportUi.Running(0f, 0f)
-        val ex = Exporter(applicationContext, c.clip, settings, { t -> s.viewAt(t) }, baseAt = { t -> c.baseAt(t, s) }, listener = object : Exporter.Listener {
+        val ex = Exporter(applicationContext, c.clip, settings, { t -> s.sceneAt(t) }, baseAt = { t -> c.baseAt(t, s) }, listener = object : Exporter.Listener {
             override fun onProgress(fraction: Float, speed: Float) = runOnUiThread {
                 if (exporter != null) c.exportUi = EditorController.ExportUi.Running(fraction, speed)
             }

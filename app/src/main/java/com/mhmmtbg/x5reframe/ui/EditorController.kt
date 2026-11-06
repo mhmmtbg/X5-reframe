@@ -53,7 +53,28 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     var onChanged: () -> Unit = {}
 
-    fun displayedView(t: Long): ViewParams = snapshotLive ?: snapshotState.viewAt(t)
+    /** Düzenlenen bölme (çoklu açıda). */
+    var activePane by mutableIntStateOf(0)
+        private set
+    @Volatile private var snapshotActive = 0
+
+    fun selectPane(i: Int) {
+        val n = state.layout.count
+        val v = i.coerceIn(0, n - 1)
+        if (v != activePane) { clearLive(); activePane = v; snapshotActive = v; onChanged(); say("Bölme ${v + 1} seçildi") }
+    }
+
+    /** Oynatıcı / dışa aktarım: düzendeki tüm bölmelerin kadrajları (etkin bölmede canlı düzenleme dahil). */
+    fun sceneAt(t: Long): List<ViewParams> {
+        val s = snapshotState
+        val live = snapshotLive
+        return (0 until s.layout.count).map { i -> if (i == snapshotActive && live != null) live else s.viewAt(t, i) }
+    }
+
+    private val ap: com.mhmmtbg.x5reframe.model.Pane get() = state.pane(activePane)
+    val activeKeyframes: List<Keyframe> get() = ap.keyframes
+    fun activeKeyframeNear(t: Long) = ap.keyframeNear(t)
+    private fun withActive(p: com.mhmmtbg.x5reframe.model.Pane) = state.withPane(activePane, p)
 
     /** Hareket sensörü varsa sabitleyici (yoksa sabitleme seçenekleri kapalı). */
     val stabilizer: com.mhmmtbg.x5reframe.stab.Stabilizer? = clip.imu?.let {
@@ -88,17 +109,19 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     fun beginViewGesture() {
         gestureStart = state
-        if (state.keyframes.isNotEmpty() && liveView == null) setLive(state.viewAt(positionUs))
+        if (ap.keyframes.isNotEmpty() && liveView == null) setLive(ap.viewAt(positionUs))
     }
 
     fun updateView(transform: (ViewParams) -> ViewParams) {
-        if (state.keyframes.isEmpty()) {
-            history.replace(state.copy(baseView = transform(state.baseView).clamped()))
+        val p = ap
+        if (p.keyframes.isEmpty()) {
+            history.replace(withActive(p.copy(baseView = transform(p.baseView).clamped())))
             state = history.current
             snapshotState = state
             onChanged()
         } else {
-            setLive(transform(liveView ?: state.viewAt(positionUs)).clamped())
+            setLive(transform(liveView ?: p.viewAt(positionUs)).clamped())
+            onChanged()
         }
     }
 
@@ -109,7 +132,7 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
     fun endViewGesture() {
         val before = gestureStart ?: return
         gestureStart = null
-        if (state.keyframes.isEmpty() && before != state) {
+        if (ap.keyframes.isEmpty() && before != state) {
             val after = state
             history.replace(before)
             history.push(after)
@@ -119,44 +142,59 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     /** Tek seferlik kadraj değişikliği (düğmeler). */
     fun changeView(transform: (ViewParams) -> ViewParams) {
-        if (state.keyframes.isEmpty()) commit(state.copy(baseView = transform(state.baseView).clamped()))
-        else { setLive(transform(liveView ?: state.viewAt(positionUs)).clamped()); onChanged() }
+        val p = ap
+        if (p.keyframes.isEmpty()) commit(withActive(p.copy(baseView = transform(p.baseView).clamped())))
+        else { setLive(transform(liveView ?: p.viewAt(positionUs)).clamped()); onChanged() }
     }
 
     private fun setLive(v: ViewParams?) { liveView = v; snapshotLive = v }
 
     fun clearLive() { setLive(null) }
 
-    val currentView: ViewParams get() = liveView ?: state.viewAt(positionUs)
+    val currentView: ViewParams get() = liveView ?: ap.viewAt(positionUs)
 
     fun addOrUpdateKeyframe() {
-        val existed = state.keyframeNear(positionUs, 40_000) != null
-        commit(state.withKeyframe(Keyframe(positionUs, currentView)))
+        val existed = ap.keyframeNear(positionUs, 40_000) != null
+        commit(withActive(ap.withKeyframe(Keyframe(positionUs, currentView))))
         setLive(null)
-        say(if (existed) "Anahtar kare güncellendi · ${fmt(positionUs)}" else "Anahtar kare eklendi · ${fmt(positionUs)}")
+        val pane = if (state.layout.count > 1) " (bölme ${activePane + 1})" else ""
+        say((if (existed) "Anahtar kare güncellendi · " else "Anahtar kare eklendi · ") + fmt(positionUs) + pane)
     }
 
     fun deleteKeyframe() {
-        val near = state.keyframeNear(positionUs)
+        val near = ap.keyframeNear(positionUs)
         if (near == null) {
-            say(if (state.keyframes.isEmpty()) "Silinecek anahtar kare yok" else "Oynatma çizgisini bir anahtar karenin üstüne getir", false)
+            say(if (ap.keyframes.isEmpty()) "Silinecek anahtar kare yok" else "Oynatma çizgisini bir anahtar karenin üstüne getir", false)
             return
         }
-        commit(state.copy(keyframes = state.keyframes - near))
+        commit(withActive(ap.copy(keyframes = ap.keyframes - near)))
         setLive(null)
         say("Anahtar kare silindi · ${fmt(near.timeUs)}")
     }
 
     fun clearKeyframes() {
-        if (state.keyframes.isEmpty()) return
+        if (ap.keyframes.isEmpty()) return
         val view = currentView
-        commit(state.copy(keyframes = emptyList(), baseView = view))
+        commit(withActive(ap.copy(keyframes = emptyList(), baseView = view)))
         setLive(null)
         say("Tüm anahtar kareler silindi")
     }
 
-    fun previousKeyframeTime(): Long? = state.keyframes.lastOrNull { it.timeUs < positionUs - 40_000 }?.timeUs
-    fun nextKeyframeTime(): Long? = state.keyframes.firstOrNull { it.timeUs > positionUs + 40_000 }?.timeUs
+    fun previousKeyframeTime(): Long? = ap.keyframes.lastOrNull { it.timeUs < positionUs - 40_000 }?.timeUs
+    fun nextKeyframeTime(): Long? = ap.keyframes.firstOrNull { it.timeUs > positionUs + 40_000 }?.timeUs
+
+    fun setLayout(l: com.mhmmtbg.x5reframe.model.Layout) {
+        var next = state.copy(layout = l)
+        // Yeni bölmeler varsayılan yönleriyle oluşsun (ön, arka, sağ, sol).
+        for (i in 1 until l.count) if (next.extraPanes.size < i) next = next.withPane(i, next.pane(i))
+        if (l != com.mhmmtbg.x5reframe.model.Layout.SINGLE && next.aspect == com.mhmmtbg.x5reframe.model.Aspect.PANO) {
+            next = next.copy(aspect = com.mhmmtbg.x5reframe.model.Aspect.LANDSCAPE)
+        }
+        commit(next)
+        clearLive()
+        activePane = 0; snapshotActive = 0
+        say("Düzen: ${l.label}")
+    }
 
     // ---- Kesme ----
 
