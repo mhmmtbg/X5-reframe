@@ -63,7 +63,10 @@ class Stabilizer(imu: Imu, rigFromImu: DoubleArray) {
         }
     }
 
-    /** t saniyedeki world_from_rig. */
+    /** Video zamanı t saniyedeki world_from_rig. */
+    fun orientationAtVideo(sec: Double): Quat = orientation(sec + IMU_TIME_OFFSET)
+
+    /** IMU zamanı t saniyedeki world_from_rig. */
     fun orientation(sec: Double): Quat {
         if (sec <= t[0]) return q[0]
         if (sec >= t[n - 1]) return q[n - 1]
@@ -127,8 +130,10 @@ class Stabilizer(imu: Imu, rigFromImu: DoubleArray) {
      * rig_from_view temel dönüşü (kullanıcı kadrajı bunun üstüne uygulanır), satır öncelikli 3x3.
      * @param lockSec yön kilidinde bakış yönünün alındığı an
      */
-    fun base(sec: Double, mode: StabMode, strength: Double, lockSec: Double): DoubleArray? {
+    fun base(videoSec: Double, mode: StabMode, strength: Double, lockVideoSec: Double): DoubleArray? {
         if (mode == StabMode.OFF) return null
+        val sec = videoSec + IMU_TIME_OFFSET
+        val lockSec = lockVideoSec + IMU_TIME_OFFSET
         val o = orientation(sec)
         val target: Quat = when (mode) {
             StabMode.SMOOTH -> { ensureSmooth(mode, strength); interpGrid(smoothQ!!, sec) }
@@ -154,10 +159,13 @@ class Stabilizer(imu: Imu, rigFromImu: DoubleArray) {
     companion object {
         /**
          * IMU eksenlerinden gövde eksenlerine işaretli eşleme (satır öncelikli).
-         * Geçici değer; CI'daki görüntü-jiroskop kalibrasyonu sonucu ile değiştirilecek.
+         * X5 için görüntüden ölçüldü (tools/imu_calibrate.py): 95 kare çiftinde medyan hata 0,19°.
          */
         fun rigFromImuFor(@Suppress("UNUSED_PARAMETER") camera: String): DoubleArray =
-            doubleArrayOf(1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0)
+            doubleArrayOf(0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0)
+
+        /** IMU zamanı = video zamanı + bu kayma (sn); aynı kalibrasyondan. */
+        const val IMU_TIME_OFFSET = 0.04
 
         fun mul3(m: DoubleArray, v: DoubleArray) = doubleArrayOf(
             m[0] * v[0] + m[1] * v[1] + m[2] * v[2],

@@ -49,6 +49,34 @@ class ExportTest {
     }
 
     @Test
+    fun horizonLockLevelsView() {
+        assumeTrue("örnek klip yok", clipFile.exists())
+        val clip = ClipInfo.load(ctx, Uri.fromFile(clipFile))
+        val imu = clip.imu
+        assertTrue("IMU okunamadı", imu != null && imu.size > 1000)
+        val st = com.mhmmtbg.x5reframe.stab.Stabilizer(imu!!, com.mhmmtbg.x5reframe.stab.Stabilizer.rigFromImuFor(clip.cameraType))
+        val m = com.mhmmtbg.x5reframe.stab.Stabilizer.rigFromImuFor(clip.cameraType)
+        var worst = 0.0
+        for (sec in listOf(1.0, 4.0, 8.0, 12.0, 16.0)) {
+            val base = st.base(sec, com.mhmmtbg.x5reframe.stab.StabMode.HORIZON, 0.5, 0.0)!!
+            // Görünümün "aşağı"sı rig çerçevesinde:
+            val viewDown = doubleArrayOf(base[1], base[4], base[7])
+            // Ölçülen yerçekimi (o ana yakın 0,2 sn ortalaması), rig çerçevesinde aşağı yön:
+            val g = DoubleArray(3)
+            for (i in 0 until imu.size) if (kotlin.math.abs(imu.t[i] - sec - com.mhmmtbg.x5reframe.stab.Stabilizer.IMU_TIME_OFFSET) < 0.1) {
+                val a = com.mhmmtbg.x5reframe.stab.Stabilizer.mul3(m, imu.acc[i]); for (k in 0..2) g[k] -= a[k]
+            }
+            val gl = kotlin.math.sqrt(g[0] * g[0] + g[1] * g[1] + g[2] * g[2])
+            val cos = (viewDown[0] * g[0] + viewDown[1] * g[1] + viewDown[2] * g[2]) / gl
+            val ang = Math.toDegrees(kotlin.math.acos(cos.coerceIn(-1.0, 1.0)))
+            log("t=$sec horizon error=${"%.2f".format(ang)} deg")
+            worst = maxOf(worst, ang)
+        }
+        writeReport()
+        assertTrue("ufuk hatası çok büyük: $worst", worst < 8.0)
+    }
+
+    @Test
     fun lrvPreviewDecodes() {
         val lrvFile = File("/data/local/tmp/clip.lrv")
         assumeTrue("örnek LRV yok", clipFile.exists() && lrvFile.exists())
