@@ -31,6 +31,19 @@ data class Segment(
     val outputDurationUs: Long get() = ((edit.outUs - edit.inUs) / speed).toLong()
 }
 
+/** Projenin ses ayarları: orijinal ses seviyesi ve arka plan müziği. */
+data class ProjectAudio(
+    val originalVolume: Float = 1f,
+    val musicUri: Uri? = null,
+    val musicName: String = "",
+    val musicVolume: Float = 0.6f,
+    val loop: Boolean = true,
+    val fade: Boolean = true,
+) {
+    /** Ses yeniden kodlanmalı mı (müzik var ya da orijinal seviye değişmiş). */
+    val needsMix: Boolean get() = musicUri != null || originalVolume != 1f
+}
+
 /** Kaydedilmiş bir düzenleme projesi: sıralı parçalar. */
 data class Project(
     val id: String,
@@ -38,6 +51,7 @@ data class Project(
     val createdAt: Long,
     val updatedAt: Long,
     val segments: List<Segment>,
+    val audio: ProjectAudio = ProjectAudio(),
 ) {
     val totalDurationUs: Long get() = segments.sumOf { it.outputDurationUs }
     val keyframeCount: Int get() = segments.sumOf { s -> s.edit.keyframes.size + s.edit.extraPanes.sumOf { it.keyframes.size } }
@@ -102,6 +116,12 @@ class ProjectStore(context: Context) {
             put("id", p.id); put("name", p.name)
             put("createdAt", p.createdAt); put("updatedAt", p.updatedAt)
             put("segments", JSONArray().apply { p.segments.forEach { put(segmentToJson(it)) } })
+            put("audio", JSONObject().apply {
+                put("originalVolume", p.audio.originalVolume.toDouble())
+                p.audio.musicUri?.let { put("musicUri", it.toString()) }
+                put("musicName", p.audio.musicName); put("musicVolume", p.audio.musicVolume.toDouble())
+                put("loop", p.audio.loop); put("fade", p.audio.fade)
+            })
         }
 
         private fun segmentToJson(s: Segment) = JSONObject().apply {
@@ -126,7 +146,14 @@ class ProjectStore(context: Context) {
             // Sürüm 1: tek klip alanları doğrudan projede.
             val segs = o.optJSONArray("segments")?.let { arr -> (0 until arr.length()).map { segmentFromJson(arr.getJSONObject(it)) } }
                 ?: listOf(segmentFromJson(o))
-            return Project(o.getString("id"), o.getString("name"), o.getLong("createdAt"), o.getLong("updatedAt"), segs)
+            val a = o.optJSONObject("audio")
+            val audio = if (a == null) ProjectAudio() else ProjectAudio(
+                a.optDouble("originalVolume", 1.0).toFloat(),
+                a.optString("musicUri").takeIf { it.isNotEmpty() }?.let(Uri::parse),
+                a.optString("musicName"), a.optDouble("musicVolume", 0.6).toFloat(),
+                a.optBoolean("loop", true), a.optBoolean("fade", true),
+            )
+            return Project(o.getString("id"), o.getString("name"), o.getLong("createdAt"), o.getLong("updatedAt"), segs, audio)
         }
 
         fun editToJson(e: EditState) = JSONObject().apply {

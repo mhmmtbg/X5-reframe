@@ -155,6 +155,31 @@ class ExportTest {
     }
 
     @Test
+    fun exportsWithMusicMix() {
+        val lrvFile = File("/data/local/tmp/clip.lrv")
+        assumeTrue("örnek klip yok", clipFile.exists() && lrvFile.exists())
+        val clip = ClipInfo.load(ctx, Uri.fromFile(clipFile))
+        val done = CountDownLatch(1)
+        var error: String? = null
+        val v = listOf(ViewParams(yaw = 180.0))
+        // Müzik yerine LRV'nin ses izini kullan (her biçim çözülebilmeli).
+        val mix = Exporter.Mix(com.mhmmtbg.x5reframe.media.MusicSpec(Uri.fromFile(lrvFile), 0.5f, true, 500_000, 500_000), 0.8f)
+        val ex = Exporter(ctx, Exporter.Output(1280, 720, false, 8_000_000, true, false, mix),
+            listOf(Exporter.Job(clip, 0, 2_000_000, { v })), object : Exporter.Listener {
+                override fun onProgress(fraction: Float, speed: Float) {}
+                override fun onDone(uri: Uri, seconds: Float) { done.countDown() }
+                override fun onFailed(message: String) { error = message; done.countDown() }
+            })
+        Thread { ex.run() }.start()
+        assertTrue("zaman aşımı", done.await(10, TimeUnit.MINUTES))
+        log("mix export error=$error frames=${ex.videoWritten} audio=${ex.audioWritten}")
+        writeReport()
+        assertTrue("karışım hatası: $error", error == null)
+        // 2 sn AAC ≈ 94 örnek
+        assertTrue("ses örneği az: ${ex.audioWritten}", ex.audioWritten in 80..110)
+    }
+
+    @Test
     fun overlayDrawsTextLayer() {
         val egl = com.mhmmtbg.x5reframe.gl.EglCore()
         try {

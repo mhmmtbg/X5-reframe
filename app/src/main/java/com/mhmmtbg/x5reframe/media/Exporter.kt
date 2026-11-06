@@ -43,7 +43,11 @@ class Exporter(
         val includeAudio: Boolean = true,
         /** 360° equirect çıktı: küresel video bilgisi eklenir. */
         val spherical: Boolean = false,
+        /** Müzik / ses seviyesi: verilirse ses çözülüp karıştırılır ve AAC olarak yeniden kodlanır. */
+        val mix: Mix? = null,
     )
+
+    data class Mix(val music: MusicSpec?, val originalVolume: Float)
 
     /** Tek bir klip parçası. */
     class Job(
@@ -128,8 +132,23 @@ class Exporter(
             muxer = if (tmp != null) MediaMuxer(tmp.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             else MediaMuxer(outPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-            // Ses biçimi: sesli ilk parçanın AAC izi (X5 klipleri aynı biçimde).
-            if (output.includeAudio) {
+            val fpsHint = jobs.first().clip.frameRate
+            val frameDurHint = (1_000_000 / fpsHint).toLong()
+            val totalOutUs = jobs.sumOf { (((it.endUs.coerceAtMost(it.clip.durationUs) - it.startUs) / it.speed) / frameDurHint).toLong().coerceAtLeast(1) * frameDurHint }
+            if (output.mix != null) {
+                // Karışım yolu: AAC kodlayıcının biçimini almak için ilk sesi önceden üret.
+                var off = 0L
+                val segs = jobs.map { j ->
+                    val d = (((j.endUs.coerceAtMost(j.clip.durationUs) - j.startUs) / j.speed) / frameDurHint).toLong().coerceAtLeast(1) * frameDurHint
+                    AudioMixer.Seg(j.clip.uri, if (output.includeAudio) j.clip.audioTrack else null, j.startUs, off, d, j.speed).also { off += d }
+                }
+                mixer = AudioMixer(context, segs, output.mix.music, if (output.includeAudio) output.mix.originalVolume else 0f, totalOutUs)
+                aac = AacEncoder()
+                mixTotalUs = totalOutUs
+                var guard = 0
+                while (aac!!.outputFormat == null && guard++ < 50) produceAudio(minOf(totalOutUs, (guard + 1) * 21_333L))
+                audioFormat = aac!!.outputFormat
+            } else if (output.includeAudio) {
                 for (j in jobs) {
                     val a = j.clip.audioTrack ?: continue
                     context.contentResolver.openFileDescriptor(j.clip.uri, "r")!!.use { pfd ->
@@ -162,7 +181,7 @@ class Exporter(
                 val program = ReframeProgram(job.clip.rig).apply { stitchInvDistance = job.stitchInv }
                 val source = DualFrameSource(pfd.fileDescriptor, job.clip, realtime = false)
                 try {
-                    val audio = if (output.includeAudio && job.speed == 1.0) openAudio(pfd, job) else null
+                    val audio = if (output.mix == null && output.includeAudio && job.speed == 1.0) openAudio(pfd, job) else null
                     val end = job.endUs.coerceAtMost(job.clip.durationUs)
                     val nFrames = (((end - job.startUs) / job.speed) / frameDur).toLong().coerceAtLeast(1)
                     if (source.seekAndShow(job.startUs, frameDur) < 0) continue
@@ -184,6 +203,7 @@ class Exporter(
                         egl.swap(win)
                         drain(false)
                         audio?.writeUpTo(pts, timeline)
+                        if (mixer != null) produceAudio(timeline + tOut)
 
                         val now = SystemClock.elapsedRealtime()
                         if (now - lastReport > 250) {
@@ -207,6 +227,10 @@ class Exporter(
             encoder.signalEndOfInputStream()
             drain(true)
             if (!muxerStarted) throw IllegalStateException("Kodlayıcı çıktı üretmedi")
+            if (mixer != null) {
+                produceAudio(timeline)
+                aac!!.finish(::onAacOutput)
+            }
             pending.forEach { (b, i) -> muxer.writeSampleData(audioTrack, b, i); audioWritten++ }
             pending.clear()
 
@@ -230,6 +254,8 @@ class Exporter(
             outUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             listener.onFailed(if (t is InterruptedException) "İptal edildi" else (t.message ?: t.javaClass.simpleName))
         } finally {
+            runCatching { mixer?.close() }
+            runCatching { aac?.release() }
             runCatching { if (::encoder.isInitialized) { encoder.stop(); encoder.release() } }
             runCatching { egl?.release() }
             pfds.forEach { runCatching { it.close() } }
@@ -302,6 +328,33 @@ class Exporter(
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
                 }
             }
+        }
+    }
+
+    // ---- Karışım yolu ----
+    private var mixer: AudioMixer? = null
+    private var aac: AacEncoder? = null
+    private var mixTotalUs = 0L
+    private val pcm = ShortArray(1024 * 2)
+
+    /** Zaman çizelgesinde [untilUs]'ya kadar karışık sesi üret ve kodla. */
+    private fun produceAudio(untilUs: Long) {
+        val m = mixer ?: return
+        val enc = aac ?: return
+        val target = minOf(untilUs, mixTotalUs)
+        while (m.producedUs < target) {
+            val left = ((target - m.producedUs) * MIX_RATE / 1_000_000).toInt().coerceIn(1, 1024)
+            m.render(left, pcm)
+            enc.feed(pcm, left, ::onAacOutput)
+        }
+    }
+
+    private fun onAacOutput(b: ByteBuffer, i: MediaCodec.BufferInfo) {
+        if (muxerStarted && audioTrack >= 0) {
+            muxer.writeSampleData(audioTrack, b, i); audioWritten++
+        } else {
+            val copy = ByteBuffer.allocate(i.size).put(b).also { it.flip() }
+            pending += copy to MediaCodec.BufferInfo().also { it.set(0, i.size, i.presentationTimeUs, i.flags) }
         }
     }
 

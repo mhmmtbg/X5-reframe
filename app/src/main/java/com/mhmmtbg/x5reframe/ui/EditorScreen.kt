@@ -153,7 +153,7 @@ fun EditorScreen(
                 Tool.STAB -> StabPanel(c)
                 Tool.MULTI -> MultiPanel(c)
                 Tool.LAYER -> LayerPanel(c, actions)
-                Tool.AUDIO -> AudioPanel(c, actions)
+                Tool.AUDIO -> AudioPanel(c, actions, seq)
             }
         }
     }
@@ -572,14 +572,49 @@ private fun StabPanel(c: EditorController) {
 }
 
 @Composable
-private fun AudioPanel(c: EditorController, a: EditorActions) {
+private fun AudioPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
     val s = c.state
+    val au = seq.audio
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        SwitchRow("Orijinal ses dışa aktarılsın", s.includeAudio) {
-            c.commit(s.copy(includeAudio = it)); c.say(if (it) "Ses dahil" else "Ses çıkarıldı")
+        SwitchRow("Orijinal ses", s.includeAudio) {
+            c.commit(s.copy(includeAudio = it)); c.say(if (it) "Orijinal ses açık" else "Orijinal ses kapalı")
+        }
+        if (s.includeAudio) {
+            VolumeRow("Seviye", au.originalVolume) { seq.updateAudio(au.copy(originalVolume = it)) }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
+        if (au.musicUri == null) {
+            ActionButton("+ Müzik ekle", Modifier.fillMaxWidth(), primary = true) { seq.pickMusic() }
+            Text("Telefondaki bir şarkıyı arka plana ekle. Video uzunluğuna göre kırpılır ya da döngüye alınır.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        } else {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("♪ " + au.musicName, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                Text("Değiştir", color = Palette.Accent, style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.clickable { seq.pickMusic() }.padding(8.dp))
+                Text("Kaldır", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.clickable { seq.updateAudio(au.copy(musicUri = null, musicName = "")); c.say("Müzik kaldırıldı") }.padding(8.dp))
+            }
+            VolumeRow("Müzik", au.musicVolume) { seq.updateAudio(au.copy(musicVolume = it)) }
+            SwitchRow("Döngü (müzik kısaysa başa sar)", au.loop) { seq.updateAudio(au.copy(loop = it)) }
+            SwitchRow("Başta yükselsin, sonda azalsın", au.fade) { seq.updateAudio(au.copy(fade = it)) }
         }
         SwitchRow("Önizlemede sesi kapat", c.previewMuted) { c.previewMuted = it; a.setMuted(it) }
-        Text("Müzik ekleme ve ses seviyeleri sonraki aşamalarda gelecek.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        if (au.needsMix) Text("Ses karıştırılacağı için dışa aktarımda AAC olarak yeniden kodlanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        if (seq.segments.any { it.speed != 1.0 }) Text("Hızı 1× olmayan parçalarda orijinal ses kapanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun VolumeRow(label: String, value: Float, onCommit: (Float) -> Unit) {
+    var draft by remember(value) { mutableStateOf(value) }
+    LabeledRow(label) {
+        Slider(
+            value = draft, onValueChange = { draft = it }, onValueChangeFinished = { onCommit(draft) },
+            valueRange = 0f..1.5f, modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+        )
+        Text("%${(draft * 100).toInt()}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(48.dp))
     }
 }
 

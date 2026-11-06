@@ -84,6 +84,58 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         }
     }
 
+    private var projectAudio by mutableStateOf(com.mhmmtbg.x5reframe.project.ProjectAudio())
+    private var musicPreview: android.media.MediaPlayer? = null
+
+    private val musicPicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            setAudio(projectAudio.copy(musicUri = uri, musicName = displayName(uri)))
+            controller?.say("Müzik eklendi")
+        }
+    }
+
+    private fun setAudio(a: com.mhmmtbg.x5reframe.project.ProjectAudio) {
+        projectAudio = a
+        project = project?.copy(audio = a, updatedAt = System.currentTimeMillis())
+        project?.let { p -> Thread { runCatching { store.save(p) } }.start() }
+        player?.setVolume(a.originalVolume)
+        setupMusicPreview()
+    }
+
+    /** Önizlemede müzik: MediaPlayer, zaman çizelgesi konumuna göre başlatılır. */
+    private fun setupMusicPreview() {
+        musicPreview?.release(); musicPreview = null
+        val uri = projectAudio.musicUri ?: return
+        musicPreview = runCatching {
+            android.media.MediaPlayer().apply {
+                setDataSource(this@EditorActivity, uri)
+                isLooping = projectAudio.loop
+                setVolume(projectAudio.musicVolume.coerceAtMost(1f), projectAudio.musicVolume.coerceAtMost(1f))
+                prepare()
+            }
+        }.getOrNull()
+    }
+
+    /** Seçili parçadaki konumun proje zaman çizelgesindeki karşılığı (µs). */
+    private fun timelinePosition(): Long {
+        val c = controller ?: return 0
+        var off = 0L
+        for (i in 0 until segIndex) off += segments[i].outputDurationUs
+        val seg = segments.getOrNull(segIndex) ?: return off
+        return off + ((c.positionUs - seg.edit.inUs).coerceAtLeast(0) / seg.speed).toLong()
+    }
+
+    private fun syncMusic(playing: Boolean) {
+        val mp = musicPreview ?: return
+        if (playing && controller?.previewMuted != true) {
+            val ms = (timelinePosition() / 1000).toInt()
+            val d = mp.duration
+            mp.seekTo(if (projectAudio.loop && d > 0) ms % d else ms.coerceAtMost(d))
+            mp.start()
+        } else if (mp.isPlaying) mp.pause()
+    }
+
     private val addClipPicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -123,6 +175,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             }
             project = proj
             segments = proj.segments
+            projectAudio = proj.audio
+            setupMusicPreview()
             openSegment(0)
         }
     }
@@ -152,6 +206,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.layoutProvider = { c.snapshotState.layout.rects }
             p.baseProvider = { t -> c.baseAt(t) }
             p.layersProvider = { c.snapshotState.layers }
+            p.setVolume(projectAudio.originalVolume)
             p.setStitchInv(c.state.stitchInv)
             c.onChanged = {
                 p.setStitchInv(c.state.stitchInv)
@@ -268,6 +323,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             updateSegments(list, segIndex, reopen = false)
             controller?.say("Hız ${sp}×" + if (sp != 1.0) " (bu parçada ses kapanır)" else "")
         },
+        audio = projectAudio,
+        pickMusic = { musicPicker.launch(arrayOf("audio/*")) },
+        updateAudio = { a -> setAudio(a) },
         setTransition = { i, tr ->
             storeCurrentEdit()
             val list = segments.toMutableList().apply { set(i, get(i).copy(transitionOut = tr)) }
@@ -304,7 +362,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 )
             )
         },
-        setMuted = { player?.setMuted(it) },
+        setMuted = { player?.setMuted(it); syncMusic(player?.playing == true) },
         pickImage = { imagePicker.launch("image/*") },
         step = { fwd -> c.clearLive(); player?.step(fwd) },
     )
@@ -413,7 +471,12 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val (w, h) = cur.outputSize()
         val mbps = if (cur.hevc) cur.quality.mbpsAvc * 7 / 10 else cur.quality.mbpsAvc
         val spherical = segs.all { it.edit.copy(aspect = cur.aspect).isSpherical }
-        val output = Exporter.Output(w, h, cur.hevc, mbps * 1_000_000, cur.includeAudio, spherical)
+        val au = projectAudio
+        val mix = if (au.needsMix) Exporter.Mix(
+            au.musicUri?.let { com.mhmmtbg.x5reframe.media.MusicSpec(it, au.musicVolume, au.loop, if (au.fade) 1_500_000 else 0, if (au.fade) 2_000_000 else 0) },
+            au.originalVolume,
+        ) else null
+        val output = Exporter.Output(w, h, cur.hevc, mbps * 1_000_000, cur.includeAudio, spherical, mix)
         val totalSec = segs.sumOf { it.outputDurationUs } / 1e6f
         c.exportUi = EditorController.ExportUi.Running(0f, 0f)
         val listener = object : Exporter.Listener {
@@ -480,6 +543,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     override fun onPlayingChanged(playing: Boolean) {
         controller?.playing = playing
+        syncMusic(playing)
     }
 
     override fun onError(message: String) {
@@ -540,6 +604,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         super.onDestroy()
         exporter?.cancelled = true
         player?.release()
+        musicPreview?.release()
     }
 
     companion object {

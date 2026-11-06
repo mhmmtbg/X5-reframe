@@ -45,6 +45,10 @@ class SequenceUi(
     val delete: (Int) -> Unit,
     val setSpeed: (Int, Double) -> Unit,
     val setTransition: (Int, Transition) -> Unit,
+    /** Proje sesi */
+    val audio: com.mhmmtbg.x5reframe.project.ProjectAudio = com.mhmmtbg.x5reframe.project.ProjectAudio(),
+    val pickMusic: () -> Unit = {},
+    val updateAudio: (com.mhmmtbg.x5reframe.project.ProjectAudio) -> Unit = {},
 )
 
 /** Parça şeridi: dokun = seç, uzun bas = işlemler menüsü. */
