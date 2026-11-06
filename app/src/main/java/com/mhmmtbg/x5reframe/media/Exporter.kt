@@ -100,7 +100,7 @@ class Exporter(
             var frames = 0
             var lastReport = 0L
             while (pts in 0..end && !cancelled) {
-                program.draw(settings.width, settings.height, viewAt(pts), source.textures, source.texMatrices)
+                program.draw(settings.width, settings.height, viewAt(pts), source)
                 egl.setPresentationTime(win, (pts - start).coerceAtLeast(0) * 1000)
                 egl.swap(win)
                 frames++

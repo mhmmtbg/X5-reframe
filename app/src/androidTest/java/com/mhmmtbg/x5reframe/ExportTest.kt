@@ -49,6 +49,34 @@ class ExportTest {
     }
 
     @Test
+    fun lrvPreviewDecodes() {
+        val lrvFile = File("/data/local/tmp/clip.lrv")
+        assumeTrue("örnek LRV yok", clipFile.exists() && lrvFile.exists())
+        val clip = ClipInfo.load(ctx, Uri.fromFile(clipFile), Uri.fromFile(lrvFile))
+        val lrv = clip.lrv
+        assertTrue("LRV tanınmadı", lrv != null)
+        val egl = com.mhmmtbg.x5reframe.gl.EglCore()
+        val pfd = ctx.contentResolver.openFileDescriptor(lrv!!.uri, "r")!!
+        try {
+            val program = com.mhmmtbg.x5reframe.gl.ReframeProgram(clip.rig)
+            val src = com.mhmmtbg.x5reframe.media.SideBySideFrameSource(pfd.fileDescriptor, lrv.videoTrack, lrv.width, lrv.height)
+            val pts = src.seekAndShow(2_000_000, 33_366)
+            log("lrv ${lrv.width}x${lrv.height} seek pts=$pts")
+            assertTrue("LRV karesi çözülemedi", pts >= 1_900_000)
+            val pb = egl.createPbuffer(64, 36)
+            egl.makeCurrent(pb)
+            program.draw(64, 36, ViewParams(), src)
+            assertEquals(android.opengl.GLES30.GL_NO_ERROR, android.opengl.GLES30.glGetError())
+            src.release()
+            program.release()
+        } finally {
+            pfd.close()
+            egl.release()
+            writeReport()
+        }
+    }
+
+    @Test
     fun exportsVideoWithAudio() {
         assumeTrue("örnek klip yok", clipFile.exists())
         try {

@@ -23,6 +23,7 @@ class ReframeProgram(private val rig: Rig) {
     private val uIntr = IntArray(2)
     private val uDist = IntArray(2)
     private val uDist2 = IntArray(2)
+    private val uSub = IntArray(2)
     private val uView: Int
     private val uScale: Int
     private val uMode: Int
@@ -36,6 +37,7 @@ class ReframeProgram(private val rig: Rig) {
             uIntr[i] = GLES30.glGetUniformLocation(program, "uIntr$i")
             uDist[i] = GLES30.glGetUniformLocation(program, "uDist$i")
             uDist2[i] = GLES30.glGetUniformLocation(program, "uDist2$i")
+            uSub[i] = GLES30.glGetUniformLocation(program, "uSub$i")
         }
         uView = GLES30.glGetUniformLocation(program, "uView")
         uScale = GLES30.glGetUniformLocation(program, "uScale")
@@ -51,20 +53,17 @@ class ReframeProgram(private val rig: Rig) {
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, quad.size * 4, buf, GLES30.GL_STATIC_DRAW)
     }
 
-    /**
-     * @param trackTex izin sırasına göre OES doku kimlikleri
-     * @param trackTexMat izin sırasına göre SurfaceTexture dönüşüm matrisleri
-     */
-    fun draw(width: Int, height: Int, view: ViewParams, trackTex: IntArray, trackTexMat: Array<FloatArray>) {
+    fun draw(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource) {
         GLES30.glViewport(0, 0, width, height)
         GLES30.glUseProgram(program)
         for (i in 0..1) {
             val lens: Lens = rig.lenses[i]
-            val track = lens.videoTrackOrder
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + i)
-            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, trackTex[track])
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, src.lensTexture(i))
             GLES30.glUniform1i(uTex[i], i)
-            GLES30.glUniformMatrix4fv(uTexMat[i], 1, false, trackTexMat[track], 0)
+            GLES30.glUniformMatrix4fv(uTexMat[i], 1, false, src.lensTexMatrix(i), 0)
+            val sub = src.lensSubRect(i)
+            GLES30.glUniform4f(uSub[i], sub[0], sub[1], sub[2], sub[3])
             GLES30.glUniformMatrix3fv(uCamFromRig[i], 1, true, lens.camFromRig.toFloats(), 0)
             GLES30.glUniform4f(uIntr[i], lens.fx.toFloat(), lens.fy.toFloat(), lens.cx.toFloat(), lens.cy.toFloat())
             GLES30.glUniform4f(uDist[i], lens.k[0].toFloat(), lens.k[1].toFloat(), lens.k[2].toFloat(), lens.k[3].toFloat())
@@ -159,6 +158,8 @@ uniform vec4 uDist0;   // k1 k2 k3 p1
 uniform vec4 uDist1;
 uniform vec2 uDist20;  // p2 xi
 uniform vec2 uDist21;
+uniform vec4 uSub0;    // lensin doku içindeki alt bölgesi (LRV: yan yana)
+uniform vec4 uSub1;
 uniform mat3 uView;    // rig_from_view
 uniform vec2 uScale;
 uniform int uMode;     // 0: düz (rectilinear), 1: geniş (stereografik)
@@ -177,8 +178,9 @@ vec2 project(vec3 c, vec4 intr, vec4 d1, vec2 d2) {
     return vec2(intr.x * md.x + intr.z, intr.y * md.y + intr.w);
 }
 
-vec2 texCoord(mat4 texMat, vec2 uv) {
-    return (texMat * vec4(uv.x, 1.0 - uv.y, 0.0, 1.0)).xy;
+vec2 texCoord(mat4 texMat, vec4 sub, vec2 uv) {
+    vec2 q = vec2(sub.x * uv.x + sub.y, sub.z * uv.y + sub.w);
+    return (texMat * vec4(q.x, 1.0 - q.y, 0.0, 1.0)).xy;
 }
 
 void main() {
@@ -202,8 +204,8 @@ void main() {
     if (c1.z < COS_LIMIT) w0 = 1.0;
 
     vec3 col = vec3(0.0);
-    if (w0 > 0.0) col += w0 * texture(uTex0, texCoord(uTexMat0, project(c0, uIntr0, uDist0, uDist20))).rgb;
-    if (w0 < 1.0) col += (1.0 - w0) * texture(uTex1, texCoord(uTexMat1, project(c1, uIntr1, uDist1, uDist21))).rgb;
+    if (w0 > 0.0) col += w0 * texture(uTex0, texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20))).rgb;
+    if (w0 < 1.0) col += (1.0 - w0) * texture(uTex1, texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21))).rgb;
     outColor = vec4(col, 1.0);
 }
 """

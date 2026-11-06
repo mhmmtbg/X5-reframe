@@ -75,7 +75,7 @@ class TrackDecoder(fd: FileDescriptor, track: Int, surface: Surface, realtime: B
 
     fun release(index: Int, render: Boolean) = codec.releaseOutputBuffer(index, render)
 
-    fun seek(us: Long) {
+    override fun seek(us: Long) {
         extractor.seekTo(us, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         codec.flush()
         inputEos = false
@@ -94,7 +94,7 @@ class TrackDecoder(fd: FileDescriptor, track: Int, surface: Surface, realtime: B
  * İki lens izini eşzamanlı çözer ve OES dokularına aktarır.
  * GL bağlamı geçerli olan iş parçacığından oluşturulmalı ve kullanılmalıdır.
  */
-class DualFrameSource(fd: FileDescriptor, clip: ClipInfo, realtime: Boolean = true) {
+class DualFrameSource(fd: FileDescriptor, private val clip: ClipInfo, realtime: Boolean = true) : FrameSource {
     val textures = IntArray(2) { ReframeProgram.createOesTexture() }
     val texMatrices = Array(2) { FloatArray(16) }
     private val callbackThread = HandlerThread("st-callbacks").apply { start() }
@@ -104,12 +104,17 @@ class DualFrameSource(fd: FileDescriptor, clip: ClipInfo, realtime: Boolean = tr
     @Volatile private var latches = arrayOf(CountDownLatch(1), CountDownLatch(1))
     private val decoders: Array<TrackDecoder>
 
-    var hasFrame = false
+    override var hasFrame = false
         private set
-    var currentPts = 0L
+    override var currentPts = 0L
         private set
-    var lastRendered = false
+    override var lastRendered = false
         private set
+    private val fullRect = floatArrayOf(1f, 0f, 1f, 0f)
+
+    override fun lensTexture(lens: Int) = textures[clip.rig.lenses[lens].videoTrackOrder]
+    override fun lensTexMatrix(lens: Int) = texMatrices[clip.rig.lenses[lens].videoTrackOrder]
+    override fun lensSubRect(lens: Int) = fullRect
 
     init {
         for (i in 0..1) {
@@ -119,7 +124,7 @@ class DualFrameSource(fd: FileDescriptor, clip: ClipInfo, realtime: Boolean = tr
         decoders = Array(2) { TrackDecoder(fd, clip.videoTracks[it], surfaces[it], realtime) }
     }
 
-    fun seek(us: Long) {
+    override fun seek(us: Long) {
         decoders.forEach { it.seek(us) }
     }
 
@@ -127,10 +132,8 @@ class DualFrameSource(fd: FileDescriptor, clip: ClipInfo, realtime: Boolean = tr
      * Sıradaki eş kare çiftini çözer. render=true ise dokulara aktarır.
      * @return karenin zaman damgası (µs) ya da akış bittiyse -1
      */
-    fun next(render: Boolean): Long = next { render }
-
     /** [renderIf] karenin zaman damgasına bakarak dokuya aktarılıp aktarılmayacağına karar verir. */
-    fun next(renderIf: (Long) -> Boolean): Long {
+    override fun next(renderIf: (Long) -> Boolean): Long {
         var o0 = decoders[0].nextOutput()
         var o1 = decoders[1].nextOutput()
         // İki izin zaman damgalarını hizala (normalde zaten eşittir).
@@ -168,17 +171,7 @@ class DualFrameSource(fd: FileDescriptor, clip: ClipInfo, realtime: Boolean = tr
         return pts
     }
 
-    /** Hedef zamana git ve hedefi kapsayan kareyi dokulara yükle. */
-    fun seekAndShow(targetUs: Long, frameDurUs: Long): Long {
-        seek(targetUs)
-        while (true) {
-            val pts = next { it + frameDurUs > targetUs }
-            if (pts < 0) return -1
-            if (lastRendered) return pts
-        }
-    }
-
-    fun release() {
+    override fun release() {
         decoders.forEach { it.close() }
         surfaces.forEach { it.release() }
         surfaceTextures.forEach { it.release() }

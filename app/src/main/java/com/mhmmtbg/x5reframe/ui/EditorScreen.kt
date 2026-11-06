@@ -73,6 +73,7 @@ class EditorActions(
     val open: (Uri) -> Unit,
     val share: (Uri) -> Unit,
     val setMuted: (Boolean) -> Unit,
+    val step: (Boolean) -> Unit,
 )
 
 private enum class Tool(val label: String) { FRAME("Kadraj"), TRIM("Kes"), AUDIO("Ses") }
@@ -163,7 +164,7 @@ private fun TopBar(c: EditorController, a: EditorActions, onExport: () -> Unit) 
         Column(Modifier.weight(1f)) {
             Text(c.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "${c.clip.cameraType} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn",
+                "${c.clip.cameraType} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn" + if (c.clip.lrv != null) " · hızlı önizleme" else "",
                 style = MaterialTheme.typography.bodySmall, color = Palette.Muted,
             )
         }
@@ -231,11 +232,13 @@ private fun Transport(c: EditorController, a: EditorActions) {
         IconButton(onClick = { c.previousKeyframeTime()?.let(a.seek) }, enabled = c.previousKeyframeTime() != null) {
             Icon(Glyphs.PrevKey, "Önceki anahtar kare", tint = if (c.previousKeyframeTime() != null) Palette.Text else Palette.Outline)
         }
+        IconButton(onClick = { a.step(false) }) { Icon(Glyphs.FrameBack, "Bir kare geri", tint = Palette.Text) }
         FilledIconButton(
             onClick = a.playPause,
             modifier = Modifier.size(52.dp),
             colors = IconButtonDefaults.filledIconButtonColors(containerColor = Palette.Text, contentColor = Palette.Background),
         ) { Icon(if (c.playing) Glyphs.Pause else Glyphs.Play, if (c.playing) "Duraklat" else "Oynat") }
+        IconButton(onClick = { a.step(true) }) { Icon(Glyphs.FrameFwd, "Bir kare ileri", tint = Palette.Text) }
         IconButton(onClick = { c.nextKeyframeTime()?.let(a.seek) }, enabled = c.nextKeyframeTime() != null) {
             Icon(Glyphs.NextKey, "Sonraki anahtar kare", tint = if (c.nextKeyframeTime() != null) Palette.Text else Palette.Outline)
         }

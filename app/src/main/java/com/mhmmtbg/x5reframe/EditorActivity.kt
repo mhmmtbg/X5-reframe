@@ -75,10 +75,11 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             }
         }
         lifecycleScope.launch {
-            val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, uri) } }
+            val lrvUri = existing?.lrvUri ?: intent.getStringExtra(EXTRA_LRV)?.let(Uri::parse)
+            val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, uri, lrvUri) } }
             r.onSuccess { clip ->
                 val name = existing?.clipName ?: displayName(uri)
-                val proj = existing ?: withContext(Dispatchers.IO) { store.create(uri, name, clip.durationUs) }
+                val proj = existing ?: withContext(Dispatchers.IO) { store.create(uri, name, clip.durationUs, clip.lrv?.uri) }
                 project = proj
                 val c = EditorController(clip, proj.name, proj.edit)
                 val p = Player(this@EditorActivity, clip, this@EditorActivity)
@@ -89,6 +90,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                     saveHandler.postDelayed(saveTask, 800)
                 }
                 if (existing == null) saveHandler.postDelayed({ captureThumb() }, 1500)
+                buildFilmstrip(clip)
                 controller = c
                 player = p
                 loaded = true
@@ -128,6 +130,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             )
         },
         setMuted = { player?.setMuted(it) },
+        step = { fwd -> c.clearLive(); player?.step(fwd) },
     )
 
     // ---- Önizleme yüzeyi ----
@@ -181,6 +184,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     private fun createTimeline(ctx: android.content.Context): TimelineView {
         val t = TimelineView(ctx)
+        t.filmstrip = filmstrip
+        timelineView = t
         t.listener = object : TimelineView.Listener {
             override fun onScrub(us: Long, fromUser: Boolean) {
                 val c = controller ?: return
@@ -261,6 +266,35 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         Thread { runCatching { store.save(updated) } }.start()
     }
 
+    /** Zaman çizelgesi için LRV'den ön lens merkezini gösteren küçük kareler. */
+    private var timelineView: TimelineView? = null
+    private var filmstrip: List<android.graphics.Bitmap> = emptyList()
+
+    private fun buildFilmstrip(clip: ClipInfo) {
+        val lrv = clip.lrv ?: return
+        Thread {
+            val frames = runCatching {
+                val r = android.media.MediaMetadataRetriever()
+                try {
+                    r.setDataSource(this, lrv.uri)
+                    val n = 12
+                    val lens = clip.rig.lenses[0]
+                    (0 until n).mapNotNull { i ->
+                        val t = clip.durationUs * (i + 0.5) / n
+                        r.getFrameAtTime(t.toLong(), android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { f ->
+                            val half = f.width / 2
+                            val cx = (lens.cx * half).toInt(); val cy = (lens.cy * f.height).toInt()
+                            val side = (f.height * 0.55).toInt()
+                            val x0 = (cx - side / 2).coerceIn(0, half - side); val y0 = (cy - side / 2).coerceIn(0, f.height - side)
+                            android.graphics.Bitmap.createScaledBitmap(android.graphics.Bitmap.createBitmap(f, x0, y0, side, side), 96, 96, true)
+                        }
+                    }
+                } finally { r.release() }
+            }.getOrDefault(emptyList())
+            runOnUiThread { filmstrip = frames; timelineView?.filmstrip = frames }
+        }.start()
+    }
+
     private fun captureThumb() {
         val p = project ?: return
         player?.captureThumbnail(384, 216) { bmp -> runCatching { store.saveThumbnail(p.id, bmp) } }
@@ -283,5 +317,6 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     companion object {
         const val CANCELLED = "İptal edildi"
         const val EXTRA_PROJECT = "project"
+        const val EXTRA_LRV = "lrv"
     }
 }

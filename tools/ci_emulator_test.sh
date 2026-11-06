@@ -3,7 +3,8 @@
 set -x
 adb wait-for-device
 adb push media/clip.insv /data/local/tmp/clip.insv
-adb shell chmod 644 /data/local/tmp/clip.insv
+adb push media/clip.lrv /data/local/tmp/clip.lrv
+adb shell chmod 644 /data/local/tmp/clip.insv /data/local/tmp/clip.lrv
 gradle :app:connectedDebugAndroidTest --no-daemon --stacktrace > out/test.log 2>&1
 echo "exit=$?" >> out/test.log
 adb logcat -d -s ExportTest:* AndroidRuntime:E > out/logcat.txt || true

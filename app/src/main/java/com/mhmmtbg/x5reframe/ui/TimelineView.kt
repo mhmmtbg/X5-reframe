@@ -35,7 +35,13 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
     var outUs = 1L
         set(v) { field = v; invalidate() }
     var keyframes: List<Long> = emptyList()
+        set(v) { if (field != v) { field = v; invalidate() } }
+    /** Klip boyunca eşit aralıklı küçük kareler (isteğe bağlı). */
+    var filmstrip: List<android.graphics.Bitmap> = emptyList()
         set(v) { field = v; invalidate() }
+    private val pStrip = Paint(Paint.FILTER_BITMAP_FLAG)
+    private val pDim = Paint().apply { color = 0xA0000000.toInt() }
+    private val src = android.graphics.Rect()
     /** Kısa süreli vurgulanacak anahtar kare (eklenince yanıp söner). */
     private var flashKeyUs = -1L
     private var flashUntil = 0L
@@ -80,10 +86,34 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
         // Tüm klip
         rect.set(pad, top, width - pad, bottom)
         c.drawRoundRect(rect, 4 * dp, 4 * dp, pTrack)
-        // Kesme aralığı
         val xi = xOf(inUs); val xo = xOf(outUs)
-        rect.set(xi, top, xo, bottom)
-        c.drawRect(rect, pRange)
+        if (filmstrip.isNotEmpty()) {
+            // Küçük kareler; kesme dışı kısım karartılır.
+            val n = filmstrip.size
+            val cellW = (width - 2 * pad) / n
+            c.save()
+            c.clipRect(pad, top, width - pad, bottom)
+            for (i in 0 until n) {
+                val b = filmstrip[i]
+                val left = pad + i * cellW
+                // Kareyi hücreye kırparak sığdır.
+                val scale = maxOf(cellW / b.width, trackH / b.height)
+                val sw = (cellW / scale).toInt(); val sh = (trackH / scale).toInt()
+                val sx = (b.width - sw) / 2; val sy = (b.height - sh) / 2
+                src.set(sx, sy, sx + sw, sy + sh)
+                rect.set(left, top, left + cellW + 1, bottom)
+                c.drawBitmap(b, src, rect, pStrip)
+            }
+            c.restore()
+            rect.set(pad, top, xi, bottom); c.drawRect(rect, pDim)
+            rect.set(xo, top, width - pad, bottom); c.drawRect(rect, pDim)
+            rect.set(xi, top, xo, top + 3 * dp); c.drawRect(rect, pHandle)
+            rect.set(xi, bottom - 3 * dp, xo, bottom); c.drawRect(rect, pHandle)
+        } else {
+            // Kesme aralığı
+            rect.set(xi, top, xo, bottom)
+            c.drawRect(rect, pRange)
+        }
         // Tutamaklar
         drawHandle(c, xi - handleW, top, bottom)
         drawHandle(c, xo, top, bottom)

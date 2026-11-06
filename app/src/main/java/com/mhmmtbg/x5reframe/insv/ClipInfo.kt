@@ -18,7 +18,11 @@ class ClipInfo(
     val height: Int,
     val durationUs: Long,
     val frameRate: Float,
+    /** Aynı çekimin düşük çözünürlüklü önizleme dosyası (yan yana iki lens). */
+    val lrv: Lrv? = null,
 ) {
+    data class Lrv(val uri: Uri, val videoTrack: Int, val width: Int, val height: Int)
+
     companion object {
         // ExtraMetadata alan etiketleri (telemetry-parser extra_info.rs)
         private const val TAG_CAMERA_TYPE = 2
@@ -30,7 +34,24 @@ class ClipInfo(
             "Insta360 X4", "Insta360 X5", "Insta360 X4 Air", "Insta360 X6", "Antigravity A1", "Insta360 DM"
         )
 
-        fun load(context: Context, uri: Uri): ClipInfo {
+        /** LRV dosyasını doğrula: tek video izi, 2:1 yan yana. Uymazsa null. */
+        fun probeLrv(context: Context, uri: Uri): Lrv? = runCatching {
+            context.contentResolver.openFileDescriptor(uri, "r")!!.use { pfd ->
+                val ex = MediaExtractor()
+                try {
+                    ex.setDataSource(pfd.fileDescriptor)
+                    (0 until ex.trackCount).firstNotNullOfOrNull { i ->
+                        val f = ex.getTrackFormat(i)
+                        if (f.getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true) {
+                            val w = f.getInteger(MediaFormat.KEY_WIDTH); val h = f.getInteger(MediaFormat.KEY_HEIGHT)
+                            if (w == 2 * h) Lrv(uri, i, w, h) else null
+                        } else null
+                    }
+                } finally { ex.release() }
+            }
+        }.getOrNull()
+
+        fun load(context: Context, uri: Uri, lrvUri: Uri? = null): ClipInfo {
             val pfd = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: throw IllegalStateException("dosya açılamadı")
             pfd.use {
@@ -82,7 +103,8 @@ class ClipInfo(
                 }
                 val reversed = camera in TRACK_ORDER_BODIES && meta.long(TAG_MULTI_TRACK_ORDER) == TRACK0_STREAM10
                 val rig = Rig.fromOffsetV3(offset, crop, reversed)
-                return ClipInfo(uri, camera, rig, video, audio, w, h, dur, fps)
+                val lrv = lrvUri?.let { probeLrv(context, it) }
+                return ClipInfo(uri, camera, rig, video, audio, w, h, dur, fps, lrv)
             }
         }
     }

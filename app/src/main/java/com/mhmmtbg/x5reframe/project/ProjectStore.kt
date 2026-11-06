@@ -23,6 +23,7 @@ data class Project(
     val createdAt: Long,
     val updatedAt: Long,
     val edit: EditState,
+    val lrvUri: Uri? = null,
 )
 
 /** Projeleri uygulamanın kendi klasöründe JSON olarak saklar (internet, hesap yok). */
@@ -36,11 +37,11 @@ class ProjectStore(context: Context) {
     fun get(id: String): Project? = File(dir, "$id.json").takeIf { it.exists() }
         ?.let { runCatching { fromJson(JSONObject(it.readText())) }.getOrNull() }
 
-    fun create(clipUri: Uri, clipName: String, durationUs: Long): Project {
+    fun create(clipUri: Uri, clipName: String, durationUs: Long, lrvUri: Uri? = null): Project {
         val now = System.currentTimeMillis()
         val p = Project(
             UUID.randomUUID().toString(), clipName.substringBeforeLast('.'), clipUri, clipName, durationUs, now, now,
-            EditState(outUs = durationUs),
+            EditState(outUs = durationUs), lrvUri,
         )
         save(p)
         return p
@@ -83,11 +84,13 @@ class ProjectStore(context: Context) {
             put("durationUs", p.durationUs)
             put("createdAt", p.createdAt); put("updatedAt", p.updatedAt)
             put("edit", editToJson(p.edit))
+            p.lrvUri?.let { put("lrvUri", it.toString()) }
         }
 
         fun fromJson(o: JSONObject) = Project(
             o.getString("id"), o.getString("name"), Uri.parse(o.getString("clipUri")), o.getString("clipName"),
             o.getLong("durationUs"), o.getLong("createdAt"), o.getLong("updatedAt"), editFromJson(o.getJSONObject("edit")),
+            o.optString("lrvUri").takeIf { it.isNotEmpty() }?.let(Uri::parse),
         )
 
         fun editToJson(e: EditState) = JSONObject().apply {

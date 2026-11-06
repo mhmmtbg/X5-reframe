@@ -14,6 +14,7 @@ permissions:
 
 env:
   INSV_ID: 1R4PdzliQXXfffxXTTiXfYU3nw-Lb81kh
+  LRV_ID: 1MnqSVf1MKfwI4mCFDNDyhxS4TtAuHgSW
 
 jobs:
   emulator:
@@ -42,6 +43,7 @@ jobs:
         run: |
           mkdir -p media out
           curl -sSL --retry 3 -o media/clip.insv "https://drive.usercontent.google.com/download?id=$INSV_ID&export=download&confirm=t"
+          curl -sSL --retry 3 -o media/clip.lrv "https://drive.usercontent.google.com/download?id=$LRV_ID&export=download&confirm=t"
           ls -la media
 
       - name: Test APK'larını derle

@@ -21,6 +21,8 @@ object Glyphs {
     val Back = icon("back", "M20,11H7.83l5.59,-5.59L12,4l-8,8 8,8 1.41,-1.41L7.83,13H20v-2z")
     val PrevKey = icon("prev", "M6,6h2v12H6zM9.5,12l8.5,6V6z")
     val NextKey = icon("next", "M6,18l8.5,-6L6,6v12zM16,6v12h2V6h-2z")
+    val FrameBack = icon("fback", "M15.41,7.41L14,6l-6,6 6,6 1.41,-1.41L10.83,12z")
+    val FrameFwd = icon("ffwd", "M10,6L8.59,7.41 13.17,12l-4.58,4.59L10,18l6,-6z")
     val Close = icon("close", "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 13.41,12z")
     val Check = icon("check", "M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z")
     val VolumeOn = icon("vol", "M3,9v6h4l5,5V4L7,9H3zM16.5,12c0,-1.77 -1.02,-3.29 -2.5,-4.03v8.05c1.48,-0.73 2.5,-2.25 2.5,-4.02z")

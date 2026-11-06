@@ -37,10 +37,13 @@ class Player(
     private val handler = Handler(thread.looper)
     private val main = Handler(Looper.getMainLooper())
     private val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(clip.uri, "r")!!
+    /** Varsa hafif LRV önizleme dosyası; yoksa asıl .insv kullanılır. */
+    private val lrvPfd: ParcelFileDescriptor? = clip.lrv?.let { runCatching { context.contentResolver.openFileDescriptor(it.uri, "r") }.getOrNull() }
+    val usingLrv get() = lrvPfd != null
 
     private lateinit var egl: EglCore
     private lateinit var program: ReframeProgram
-    private lateinit var source: DualFrameSource
+    private lateinit var source: FrameSource
     private var window: EGLSurface = EGL14.EGL_NO_SURFACE
     private var winW = 0
     private var winH = 0
@@ -62,7 +65,12 @@ class Player(
             try {
                 egl = EglCore()
                 program = ReframeProgram(clip.rig)
-                source = DualFrameSource(pfd.fileDescriptor, clip)
+                val lrv = clip.lrv
+                source = if (lrvPfd != null && lrv != null) {
+                    SideBySideFrameSource(lrvPfd.fileDescriptor, lrv.videoTrack, lrv.width, lrv.height)
+                } else {
+                    DualFrameSource(pfd.fileDescriptor, clip)
+                }
                 source.seekAndShow(0, frameDurUs)
                 drawNow()
                 postPosition(source.currentPts)
@@ -122,6 +130,22 @@ class Player(
         main.post { listener.onPlayingChanged(false) }
     }
 
+    /** Bir kare ileri / geri (duraklatılmışken). */
+    fun step(forward: Boolean) {
+        if (playing) pause()
+        if (forward) {
+            handler.post {
+                if (released || !::source.isInitialized) return@post
+                runCatching {
+                    val pts = source.next(true)
+                    if (pts >= 0) { drawNow(); postPosition(pts) }
+                }.onFailure { error(it) }
+            }
+        } else {
+            handler.post { if (::source.isInitialized) seekTo((source.currentPts - frameDurUs).coerceAtLeast(0)) }
+        }
+    }
+
     fun seekTo(us: Long) {
         pendingSeek = us.coerceIn(0, clip.durationUs)
         handler.post(seekTask)
@@ -172,7 +196,7 @@ class Player(
         if (window == EGL14.EGL_NO_SURFACE || !::source.isInitialized || !source.hasFrame) return
         egl.makeCurrent(window)
         val view = viewProvider(source.currentPts)
-        program.draw(winW, winH, view, source.textures, source.texMatrices)
+        program.draw(winW, winH, view, source)
         egl.swap(window)
     }
 
@@ -182,7 +206,7 @@ class Player(
         runCatching {
             val pb = egl.createPbuffer(w, h)
             egl.makeCurrent(pb)
-            program.draw(w, h, viewProvider(source.currentPts), source.textures, source.texMatrices)
+            program.draw(w, h, viewProvider(source.currentPts), source)
             val buf = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder())
             GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
             if (window != EGL14.EGL_NO_SURFACE) egl.makeCurrent(window) else egl.makeNothingCurrent()
@@ -219,6 +243,7 @@ class Player(
                 }
             }
             runCatching { pfd.close() }
+            runCatching { lrvPfd?.close() }
             thread.quitSafely()
         }
     }

@@ -84,8 +84,11 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun openNew(uri: Uri) {
-        startActivity(Intent(this, EditorActivity::class.java).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+    private fun openNew(uri: Uri, lrv: Uri? = null) {
+        startActivity(
+            Intent(this, EditorActivity::class.java).setData(uri).putExtra(EditorActivity.EXTRA_LRV, lrv?.toString())
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        )
     }
 
     private fun openProject(p: Project) {
@@ -246,7 +249,7 @@ class MainActivity : AppCompatActivity() {
     private fun MediaRow(f: DocumentFile) {
         val thumb by produceState<Bitmap?>(null, f.uri) { value = withContext(Dispatchers.IO) { lrvThumbnail(f) } }
         Row(
-            Modifier.fillMaxWidth().background(Palette.Surface, RoundedCornerShape(12.dp)).clickable { openNew(f.uri) }.padding(10.dp),
+            Modifier.fillMaxWidth().background(Palette.Surface, RoundedCornerShape(12.dp)).clickable { openNew(f.uri, lrvFor(f)?.uri) }.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(Modifier.width(128.dp).aspectRatio(2f).clip(RoundedCornerShape(8.dp)).background(Palette.SurfaceHigh)) {
@@ -262,11 +265,23 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /** Aynı klasördeki LRV önizleme dosyasından küçük resim (yoksa null). */
-    private fun lrvThumbnail(f: DocumentFile): Bitmap? = runCatching {
+    /** Aynı çekimin LRV önizleme dosyası: VID_..._00_024.insv → LRV_..._01_024.lrv */
+    private fun lrvFor(f: DocumentFile): DocumentFile? = runCatching {
         val name = f.name ?: return null
         val lrvName = name.replaceFirst("VID_", "LRV_").replace("_00_", "_01_").replaceAfterLast('.', "lrv")
-        val lrv = f.parentFile?.findFile(lrvName) ?: return null
+        val parent = f.parentFile ?: findParent(f) ?: return null
+        parent.findFile(lrvName) ?: parent.findFile(lrvName.uppercase().replace(".LRV", ".lrv"))
+    }.getOrNull()
+
+    private fun findParent(f: DocumentFile): DocumentFile? {
+        val root = folder?.let { DocumentFile.fromTreeUri(this, it) } ?: return null
+        val dirs = listOf(root) + root.listFiles().filter { it.isDirectory }.flatMap { d -> listOf(d) + d.listFiles().filter { it.isDirectory } }
+        return dirs.firstOrNull { d -> d.listFiles().any { it.uri == f.uri } }
+    }
+
+    /** LRV önizleme dosyasından küçük resim (yoksa null). */
+    private fun lrvThumbnail(f: DocumentFile): Bitmap? = runCatching {
+        val lrv = lrvFor(f) ?: return null
         val r = MediaMetadataRetriever()
         try {
             r.setDataSource(this, lrv.uri)
