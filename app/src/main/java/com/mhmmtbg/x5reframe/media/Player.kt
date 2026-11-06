@@ -176,6 +176,27 @@ class Player(
         egl.swap(window)
     }
 
+    /** O anki kareden küçük resim üretir (proje listesi için). */
+    fun captureThumbnail(w: Int, h: Int, onReady: (android.graphics.Bitmap) -> Unit) = handler.post {
+        if (released || !::source.isInitialized || !source.hasFrame) return@post
+        runCatching {
+            val pb = egl.createPbuffer(w, h)
+            egl.makeCurrent(pb)
+            program.draw(w, h, viewProvider(source.currentPts), source.textures, source.texMatrices)
+            val buf = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder())
+            GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
+            if (window != EGL14.EGL_NO_SURFACE) egl.makeCurrent(window) else egl.makeNothingCurrent()
+            egl.releaseSurface(pb)
+            val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+            buf.rewind()
+            bmp.copyPixelsFromBuffer(buf)
+            // GL satırları aşağıdan yukarı okur.
+            val m = android.graphics.Matrix().apply { preScale(1f, -1f) }
+            val flipped = android.graphics.Bitmap.createBitmap(bmp, 0, 0, w, h, m, false)
+            onReady(flipped)
+        }
+    }
+
     private fun postPosition(us: Long) = main.post { listener.onPosition(us) }
 
     private fun error(t: Throwable) {

@@ -13,7 +13,7 @@ import com.mhmmtbg.x5reframe.model.Keyframe
 import com.mhmmtbg.x5reframe.model.ViewParams
 
 /** Ekranın tüm durumu ve düzenleme işlemleri. UI iş parçacığından çağrılır. */
-class EditorController(val clip: ClipInfo, val fileName: String) {
+class EditorController(val clip: ClipInfo, val fileName: String, initial: EditState? = null) {
 
     sealed interface ExportUi {
         data object Idle : ExportUi
@@ -24,7 +24,9 @@ class EditorController(val clip: ClipInfo, val fileName: String) {
 
     data class Feedback(val text: String, val positive: Boolean, val id: Int)
 
-    private val history = History(EditState(outUs = clip.durationUs))
+    private val history = History(
+        (initial ?: EditState()).let { if (it.outUs <= it.inUs || it.outUs > clip.durationUs) it.copy(inUs = 0, outUs = clip.durationUs) else it }
+    )
 
     var state by mutableStateOf(history.current)
         private set

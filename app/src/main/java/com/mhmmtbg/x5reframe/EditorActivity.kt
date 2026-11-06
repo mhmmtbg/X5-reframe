@@ -43,6 +43,10 @@ import kotlin.math.max
 class EditorActivity : AppCompatActivity(), Player.Listener {
 
     private var controller: EditorController? = null
+    private lateinit var store: com.mhmmtbg.x5reframe.project.ProjectStore
+    private var project: com.mhmmtbg.x5reframe.project.Project? = null
+    private val saveHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val saveTask = Runnable { saveNow() }
     private var player: Player? = null
     private var exporter: Exporter? = null
     private var userScrubbing = false
@@ -51,7 +55,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val uri: Uri = intent.data ?: run { finish(); return }
+        store = com.mhmmtbg.x5reframe.project.ProjectStore(this)
+        val existing = intent.getStringExtra(EXTRA_PROJECT)?.let { store.get(it) }
+        val uri: Uri = existing?.clipUri ?: intent.data ?: run { finish(); return }
         setContent {
             X5Theme {
                 val c = controller
@@ -71,14 +77,25 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         lifecycleScope.launch {
             val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, uri) } }
             r.onSuccess { clip ->
-                val c = EditorController(clip, displayName(uri))
+                val name = existing?.clipName ?: displayName(uri)
+                val proj = existing ?: withContext(Dispatchers.IO) { store.create(uri, name, clip.durationUs) }
+                project = proj
+                val c = EditorController(clip, proj.name, proj.edit)
                 val p = Player(this@EditorActivity, clip, this@EditorActivity)
                 p.viewProvider = { t -> c.displayedView(t) }
-                c.onChanged = { p.requestRedraw() }
+                c.onChanged = {
+                    p.requestRedraw()
+                    saveHandler.removeCallbacks(saveTask)
+                    saveHandler.postDelayed(saveTask, 800)
+                }
+                if (existing == null) saveHandler.postDelayed({ captureThumb() }, 1500)
                 controller = c
                 player = p
                 loaded = true
-            }.onFailure { loadError = it.message ?: it.javaClass.simpleName }
+            }.onFailure {
+                loadError = (it.message ?: it.javaClass.simpleName) +
+                    if (existing != null) "\n\nKlip taşınmış ya da silinmiş olabilir." else ""
+            }
         }
     }
 
@@ -236,9 +253,25 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         controller?.say("Hata: $message", false)
     }
 
+    private fun saveNow() {
+        val c = controller ?: return
+        val p = project ?: return
+        val updated = p.copy(edit = c.state, updatedAt = System.currentTimeMillis())
+        project = updated
+        Thread { runCatching { store.save(updated) } }.start()
+    }
+
+    private fun captureThumb() {
+        val p = project ?: return
+        player?.captureThumbnail(384, 216) { bmp -> runCatching { store.saveThumbnail(p.id, bmp) } }
+    }
+
     override fun onPause() {
         super.onPause()
         player?.pause()
+        saveHandler.removeCallbacks(saveTask)
+        saveNow()
+        captureThumb()
     }
 
     override fun onDestroy() {
@@ -249,5 +282,6 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     companion object {
         const val CANCELLED = "İptal edildi"
+        const val EXTRA_PROJECT = "project"
     }
 }

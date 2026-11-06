@@ -44,6 +44,9 @@ class EglCore {
         return s
     }
 
+    fun createPbuffer(w: Int, h: Int): EGLSurface =
+        EGL14.eglCreatePbufferSurface(display, config, intArrayOf(EGL14.EGL_WIDTH, w, EGL14.EGL_HEIGHT, h, EGL14.EGL_NONE), 0)
+
     fun makeCurrent(s: EGLSurface) {
         check(EGL14.eglMakeCurrent(display, s, s, context)) { "eglMakeCurrent" }
     }
