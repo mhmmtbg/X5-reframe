@@ -76,7 +76,7 @@ class EditorActions(
     val step: (Boolean) -> Unit,
 )
 
-private enum class Tool(val label: String) { FRAME("Kadraj"), TRIM("Kes"), AUDIO("Ses") }
+private enum class Tool(val label: String) { FRAME("Kadraj"), TRIM("Kes"), STAB("Sabitleme"), AUDIO("Ses") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -137,6 +137,7 @@ fun EditorScreen(
             when (tool) {
                 Tool.FRAME -> FramePanel(c)
                 Tool.TRIM -> TrimPanel(c)
+                Tool.STAB -> StabPanel(c)
                 Tool.AUDIO -> AudioPanel(c, actions)
             }
         }
@@ -371,6 +372,39 @@ private fun TrimPanel(c: EditorController) {
             "Düğmeler oynatma çizgisinin olduğu yeri kullanır. Zaman çizelgesindeki sarı tutamakları sürükleyerek de ayarlayabilirsin.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+@Composable
+private fun StabPanel(c: EditorController) {
+    val s = c.state
+    if (c.stabilizer == null) {
+        Text("Bu klipte hareket sensörü verisi bulunamadı; sabitleme kullanılamıyor.", color = Palette.Muted, style = MaterialTheme.typography.bodyMedium)
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Segmented(
+            com.mhmmtbg.x5reframe.stab.StabMode.values().toList(), s.stabMode, { it.label },
+            { m -> c.commit(s.copy(stabMode = m)); c.say("Sabitleme: ${m.label}") }, Modifier.fillMaxWidth(),
+        )
+        Text(s.stabMode.hint, color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        val adjustable = s.stabMode == com.mhmmtbg.x5reframe.stab.StabMode.SMOOTH || s.stabMode == com.mhmmtbg.x5reframe.stab.StabMode.HORIZON
+        if (adjustable) {
+            var draft by remember(s.stabStrength) { mutableStateOf(s.stabStrength.toFloat()) }
+            LabeledRow("Şiddet") {
+                Slider(
+                    value = draft, onValueChange = { draft = it },
+                    onValueChangeFinished = { c.commit(s.copy(stabStrength = draft.toDouble())); c.say("Şiddet %${(draft * 100).toInt()}") },
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                )
+                Text("%${(draft * 100).toInt()}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
+            }
+        }
+        if (s.stabMode == com.mhmmtbg.x5reframe.stab.StabMode.LOCK) {
+            Text("Bakış yönü, kesme başlangıcındaki yöne kilitlenir. Kadraj sekmesindeki yön ve anahtar kareler bu yöne göre uygulanır.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        }
     }
 }
 

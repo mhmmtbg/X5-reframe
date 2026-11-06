@@ -30,6 +30,7 @@ class Exporter(
     private val settings: Settings,
     private val viewAt: (Long) -> ViewParams,
     private val listener: Listener,
+    private val baseAt: (Long) -> DoubleArray? = { null },
 ) {
     data class Settings(
         val width: Int,
@@ -100,7 +101,7 @@ class Exporter(
             var frames = 0
             var lastReport = 0L
             while (pts in 0..end && !cancelled) {
-                program.draw(settings.width, settings.height, viewAt(pts), source)
+                program.draw(settings.width, settings.height, viewAt(pts), source, baseAt(pts))
                 egl.setPresentationTime(win, (pts - start).coerceAtLeast(0) * 1000)
                 egl.swap(win)
                 frames++

@@ -53,7 +53,8 @@ class ReframeProgram(private val rig: Rig) {
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, quad.size * 4, buf, GLES30.GL_STATIC_DRAW)
     }
 
-    fun draw(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource) {
+    /** @param base sabitlemeden gelen rig_from_view temel dönüşü (yoksa kamera çerçevesi) */
+    fun draw(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray? = null) {
         GLES30.glViewport(0, 0, width, height)
         GLES30.glUseProgram(program)
         for (i in 0..1) {
@@ -69,7 +70,8 @@ class ReframeProgram(private val rig: Rig) {
             GLES30.glUniform4f(uDist[i], lens.k[0].toFloat(), lens.k[1].toFloat(), lens.k[2].toFloat(), lens.k[3].toFloat())
             GLES30.glUniform2f(uDist2[i], lens.k[4].toFloat(), lens.xi.toFloat())
         }
-        val rigFromView = Rig.mul(Rig.mul(Rig.rotY(Math.toRadians(view.yaw)), Rig.rotX(Math.toRadians(view.pitch))), Rig.rotZ(Math.toRadians(view.roll)))
+        val user = Rig.mul(Rig.mul(Rig.rotY(Math.toRadians(view.yaw)), Rig.rotX(Math.toRadians(view.pitch))), Rig.rotZ(Math.toRadians(view.roll)))
+        val rigFromView = if (base != null) Rig.mul(base, user) else user
         GLES30.glUniformMatrix3fv(uView, 1, true, rigFromView.toFloats(), 0)
 
         // Uzun kenar 1 olacak şekilde normalize edilmiş ekran koordinatları.

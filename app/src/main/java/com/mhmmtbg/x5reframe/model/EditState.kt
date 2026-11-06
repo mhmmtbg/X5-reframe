@@ -19,6 +19,9 @@ data class EditState(
     val quality: Quality = Quality.FHD,
     val hevc: Boolean = false,
     val includeAudio: Boolean = true,
+    val stabMode: com.mhmmtbg.x5reframe.stab.StabMode = com.mhmmtbg.x5reframe.stab.StabMode.OFF,
+    /** 0..1 yumuşatma şiddeti */
+    val stabStrength: Double = 0.5,
 ) {
     fun viewAt(t: Long): ViewParams = keyframes.viewAt(t, baseView)
 

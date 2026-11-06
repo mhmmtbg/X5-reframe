@@ -32,6 +32,8 @@ class Player(
 
     /** Görüntülenecek kadrajı veren fonksiyon (anahtar kareler zamana bağlı). */
     @Volatile var viewProvider: (Long) -> ViewParams = { ViewParams() }
+    /** Sabitleme temel dönüşü (yoksa null). */
+    @Volatile var baseProvider: (Long) -> DoubleArray? = { null }
 
     private val thread = HandlerThread("player").apply { start() }
     private val handler = Handler(thread.looper)
@@ -196,7 +198,7 @@ class Player(
         if (window == EGL14.EGL_NO_SURFACE || !::source.isInitialized || !source.hasFrame) return
         egl.makeCurrent(window)
         val view = viewProvider(source.currentPts)
-        program.draw(winW, winH, view, source)
+        program.draw(winW, winH, view, source, baseProvider(source.currentPts))
         egl.swap(window)
     }
 
@@ -206,7 +208,7 @@ class Player(
         runCatching {
             val pb = egl.createPbuffer(w, h)
             egl.makeCurrent(pb)
-            program.draw(w, h, viewProvider(source.currentPts), source)
+            program.draw(w, h, viewProvider(source.currentPts), source, baseProvider(source.currentPts))
             val buf = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder())
             GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
             if (window != EGL14.EGL_NO_SURFACE) egl.makeCurrent(window) else egl.makeNothingCurrent()

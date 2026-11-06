@@ -55,6 +55,15 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     fun displayedView(t: Long): ViewParams = snapshotLive ?: snapshotState.viewAt(t)
 
+    /** Hareket sensörü varsa sabitleyici (yoksa sabitleme seçenekleri kapalı). */
+    val stabilizer: com.mhmmtbg.x5reframe.stab.Stabilizer? = clip.imu?.let {
+        runCatching { com.mhmmtbg.x5reframe.stab.Stabilizer(it, com.mhmmtbg.x5reframe.stab.Stabilizer.rigFromImuFor(clip.cameraType)) }.getOrNull()
+    }
+
+    /** Oynatıcı ve dışa aktarım için sabitleme temel dönüşü. */
+    fun baseAt(t: Long, s: EditState = snapshotState): DoubleArray? =
+        stabilizer?.base(t / 1e6, s.stabMode, s.stabStrength, s.inUs / 1e6)
+
     private fun sync() {
         state = history.current
         snapshotState = state

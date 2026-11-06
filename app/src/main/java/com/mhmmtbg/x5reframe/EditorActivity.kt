@@ -84,6 +84,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 val c = EditorController(clip, proj.name, proj.edit)
                 val p = Player(this@EditorActivity, clip, this@EditorActivity)
                 p.viewProvider = { t -> c.displayedView(t) }
+                p.baseProvider = { t -> c.baseAt(t) }
                 c.onChanged = {
                     p.requestRedraw()
                     saveHandler.removeCallbacks(saveTask)
@@ -213,7 +214,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val mbps = if (s.hevc) s.quality.mbpsAvc * 7 / 10 else s.quality.mbpsAvc
         val settings = Exporter.Settings(w, h, s.hevc, mbps * 1_000_000, s.inUs, s.outUs, s.includeAudio)
         c.exportUi = EditorController.ExportUi.Running(0f, 0f)
-        val ex = Exporter(applicationContext, c.clip, settings, { t -> s.viewAt(t) }, object : Exporter.Listener {
+        val ex = Exporter(applicationContext, c.clip, settings, { t -> s.viewAt(t) }, baseAt = { t -> c.baseAt(t, s) }, listener = object : Exporter.Listener {
             override fun onProgress(fraction: Float, speed: Float) = runOnUiThread {
                 if (exporter != null) c.exportUi = EditorController.ExportUi.Running(fraction, speed)
             }

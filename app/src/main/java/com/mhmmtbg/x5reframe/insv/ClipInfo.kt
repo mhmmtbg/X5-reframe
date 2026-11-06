@@ -20,6 +20,8 @@ class ClipInfo(
     val frameRate: Float,
     /** Aynı çekimin düşük çözünürlüklü önizleme dosyası (yan yana iki lens). */
     val lrv: Lrv? = null,
+    /** Hareket sensörü kaydı (sabitleme için). */
+    val imu: Imu? = null,
 ) {
     data class Lrv(val uri: Uri, val videoTrack: Int, val width: Int, val height: Int)
 
@@ -55,11 +57,14 @@ class ClipInfo(
             val pfd = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: throw IllegalStateException("dosya açılamadı")
             pfd.use {
+                var gyroRecord: ByteArray? = null
                 val meta = FileInputStream(it.fileDescriptor).channel.use { ch ->
                     val tr = Trailer.open(ch)
                     val raw = tr.read(Trailer.ID_METADATA) ?: throw IllegalStateException("metadata kaydı yok")
+                    gyroRecord = tr.read(Trailer.ID_GYRO)
                     Proto(raw).fields()
                 }
+                val imu = gyroRecord?.let { g -> runCatching { Imu.parse(g, meta) }.getOrNull() }?.takeIf { it.size > 100 }
                 val camera = meta.string(TAG_CAMERA_TYPE) ?: "?"
                 val offset = meta.string(TAG_OFFSET_V3)
                     ?: throw IllegalStateException("Bu klipte lens kalibrasyonu (offset_v3) yok")
@@ -104,7 +109,7 @@ class ClipInfo(
                 val reversed = camera in TRACK_ORDER_BODIES && meta.long(TAG_MULTI_TRACK_ORDER) == TRACK0_STREAM10
                 val rig = Rig.fromOffsetV3(offset, crop, reversed)
                 val lrv = lrvUri?.let { probeLrv(context, it) }
-                return ClipInfo(uri, camera, rig, video, audio, w, h, dur, fps, lrv)
+                return ClipInfo(uri, camera, rig, video, audio, w, h, dur, fps, lrv, imu)
             }
         }
     }

@@ -101,6 +101,7 @@ class ProjectStore(context: Context) {
             })
             put("aspect", e.aspect.name); put("quality", e.quality.name)
             put("hevc", e.hevc); put("includeAudio", e.includeAudio)
+            put("stabMode", e.stabMode.name); put("stabStrength", e.stabStrength)
         }
 
         fun editFromJson(o: JSONObject): EditState {
@@ -114,6 +115,9 @@ class ProjectStore(context: Context) {
                 aspect = runCatching { Aspect.valueOf(o.optString("aspect")) }.getOrDefault(Aspect.LANDSCAPE),
                 quality = runCatching { Quality.valueOf(o.optString("quality")) }.getOrDefault(Quality.FHD),
                 hevc = o.optBoolean("hevc"), includeAudio = o.optBoolean("includeAudio", true),
+                stabMode = runCatching { com.mhmmtbg.x5reframe.stab.StabMode.valueOf(o.optString("stabMode")) }
+                    .getOrDefault(com.mhmmtbg.x5reframe.stab.StabMode.OFF),
+                stabStrength = o.optDouble("stabStrength", 0.5),
             )
         }
 
