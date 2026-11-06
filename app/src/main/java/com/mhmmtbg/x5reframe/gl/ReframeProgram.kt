@@ -34,6 +34,10 @@ class ReframeProgram(private val rig: Rig) {
     /** 1 / dikiş mesafesi (m); 0 = sonsuz. Yakın nesnelerde çift görüntüyü azaltır. */
     var stitchInvDistance = 0f
 
+    /** 0..1 parlaklık çarpanı (siyaha geçiş). */
+    var fade = 1f
+    private val uFade: Int
+
     init {
         program = link(VS, FS)
         for (i in 0..1) {
@@ -49,6 +53,7 @@ class ReframeProgram(private val rig: Rig) {
         uScale = GLES30.glGetUniformLocation(program, "uScale")
         uMode = GLES30.glGetUniformLocation(program, "uMode")
         uStitch = GLES30.glGetUniformLocation(program, "uStitchInv")
+        uFade = GLES30.glGetUniformLocation(program, "uFade")
         for (i in 0..1) uTrans[i] = GLES30.glGetUniformLocation(program, "uTrans$i")
 
         val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
@@ -124,6 +129,7 @@ class ReframeProgram(private val rig: Rig) {
         else GLES30.glUniform2f(uScale, sx * k, sy * k)
         GLES30.glUniform1i(uMode, view.projection.ordinal)
         GLES30.glUniform1f(uStitch, stitchInvDistance)
+        GLES30.glUniform1f(uFade, fade)
         for (i in 0..1) {
             val t = rig.lenses[i].translationRig
             GLES30.glUniform3f(uTrans[i], t[0].toFloat(), t[1].toFloat(), t[2].toFloat())
@@ -213,6 +219,7 @@ uniform mat3 uView;    // rig_from_view
 uniform vec2 uScale;
 uniform int uMode;     // 0 doğrusal, 1 stereografik, 2 pannini, 3 fisheye, 4 equirect
 uniform float uStitchInv; // 1 / dikiş mesafesi
+uniform float uFade;
 uniform vec3 uTrans0;  // lens merkezleri (rig, metre)
 uniform vec3 uTrans1;
 
@@ -271,7 +278,7 @@ void main() {
     vec3 col = vec3(0.0);
     if (w0 > 0.0) col += w0 * texture(uTex0, texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20))).rgb;
     if (w0 < 1.0) col += (1.0 - w0) * texture(uTex1, texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21))).rgb;
-    outColor = vec4(col, 1.0);
+    outColor = vec4(col * uFade, 1.0);
 }
 """
     }

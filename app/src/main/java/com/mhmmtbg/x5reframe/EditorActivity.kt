@@ -48,21 +48,36 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private val saveHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val saveTask = Runnable { saveNow() }
     private var player: Player? = null
-    private var exporter: Exporter? = null
+    @Volatile private var exporter: Exporter? = null
     private var userScrubbing = false
     private var loadError by mutableStateOf<String?>(null)
     private var loaded by mutableStateOf(false)
+
+    /** Projedeki parçalar ve seçili parça (arayüz için). */
+    private var segments by mutableStateOf<List<com.mhmmtbg.x5reframe.project.Segment>>(emptyList())
+    private var segIndex by mutableStateOf(0)
+    private val clipCache = HashMap<String, ClipInfo>()
+    private var surface: android.view.Surface? = null
+    private var surfW = 0
+    private var surfH = 0
+
+    private val addClipPicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+            addSegment(uri)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         store = com.mhmmtbg.x5reframe.project.ProjectStore(this)
         val existing = intent.getStringExtra(EXTRA_PROJECT)?.let { store.get(it) }
-        val uri: Uri = existing?.clipUri ?: intent.data ?: run { finish(); return }
+        val newUri: Uri? = if (existing == null) intent.data ?: run { finish(); return } else null
         setContent {
             X5Theme {
                 val c = controller
                 if (loaded && c != null) {
-                    EditorScreen(c, actions(c), ::createSurface, ::createTimeline)
+                    EditorScreen(c, actions(c), ::createSurface, ::createTimeline, sequenceUi())
                 } else {
                     Box(Modifier.fillMaxSize().background(Palette.Background), contentAlignment = Alignment.Center) {
                         Text(
@@ -75,35 +90,167 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             }
         }
         lifecycleScope.launch {
-            val lrvUri = existing?.lrvUri ?: intent.getStringExtra(EXTRA_LRV)?.let(Uri::parse)
-            val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, uri, lrvUri) } }
-            r.onSuccess { clip ->
-                val name = existing?.clipName ?: displayName(uri)
-                val proj = existing ?: withContext(Dispatchers.IO) { store.create(uri, name, clip.durationUs, clip.lrv?.uri) }
-                project = proj
-                val c = EditorController(clip, proj.name, proj.edit)
-                val p = Player(this@EditorActivity, clip, this@EditorActivity)
-                p.sceneProvider = { t -> c.sceneAt(t) }
-                p.layoutProvider = { c.snapshotState.layout.rects }
-                p.baseProvider = { t -> c.baseAt(t) }
-                p.setStitchInv(c.state.stitchInv)
-                c.onChanged = {
-                    p.setStitchInv(c.state.stitchInv)
-                    p.requestRedraw()
-                    saveHandler.removeCallbacks(saveTask)
-                    saveHandler.postDelayed(saveTask, 800)
-                }
-                if (existing == null) saveHandler.postDelayed({ captureThumb() }, 1500)
-                buildFilmstrip(clip)
-                controller = c
-                player = p
-                loaded = true
-            }.onFailure {
-                loadError = (it.message ?: it.javaClass.simpleName) +
-                    if (existing != null) "\n\nKlip taşınmış ya da silinmiş olabilir." else ""
+            val proj = existing ?: run {
+                val lrvUri = intent.getStringExtra(EXTRA_LRV)?.let(Uri::parse)
+                val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, newUri!!, lrvUri) } }
+                val clip = r.getOrElse { loadError = it.message ?: it.javaClass.simpleName; return@launch }
+                clipCache[newUri.toString()] = clip
+                withContext(Dispatchers.IO) { store.create(newUri!!, displayName(newUri), clip.durationUs, clip.lrv?.uri) }
+                    .also { saveHandler.postDelayed({ captureThumb() }, 1500) }
             }
+            project = proj
+            segments = proj.segments
+            openSegment(0)
         }
     }
+
+    /** Bir parçayı düzenleyicide aç (öncekinin düzenlemesi kaydedilir). */
+    private fun openSegment(i: Int) {
+        val proj = project ?: return
+        storeCurrentEdit()
+        val seg = proj.segments.getOrNull(i) ?: return
+        player?.pause()
+        player?.detachSurface()
+        player?.release()
+        player = null
+        loaded = false
+        loadError = null
+        lifecycleScope.launch {
+            val clip = clipCache[seg.clipUri.toString()] ?: withContext(Dispatchers.IO) {
+                runCatching { ClipInfo.load(this@EditorActivity, seg.clipUri, seg.lrvUri) }
+            }.getOrElse {
+                loadError = (it.message ?: it.javaClass.simpleName) + "\n\nKlip taşınmış ya da silinmiş olabilir."
+                return@launch
+            }
+            clipCache[seg.clipUri.toString()] = clip
+            val c = EditorController(clip, proj.name, seg.edit)
+            val p = Player(this@EditorActivity, clip, this@EditorActivity)
+            p.sceneProvider = { t -> c.sceneAt(t) }
+            p.layoutProvider = { c.snapshotState.layout.rects }
+            p.baseProvider = { t -> c.baseAt(t) }
+            p.setStitchInv(c.state.stitchInv)
+            c.onChanged = {
+                p.setStitchInv(c.state.stitchInv)
+                p.requestRedraw()
+                saveHandler.removeCallbacks(saveTask)
+                saveHandler.postDelayed(saveTask, 800)
+            }
+            filmstrip = emptyList()
+            timelineView?.filmstrip = emptyList()
+            buildFilmstrip(clip)
+            segIndex = i
+            controller = c
+            player = p
+            surface?.let { sf -> if (sf.isValid) p.attachSurface(sf, surfW, surfH) }
+            loaded = true
+        }
+    }
+
+    /** Seçili parçanın düzenlemesini proje nesnesine yaz. */
+    private fun storeCurrentEdit() {
+        val c = controller ?: return
+        val proj = project ?: return
+        if (segIndex !in proj.segments.indices) return
+        val segs = proj.segments.toMutableList()
+        segs[segIndex] = segs[segIndex].copy(edit = c.state)
+        project = proj.copy(segments = segs)
+        segments = project!!.segments
+    }
+
+    private fun updateSegments(newList: List<com.mhmmtbg.x5reframe.project.Segment>, select: Int, reopen: Boolean) {
+        val proj = project ?: return
+        project = proj.copy(segments = newList, updatedAt = System.currentTimeMillis())
+        segments = newList
+        Thread { runCatching { store.save(project!!) } }.start()
+        if (reopen) { controller = null; openSegmentNoStore(select) } else segIndex = select
+    }
+
+    private fun openSegmentNoStore(i: Int) {
+        val keep = controller
+        controller = null
+        openSegment(i)
+        if (keep != null) { /* düzenleme zaten storeCurrentEdit ile yazıldı */ }
+    }
+
+    private fun addSegment(uri: Uri) {
+        lifecycleScope.launch {
+            val clip = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, uri, null) } }.getOrElse {
+                controller?.say("Eklenemedi: ${it.message}", false); return@launch
+            }
+            clipCache[uri.toString()] = clip
+            storeCurrentEdit()
+            val proj = project ?: return@launch
+            val seg = store.newSegment(uri, displayName(uri), clip.durationUs, null)
+            val list = proj.segments + seg
+            updateSegments(list, list.size - 1, reopen = true)
+        }
+    }
+
+    private fun sequenceUi() = com.mhmmtbg.x5reframe.ui.SequenceUi(
+        segments = segments,
+        current = segIndex,
+        select = { i -> if (i != segIndex) openSegment(i) },
+        add = { addClipPicker.launch(arrayOf("video/*", "application/octet-stream", "*/*")) },
+        move = { i, dir ->
+            storeCurrentEdit()
+            val list = segments.toMutableList()
+            val j = i + dir
+            if (j in list.indices) {
+                java.util.Collections.swap(list, i, j)
+                val sel = when (segIndex) { i -> j; j -> i; else -> segIndex }
+                updateSegments(list, sel, reopen = false)
+                controller?.say("Parça taşındı")
+            }
+        },
+        split = { i ->
+            storeCurrentEdit()
+            val c = controller
+            val seg = segments[i]
+            val pos = if (i == segIndex && c != null) c.positionUs else (seg.edit.inUs + seg.edit.outUs) / 2
+            if (pos - seg.edit.inUs < 300_000 || seg.edit.outUs - pos < 300_000) {
+                c?.say("Bölmek için oynatma çizgisini parçanın ortasına doğru getir", false)
+            } else {
+                val a = seg.copy(edit = seg.edit.copy(outUs = pos), transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT)
+                val b = store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, seg.edit.copy(inUs = pos))
+                    .copy(speed = seg.speed, transitionOut = seg.transitionOut)
+                val list = segments.toMutableList().apply { set(i, a); add(i + 1, b) }
+                updateSegments(list, i + 1, reopen = true)
+                c?.say("Parça bölündü")
+            }
+        },
+        duplicate = { i ->
+            storeCurrentEdit()
+            val seg = segments[i]
+            val copy = store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, seg.edit)
+                .copy(speed = seg.speed, transitionOut = seg.transitionOut)
+            val list = segments.toMutableList().apply { add(i + 1, copy) }
+            updateSegments(list, segIndex, reopen = false)
+            controller?.say("Parça çoğaltıldı")
+        },
+        delete = { i ->
+            if (segments.size <= 1) {
+                controller?.say("Son parça silinemez", false)
+            } else {
+                storeCurrentEdit()
+                val list = segments.toMutableList().apply { removeAt(i) }
+                val sel = (if (i < segIndex) segIndex - 1 else segIndex).coerceIn(0, list.size - 1)
+                updateSegments(list, sel, reopen = i == segIndex)
+                controller?.say("Parça silindi")
+            }
+        },
+        setSpeed = { i, sp ->
+            storeCurrentEdit()
+            val list = segments.toMutableList().apply { set(i, get(i).copy(speed = sp)) }
+            updateSegments(list, segIndex, reopen = false)
+            controller?.say("Hız ${sp}×" + if (sp != 1.0) " (bu parçada ses kapanır)" else "")
+        },
+        setTransition = { i, tr ->
+            storeCurrentEdit()
+            val list = segments.toMutableList().apply { set(i, get(i).copy(transitionOut = tr)) }
+            updateSegments(list, segIndex, reopen = false)
+            controller?.say("Geçiş: ${tr.label}")
+        },
+    )
 
     private fun displayName(uri: Uri): String = runCatching {
         contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
@@ -118,7 +265,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             if (p != null) { if (p.playing) p.pause() else { c.clearLive(); p.play() } }
         },
         seek = { us -> c.clearLive(); c.positionUs = us; player?.seekTo(us) },
-        startExport = { startExport(c) },
+        startExport = { whole -> startExport(c, whole) },
         cancelExport = { exporter?.cancelled = true },
         open = { uri ->
             runCatching {
@@ -145,9 +292,10 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         sv.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {}
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                surface = holder.surface; surfW = width; surfH = height
                 player?.attachSurface(holder.surface, width, height)
             }
-            override fun surfaceDestroyed(holder: SurfaceHolder) { player?.detachSurface() }
+            override fun surfaceDestroyed(holder: SurfaceHolder) { surface = null; player?.detachSurface() }
         })
         var lastX = 0f
         var lastY = 0f
@@ -219,21 +367,25 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     // ---- Dışa aktarım ----
 
-    private fun startExport(c: EditorController) {
-        if (exporter != null) return
+    private fun startExport(c: EditorController, whole: Boolean) {
+        if (exporter != null || pendingExport) return
         player?.pause()
-        val s = c.state // dışa aktarım sırasında yapılan düzenlemeler bu işi etkilemesin
-        val (w, h) = s.outputSize()
-        val mbps = if (s.hevc) s.quality.mbpsAvc * 7 / 10 else s.quality.mbpsAvc
-        val settings = Exporter.Settings(w, h, s.hevc, mbps * 1_000_000, s.inUs, s.outUs, s.includeAudio, s.isSpherical, s.stitchInv, s.layout.rects)
+        storeCurrentEdit()
+        val cur = c.state // dışa aktarım sırasında yapılan düzenlemeler bu işi etkilemesin
+        val segs = if (whole) segments else listOf(segments[segIndex])
+        val (w, h) = cur.outputSize()
+        val mbps = if (cur.hevc) cur.quality.mbpsAvc * 7 / 10 else cur.quality.mbpsAvc
+        val spherical = segs.all { it.edit.copy(aspect = cur.aspect).isSpherical }
+        val output = Exporter.Output(w, h, cur.hevc, mbps * 1_000_000, cur.includeAudio, spherical)
+        val totalSec = segs.sumOf { it.outputDurationUs } / 1e6f
         c.exportUi = EditorController.ExportUi.Running(0f, 0f)
-        val ex = Exporter(applicationContext, c.clip, settings, { t -> s.sceneAt(t) }, baseAt = { t -> c.baseAt(t, s) }, listener = object : Exporter.Listener {
+        val listener = object : Exporter.Listener {
             override fun onProgress(fraction: Float, speed: Float) = runOnUiThread {
                 if (exporter != null) c.exportUi = EditorController.ExportUi.Running(fraction, speed)
             }
             override fun onDone(uri: Uri, seconds: Float) = runOnUiThread {
                 endExport()
-                c.exportUi = EditorController.ExportUi.Done(uri, (s.outUs - s.inUs) / 1e6f, seconds)
+                c.exportUi = EditorController.ExportUi.Done(uri, totalSec, seconds)
                 window.decorView.performHapticFeedback(
                     if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
                 )
@@ -247,14 +399,38 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                     c.exportUi = EditorController.ExportUi.Failed(message)
                 }
             }
-        })
-        exporter = ex
+        }
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        Thread({ ex.run() }, "export").start()
+        val fade = 400_000L
+        Thread({
+            val jobs = runCatching {
+                segs.mapIndexed { i, seg ->
+                    val clip = clipCache[seg.clipUri.toString()] ?: ClipInfo.load(this, seg.clipUri, seg.lrvUri).also { clipCache[seg.clipUri.toString()] = it }
+                    val e = if (whole) seg.edit else cur
+                    val stab = if (e.stabMode == com.mhmmtbg.x5reframe.stab.StabMode.OFF) null else clip.imu?.let {
+                        com.mhmmtbg.x5reframe.stab.Stabilizer(it, com.mhmmtbg.x5reframe.stab.Stabilizer.rigFromImuFor(clip.cameraType))
+                    }
+                    Exporter.Job(
+                        clip, e.inUs, e.outUs, { t -> e.sceneAt(t) },
+                        { t -> stab?.base(t / 1e6, e.stabMode, e.stabStrength, e.inUs / 1e6) },
+                        e.layout.rects, e.stitchInv, seg.speed,
+                        fadeInUs = if (i > 0 && segs[i - 1].transitionOut == com.mhmmtbg.x5reframe.project.Transition.FADE) fade else 0,
+                        fadeOutUs = if (i < segs.size - 1 && seg.transitionOut == com.mhmmtbg.x5reframe.project.Transition.FADE) fade else 0,
+                    )
+                }
+            }.getOrElse { listener.onFailed(it.message ?: "Klip açılamadı"); return@Thread }
+            val ex = Exporter(applicationContext, output, jobs, listener)
+            exporter = ex
+            ex.run()
+        }, "export").start()
+        pendingExport = true
     }
+
+    @Volatile private var pendingExport = false
 
     private fun endExport() {
         exporter = null
+        pendingExport = false
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
@@ -273,9 +449,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     }
 
     private fun saveNow() {
-        val c = controller ?: return
+        storeCurrentEdit()
         val p = project ?: return
-        val updated = p.copy(edit = c.state, updatedAt = System.currentTimeMillis())
+        val updated = p.copy(updatedAt = System.currentTimeMillis())
         project = updated
         Thread { runCatching { store.save(updated) } }.start()
     }

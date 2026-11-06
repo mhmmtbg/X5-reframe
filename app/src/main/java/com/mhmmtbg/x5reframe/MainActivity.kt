@@ -183,7 +183,7 @@ class MainActivity : AppCompatActivity() {
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(p.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${"%.1f".format((p.edit.outUs - p.edit.inUs) / 1e6)} sn · ${p.edit.keyframes.size} anahtar kare",
+                    "${"%.1f".format(p.totalDurationUs / 1e6)} sn · ${p.segments.size} parça · ${p.keyframeCount} anahtar kare",
                     color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
                 )
                 Text(DateUtils.getRelativeTimeSpanString(p.updatedAt).toString(), color = Palette.Muted, style = MaterialTheme.typography.bodySmall)

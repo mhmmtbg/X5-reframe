@@ -128,6 +128,33 @@ class ExportTest {
     }
 
     @Test
+    fun exportsSequenceWithSpeedAndFade() {
+        assumeTrue("örnek klip yok", clipFile.exists())
+        val clip = ClipInfo.load(ctx, Uri.fromFile(clipFile))
+        val done = CountDownLatch(1)
+        var error: String? = null
+        val v = listOf(ViewParams(yaw = 180.0, fov = 100.0))
+        val jobs = listOf(
+            Exporter.Job(clip, 0, 1_000_000, { v }, fadeOutUs = 300_000),
+            Exporter.Job(clip, 2_000_000, 4_000_000, { v }, speed = 2.0, fadeInUs = 300_000),
+        )
+        val ex = Exporter(ctx, Exporter.Output(1280, 720, false, 8_000_000), jobs, object : Exporter.Listener {
+            override fun onProgress(fraction: Float, speed: Float) {}
+            override fun onDone(uri: Uri, seconds: Float) { done.countDown() }
+            override fun onFailed(message: String) { error = message; done.countDown() }
+        })
+        Thread { ex.run() }.start()
+        assertTrue("zaman aşımı", done.await(10, TimeUnit.MINUTES))
+        log("sequence export error=$error frames=${ex.videoWritten} audio=${ex.audioWritten}")
+        writeReport()
+        assertTrue("sekans dışa aktarım hatası: $error", error == null)
+        // 1 sn (30 kare) + 2 sn kaynak 2× hızda (30 kare)
+        assertTrue("kare sayısı beklenmedik: ${ex.videoWritten}", ex.videoWritten in 55..62)
+        // Ses yalnızca 1× parçada: ~1 sn AAC (~47 örnek)
+        assertTrue("ses örneği sayısı beklenmedik: ${ex.audioWritten}", ex.audioWritten in 35..60)
+    }
+
+    @Test
     fun lrvPreviewDecodes() {
         val lrvFile = File("/data/local/tmp/clip.lrv")
         assumeTrue("örnek LRV yok", clipFile.exists() && lrvFile.exists())

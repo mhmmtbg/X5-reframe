@@ -11,6 +11,7 @@ import android.media.MediaMuxer
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.provider.MediaStore
 import com.mhmmtbg.x5reframe.gl.EglCore
@@ -23,15 +24,46 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
-/** Düz video dışa aktarımı: GPU'da kadrajla, donanım kodlayıcıyla yaz, sesi olduğu gibi kopyala. */
+/**
+ * Dışa aktarım: bir ya da birden çok klip parçasını sırayla GPU'da kadrajlar, donanım kodlayıcıyla
+ * tek bir MP4'e yazar. Ses 1× hızdaki parçalarda yeniden kodlanmadan kopyalanır.
+ */
 class Exporter(
     private val context: Context,
-    private val clip: ClipInfo,
-    private val settings: Settings,
-    private val sceneAt: (Long) -> List<ViewParams>,
+    private val output: Output,
+    private val jobs: List<Job>,
     private val listener: Listener,
-    private val baseAt: (Long) -> DoubleArray? = { null },
 ) {
+    /** Tüm çıktı için ortak ayarlar. */
+    data class Output(
+        val width: Int,
+        val height: Int,
+        val hevc: Boolean,
+        val bitrate: Int,
+        val includeAudio: Boolean = true,
+        /** 360° equirect çıktı: küresel video bilgisi eklenir. */
+        val spherical: Boolean = false,
+    )
+
+    /** Tek bir klip parçası. */
+    class Job(
+        val clip: ClipInfo,
+        val startUs: Long,
+        val endUs: Long,
+        val sceneAt: (Long) -> List<ViewParams>,
+        val baseAt: (Long) -> DoubleArray? = { null },
+        val layoutRects: List<FloatArray> = listOf(floatArrayOf(0f, 0f, 1f, 1f)),
+        val stitchInv: Float = 0f,
+        /** 0,25..4: kaynak zamanın akış hızı. */
+        val speed: Double = 1.0,
+        /** Siyahtan açılma / siyaha kararma süreleri. */
+        val fadeInUs: Long = 0,
+        val fadeOutUs: Long = 0,
+    ) {
+        val outputDurationUs: Long get() = ((endUs - startUs) / speed).toLong()
+    }
+
+    /** Eski tek klip arayüzü (testler ve basit kullanım). */
     data class Settings(
         val width: Int,
         val height: Int,
@@ -40,12 +72,17 @@ class Exporter(
         val startUs: Long,
         val endUs: Long,
         val includeAudio: Boolean = true,
-        /** 360° equirect çıktı: küresel video bilgisi eklenir. */
         val spherical: Boolean = false,
-        /** 1 / dikiş mesafesi (m). */
         val stitchInv: Float = 0f,
-        /** Çoklu açı bölmeleri (normalize x, y, w, h). */
         val layoutRects: List<FloatArray> = listOf(floatArrayOf(0f, 0f, 1f, 1f)),
+    )
+
+    constructor(
+        context: Context, clip: ClipInfo, s: Settings, sceneAt: (Long) -> List<ViewParams>, listener: Listener,
+        baseAt: (Long) -> DoubleArray? = { null },
+    ) : this(
+        context, Output(s.width, s.height, s.hevc, s.bitrate, s.includeAudio, s.spherical),
+        listOf(Job(clip, s.startUs, s.endUs, sceneAt, baseAt, s.layoutRects, s.stitchInv)), listener,
     )
 
     interface Listener {
@@ -65,76 +102,109 @@ class Exporter(
     private var audioTrack = -1
     private var audioFormat: MediaFormat? = null
 
+    /** Test ve teşhis için. */
+    var sphericalTagged = false
+        private set
+    var audioWritten = 0
+        private set
+    var videoWritten = 0
+        private set
+
     fun run() {
         val t0 = SystemClock.elapsedRealtime()
         var outUri: Uri? = null
         var egl: EglCore? = null
-        var program: ReframeProgram? = null
-        var source: DualFrameSource? = null
-        val inPfd = context.contentResolver.openFileDescriptor(clip.uri, "r")!!
+        val pfds = ArrayList<ParcelFileDescriptor>()
         try {
-            val mime = if (settings.hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
-            checkSupported(mime, settings.width, settings.height)
+            require(jobs.isNotEmpty()) { "Dışa aktarılacak parça yok" }
+            val mime = if (output.hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
+            checkSupported(mime, output.width, output.height)
 
             outUri = createOutput()
             val outPfd = context.contentResolver.openFileDescriptor(outUri, "rw")!!
             // 360° çıktıda önce geçici dosyaya yazılır (moov kutusu düzenlenebilsin diye).
-            val tmp = if (settings.spherical) java.io.File(context.cacheDir, "export360.mp4").also { it.delete() } else null
+            val tmp = if (output.spherical) java.io.File(context.cacheDir, "export360.mp4").also { it.delete() } else null
             muxer = if (tmp != null) MediaMuxer(tmp.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             else MediaMuxer(outPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-            clip.audioTrack?.takeIf { settings.includeAudio }?.let { a ->
-                val ex = MediaExtractor()
-                ex.setDataSource(inPfd.fileDescriptor)
-                audioFormat = ex.getTrackFormat(a)
-                ex.release()
+            // Ses biçimi: sesli ilk parçanın AAC izi (X5 klipleri aynı biçimde).
+            if (output.includeAudio) {
+                for (j in jobs) {
+                    val a = j.clip.audioTrack ?: continue
+                    context.contentResolver.openFileDescriptor(j.clip.uri, "r")!!.use { pfd ->
+                        val ex = MediaExtractor(); ex.setDataSource(pfd.fileDescriptor)
+                        audioFormat = ex.getTrackFormat(a); ex.release()
+                    }
+                    break
+                }
             }
 
-            encoder = createEncoder(mime)
+            val fps = jobs.first().clip.frameRate
+            val frameDur = (1_000_000 / fps).toLong()
+            encoder = createEncoder(mime, fps)
             val inputSurface = encoder.createInputSurface()
             encoder.start()
 
             egl = EglCore()
             val win = egl.createWindowSurface(inputSurface)
             egl.makeCurrent(win)
-            program = ReframeProgram(clip.rig)
-            program.stitchInvDistance = settings.stitchInv
-            source = DualFrameSource(inPfd.fileDescriptor, clip, realtime = false)
 
-            val frameDur = (1_000_000 / clip.frameRate).toLong()
-            val start = settings.startUs
-            val end = settings.endUs.coerceAtMost(clip.durationUs)
-            val total = (end - start).coerceAtLeast(1)
-
-            openAudio(inPfd.fileDescriptor, start)
-            var pts = source.seekAndShow(start, frameDur)
-            var frames = 0
+            val totalOut = jobs.sumOf { it.outputDurationUs }.coerceAtLeast(1)
+            var timeline = 0L
             var lastReport = 0L
-            while (pts in 0..end && !cancelled) {
-                program.drawScene(settings.width, settings.height, settings.layoutRects, sceneAt(pts), source, baseAt(pts))
-                egl.setPresentationTime(win, (pts - start).coerceAtLeast(0) * 1000)
-                egl.swap(win)
-                frames++
-                drain(false)
-                writeAudioUpTo(pts, start, end)
 
-                val now = SystemClock.elapsedRealtime()
-                if (now - lastReport > 250) {
-                    lastReport = now
-                    val done = (pts - start).toFloat() / total
-                    val elapsed = (now - t0) / 1000f
-                    listener.onProgress(done.coerceIn(0f, 1f), if (elapsed > 0) ((pts - start) / 1e6f) / elapsed else 0f)
+            for (job in jobs) {
+                if (cancelled) break
+                val pfd = context.contentResolver.openFileDescriptor(job.clip.uri, "r")!!
+                pfds += pfd
+                val program = ReframeProgram(job.clip.rig).apply { stitchInvDistance = job.stitchInv }
+                val source = DualFrameSource(pfd.fileDescriptor, job.clip, realtime = false)
+                try {
+                    val audio = if (output.includeAudio && job.speed == 1.0) openAudio(pfd, job) else null
+                    val end = job.endUs.coerceAtMost(job.clip.durationUs)
+                    val nFrames = (((end - job.startUs) / job.speed) / frameDur).toLong().coerceAtLeast(1)
+                    if (source.seekAndShow(job.startUs, frameDur) < 0) continue
+                    for (k in 0 until nFrames) {
+                        if (cancelled) break
+                        val tSrc = job.startUs + (k * frameDur * job.speed).toLong()
+                        // Hedef kaynak zamanına kadar ilerle (hızlandırmada kare atlanır, yavaşlatmada aynı kare tekrar çizilir).
+                        var eos = false
+                        while (source.currentPts + frameDur <= tSrc) {
+                            if (source.next { it + frameDur > tSrc } < 0) { eos = true; break }
+                        }
+                        if (eos) break
+                        val tOut = k * frameDur
+                        program.fade = fadeFactor(job, tOut)
+                        val pts = source.currentPts
+                        program.drawScene(output.width, output.height, job.layoutRects, job.sceneAt(pts), source, job.baseAt(pts))
+                        egl.setPresentationTime(win, (timeline + tOut) * 1000)
+                        egl.swap(win)
+                        drain(false)
+                        audio?.writeUpTo(pts, timeline)
+
+                        val now = SystemClock.elapsedRealtime()
+                        if (now - lastReport > 250) {
+                            lastReport = now
+                            val done = (timeline + tOut).toFloat() / totalOut
+                            val elapsed = (now - t0) / 1000f
+                            listener.onProgress(done.coerceIn(0f, 1f), if (elapsed > 0) ((timeline + tOut) / 1e6f) / elapsed else 0f)
+                        }
+                    }
+                    audio?.writeUpTo(end, timeline)
+                    audio?.close()
+                    timeline += nFrames * frameDur
+                } finally {
+                    runCatching { source.release() }
+                    runCatching { program.release() }
                 }
-                pts = source.next(true)
             }
             if (cancelled) throw InterruptedException("İptal edildi")
 
             encoder.signalEndOfInputStream()
             drain(true)
             if (!muxerStarted) throw IllegalStateException("Kodlayıcı çıktı üretmedi")
-
-            writeAudioUpTo(end, start, end)
-            closeAudio()
+            pending.forEach { (b, i) -> muxer.writeSampleData(audioTrack, b, i); audioWritten++ }
+            pending.clear()
 
             muxer.stop()
             muxer.release()
@@ -156,20 +226,25 @@ class Exporter(
             outUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             listener.onFailed(if (t is InterruptedException) "İptal edildi" else (t.message ?: t.javaClass.simpleName))
         } finally {
-            runCatching { closeAudio() }
             runCatching { if (::encoder.isInitialized) { encoder.stop(); encoder.release() } }
-            runCatching { source?.release() }
-            runCatching { program?.release() }
             runCatching { egl?.release() }
-            runCatching { inPfd.close() }
+            pfds.forEach { runCatching { it.close() } }
         }
     }
 
-    private fun createEncoder(mime: String): MediaCodec {
-        fun format(withRate: Boolean) = MediaFormat.createVideoFormat(mime, settings.width, settings.height).apply {
+    private fun fadeFactor(job: Job, tOut: Long): Float {
+        val dur = job.outputDurationUs
+        var f = 1f
+        if (job.fadeInUs > 0 && tOut < job.fadeInUs) f = minOf(f, tOut.toFloat() / job.fadeInUs)
+        if (job.fadeOutUs > 0 && dur - tOut < job.fadeOutUs) f = minOf(f, (dur - tOut).toFloat() / job.fadeOutUs)
+        return f.coerceIn(0f, 1f)
+    }
+
+    private fun createEncoder(mime: String, fps: Float): MediaCodec {
+        fun format(withRate: Boolean) = MediaFormat.createVideoFormat(mime, output.width, output.height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, settings.bitrate)
-            setInteger(MediaFormat.KEY_FRAME_RATE, clip.frameRate.roundToInt())
+            setInteger(MediaFormat.KEY_BIT_RATE, output.bitrate)
+            setInteger(MediaFormat.KEY_FRAME_RATE, fps.roundToInt())
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
             setInteger(MediaFormat.KEY_PRIORITY, 1) // gerçek zamanlı değil: olabildiğince hızlı
             if (withRate) setInteger(MediaFormat.KEY_OPERATING_RATE, Short.MAX_VALUE.toInt())
@@ -190,7 +265,7 @@ class Exporter(
             ci.isEncoder && ci.supportedTypes.any { it.equals(mime, true) } &&
                 runCatching { ci.getCapabilitiesForType(mime).videoCapabilities.isSizeSupported(w, h) }.getOrDefault(false)
         }
-        if (!ok) throw IllegalStateException("Bu telefonun kodlayıcısı ${w}x$h ${if (settings.hevc) "H.265" else "H.264"} desteklemiyor")
+        if (!ok) throw IllegalStateException("Bu telefonun kodlayıcısı ${w}x$h ${if (output.hevc) "H.265" else "H.264"} desteklemiyor")
     }
 
     private fun drain(endOfStream: Boolean) {
@@ -206,6 +281,9 @@ class Exporter(
                     audioFormat?.let { audioTrack = muxer.addTrack(it) }
                     muxer.start()
                     muxerStarted = true
+                    // Muxer başlamadan önce okunan ses örnekleri
+                    pending.forEach { (b, inf) -> muxer.writeSampleData(audioTrack, b, inf); audioWritten++ }
+                    pending.clear()
                 }
                 i >= 0 -> {
                     val buf = encoder.getOutputBuffer(i)!!
@@ -223,66 +301,58 @@ class Exporter(
         }
     }
 
-    // Ses: yeniden kodlanmadan, görüntüyle iç içe (interleaved) yazılır.
-    private var audioEx: MediaExtractor? = null
-    private var audioBuf: ByteBuffer? = null
-    private var audioPending = false
-    private val audioInfo = MediaCodec.BufferInfo()
+    /** Muxer başlamadan gelen ses örnekleri. */
+    private val pending = ArrayList<Pair<ByteBuffer, MediaCodec.BufferInfo>>()
 
-    private fun openAudio(fd: java.io.FileDescriptor, start: Long) {
-        if (!settings.includeAudio) return
-        val a = clip.audioTrack ?: return
+    /** Bir parçanın sesi: yeniden kodlanmadan, görüntüyle iç içe yazılır. */
+    private inner class AudioCopy(private val ex: MediaExtractor, private val job: Job, maxSize: Int) {
+        private val buf = ByteBuffer.allocate(maxSize)
+        private val ai = MediaCodec.BufferInfo()
+        private var hasPending = false
+        private var done = false
+
+        /** Kaynak zamanı [limitUs]'ya kadar olan örnekleri, [timeline] kaymasıyla yazar. */
+        fun writeUpTo(limitUs: Long, timeline: Long) {
+            if (done || audioTrack < 0 && muxerStarted) return
+            while (true) {
+                if (!hasPending) {
+                    buf.clear()
+                    val n = ex.readSampleData(buf, 0)
+                    if (n < 0) { done = true; return }
+                    val t = ex.sampleTime
+                    ex.advance()
+                    if (t > job.endUs) { done = true; return }
+                    if (t < job.startUs) continue
+                    ai.set(0, n, timeline + (t - job.startUs), MediaCodec.BUFFER_FLAG_KEY_FRAME)
+                    hasPending = true
+                }
+                if (ai.presentationTimeUs - timeline + job.startUs > limitUs) return
+                buf.position(0); buf.limit(ai.size)
+                if (muxerStarted) {
+                    muxer.writeSampleData(audioTrack, buf, ai)
+                    audioWritten++
+                } else {
+                    val copy = ByteBuffer.allocate(ai.size).put(buf).also { it.flip() }
+                    pending += copy to MediaCodec.BufferInfo().also { it.set(0, ai.size, ai.presentationTimeUs, ai.flags) }
+                }
+                hasPending = false
+            }
+        }
+
+        fun close() = ex.release()
+    }
+
+    private fun openAudio(pfd: ParcelFileDescriptor, job: Job): AudioCopy? {
+        if (audioFormat == null) return null
+        val a = job.clip.audioTrack ?: return null
         val ex = MediaExtractor()
-        ex.setDataSource(fd)
+        ex.setDataSource(pfd.fileDescriptor)
         ex.selectTrack(a)
-        ex.seekTo(start, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+        ex.seekTo(job.startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         val fmt = ex.getTrackFormat(a)
         val size = if (fmt.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) fmt.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE) else 64 * 1024
-        audioBuf = ByteBuffer.allocate(size)
-        audioEx = ex
+        return AudioCopy(ex, job, size)
     }
-
-    /** Başlangıçtan [limitUs] konumuna kadar olan ses örneklerini yazar. */
-    private fun writeAudioUpTo(limitUs: Long, start: Long, end: Long) {
-        val ex = audioEx ?: return
-        val buf = audioBuf ?: return
-        if (!muxerStarted || audioTrack < 0) return
-        while (true) {
-            if (!audioPending) {
-                buf.clear()
-                val n = ex.readSampleData(buf, 0)
-                if (n < 0) { closeAudio(); return }
-                val t = ex.sampleTime
-                if (t > end) { closeAudio(); return }
-                audioInfo.set(0, n, t - start, MediaCodec.BUFFER_FLAG_KEY_FRAME)
-                audioPending = true
-                ex.advance()
-                if (t < start) { audioPending = false; continue }
-            }
-            if (audioInfo.presentationTimeUs + start > limitUs) return
-            buf.position(0); buf.limit(audioInfo.size)
-            muxer.writeSampleData(audioTrack, buf, audioInfo)
-            audioWritten++
-            audioPending = false
-        }
-    }
-
-    private fun closeAudio() {
-        audioEx?.release()
-        audioEx = null
-    }
-
-    /** Test ve teşhis için: 360° bilgisi eklendi mi. */
-    var sphericalTagged = false
-        private set
-
-    /** Test ve teşhis için: yazılan ses örneği sayısı. */
-    var audioWritten = 0
-        private set
-
-    /** Test ve teşhis için: yazılan görüntü karesi sayısı. */
-    var videoWritten = 0
-        private set
 
     private fun createOutput(): Uri {
         val name = "X5_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"

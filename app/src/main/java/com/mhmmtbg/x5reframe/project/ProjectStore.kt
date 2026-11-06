@@ -13,18 +13,35 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-/** Kaydedilmiş bir düzenleme projesi. */
-data class Project(
+enum class Transition(val label: String) { CUT("Kesme"), FADE("Siyaha geçiş") }
+
+/** Projede sıralı bir klip parçası: kaynak dosya + o parçanın düzenlemesi. */
+data class Segment(
     val id: String,
-    val name: String,
     val clipUri: Uri,
     val clipName: String,
     val durationUs: Long,
-    val createdAt: Long,
-    val updatedAt: Long,
     val edit: EditState,
     val lrvUri: Uri? = null,
-)
+    /** 0,25..4 */
+    val speed: Double = 1.0,
+    /** Bu parçadan sonrakine geçiş. */
+    val transitionOut: Transition = Transition.CUT,
+) {
+    val outputDurationUs: Long get() = ((edit.outUs - edit.inUs) / speed).toLong()
+}
+
+/** Kaydedilmiş bir düzenleme projesi: sıralı parçalar. */
+data class Project(
+    val id: String,
+    val name: String,
+    val createdAt: Long,
+    val updatedAt: Long,
+    val segments: List<Segment>,
+) {
+    val totalDurationUs: Long get() = segments.sumOf { it.outputDurationUs }
+    val keyframeCount: Int get() = segments.sumOf { s -> s.edit.keyframes.size + s.edit.extraPanes.sumOf { it.keyframes.size } }
+}
 
 /** Projeleri uygulamanın kendi klasöründe JSON olarak saklar (internet, hesap yok). */
 class ProjectStore(context: Context) {
@@ -40,12 +57,15 @@ class ProjectStore(context: Context) {
     fun create(clipUri: Uri, clipName: String, durationUs: Long, lrvUri: Uri? = null): Project {
         val now = System.currentTimeMillis()
         val p = Project(
-            UUID.randomUUID().toString(), clipName.substringBeforeLast('.'), clipUri, clipName, durationUs, now, now,
-            EditState(outUs = durationUs), lrvUri,
+            UUID.randomUUID().toString(), clipName.substringBeforeLast('.'), now, now,
+            listOf(newSegment(clipUri, clipName, durationUs, lrvUri)),
         )
         save(p)
         return p
     }
+
+    fun newSegment(clipUri: Uri, clipName: String, durationUs: Long, lrvUri: Uri?, edit: EditState? = null) =
+        Segment(UUID.randomUUID().toString(), clipUri, clipName, durationUs, edit ?: EditState(outUs = durationUs), lrvUri)
 
     @Synchronized
     fun save(p: Project) {
@@ -78,20 +98,36 @@ class ProjectStore(context: Context) {
 
     companion object {
         fun toJson(p: Project) = JSONObject().apply {
-            put("version", 1)
+            put("version", 2)
             put("id", p.id); put("name", p.name)
-            put("clipUri", p.clipUri.toString()); put("clipName", p.clipName)
-            put("durationUs", p.durationUs)
             put("createdAt", p.createdAt); put("updatedAt", p.updatedAt)
-            put("edit", editToJson(p.edit))
-            p.lrvUri?.let { put("lrvUri", it.toString()) }
+            put("segments", JSONArray().apply { p.segments.forEach { put(segmentToJson(it)) } })
         }
 
-        fun fromJson(o: JSONObject) = Project(
-            o.getString("id"), o.getString("name"), Uri.parse(o.getString("clipUri")), o.getString("clipName"),
-            o.getLong("durationUs"), o.getLong("createdAt"), o.getLong("updatedAt"), editFromJson(o.getJSONObject("edit")),
+        private fun segmentToJson(s: Segment) = JSONObject().apply {
+            put("id", s.id)
+            put("clipUri", s.clipUri.toString()); put("clipName", s.clipName)
+            put("durationUs", s.durationUs)
+            put("edit", editToJson(s.edit))
+            s.lrvUri?.let { put("lrvUri", it.toString()) }
+            put("speed", s.speed); put("transitionOut", s.transitionOut.name)
+        }
+
+        private fun segmentFromJson(o: JSONObject) = Segment(
+            o.optString("id").ifEmpty { UUID.randomUUID().toString() },
+            Uri.parse(o.getString("clipUri")), o.getString("clipName"), o.getLong("durationUs"),
+            editFromJson(o.getJSONObject("edit")),
             o.optString("lrvUri").takeIf { it.isNotEmpty() }?.let(Uri::parse),
+            o.optDouble("speed", 1.0),
+            runCatching { Transition.valueOf(o.optString("transitionOut")) }.getOrDefault(Transition.CUT),
         )
+
+        fun fromJson(o: JSONObject): Project {
+            // Sürüm 1: tek klip alanları doğrudan projede.
+            val segs = o.optJSONArray("segments")?.let { arr -> (0 until arr.length()).map { segmentFromJson(arr.getJSONObject(it)) } }
+                ?: listOf(segmentFromJson(o))
+            return Project(o.getString("id"), o.getString("name"), o.getLong("createdAt"), o.getLong("updatedAt"), segs)
+        }
 
         fun editToJson(e: EditState) = JSONObject().apply {
             put("inUs", e.inUs); put("outUs", e.outUs)

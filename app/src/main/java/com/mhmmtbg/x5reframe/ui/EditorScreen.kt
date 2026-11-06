@@ -68,7 +68,7 @@ class EditorActions(
     val back: () -> Unit,
     val playPause: () -> Unit,
     val seek: (Long) -> Unit,
-    val startExport: () -> Unit,
+    val startExport: (whole: Boolean) -> Unit,
     val cancelExport: () -> Unit,
     val open: (Uri) -> Unit,
     val share: (Uri) -> Unit,
@@ -85,6 +85,7 @@ fun EditorScreen(
     actions: EditorActions,
     surfaceFactory: (Context) -> SurfaceView,
     timelineFactory: (Context) -> TimelineView,
+    seq: SequenceUi,
 ) {
     var tool by rememberSaveable { mutableStateOf(Tool.FRAME) }
     var showExport by remember { mutableStateOf(false) }
@@ -125,6 +126,7 @@ fun EditorScreen(
         }
 
         Transport(c, actions)
+        SequenceStrip(seq)
 
         AndroidView(
             factory = timelineFactory,
@@ -160,7 +162,7 @@ fun EditorScreen(
             containerColor = Palette.Surface,
             tonalElevation = 0.dp,
         ) {
-            ExportSheet(c, actions)
+            ExportSheet(c, actions, seq)
         }
     }
 }
@@ -499,9 +501,10 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
 }
 
 @Composable
-private fun ExportSheet(c: EditorController, a: EditorActions) {
+private fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi) {
     val s = c.state
     val (w, h) = s.outputSize()
+    var whole by remember { mutableStateOf(seq.segments.size > 1) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Dışa aktar", style = MaterialTheme.typography.titleMedium)
         Text(
@@ -545,8 +548,13 @@ private fun ExportSheet(c: EditorController, a: EditorActions) {
                     if (s.hevc) "H.265: aynı kalitede daha küçük dosya; bazı eski cihazlar oynatamayabilir." else "H.264: her yerde oynar.",
                     color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
                 )
+                if (seq.segments.size > 1) {
+                    LabeledRow("Kapsam") {
+                        Segmented(listOf(true, false), whole, { if (it) "Tüm proje (${seq.segments.size})" else "Bu parça" }, { whole = it }, Modifier.weight(1f))
+                    }
+                }
                 Button(
-                    onClick = a.startExport, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), elevation = null,
+                    onClick = { a.startExport(whole) }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), elevation = null,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Palette.Accent, contentColor = Palette.OnAccent),
                 ) { Text("Başlat") }
