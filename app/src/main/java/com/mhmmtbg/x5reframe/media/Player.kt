@@ -51,6 +51,8 @@ class Player(
     private var playStartPts = 0L
     private val frameDurUs = (1_000_000 / clip.frameRate).toLong()
 
+    private val audio: AudioPreview? = clip.audioTrack?.let { AudioPreview(pfd.fileDescriptor, it) }
+
     @Volatile private var pendingSeek = -1L
     @Volatile private var redrawQueued = false
     private var released = false
@@ -107,12 +109,14 @@ class Player(
         playing = true
         playStartWall = SystemClock.elapsedRealtime()
         playStartPts = source.currentPts
+        audio?.start(source.currentPts)
         main.post { listener.onPlayingChanged(true) }
         handler.post(loop)
     }
 
     fun pause() {
         playing = false
+        handler.post { audio?.stop() }
         main.post { listener.onPlayingChanged(false) }
     }
 
@@ -129,7 +133,10 @@ class Player(
             val pts = source.seekAndShow(target, frameDurUs)
             drawNow()
             if (pts >= 0) postPosition(pts)
-            if (playing) { playStartWall = SystemClock.elapsedRealtime(); playStartPts = source.currentPts }
+            if (playing) {
+                playStartWall = SystemClock.elapsedRealtime(); playStartPts = source.currentPts
+                audio?.start(source.currentPts)
+            }
         } catch (t: Throwable) { error(t) }
     }
 
@@ -140,11 +147,17 @@ class Player(
                 val pts = source.next(true)
                 if (pts < 0) {
                     playing = false
+                    audio?.stop()
                     main.post { listener.onPlayingChanged(false) }
                     return
                 }
-                val due = playStartWall + (pts - playStartPts) / 1000
-                val wait = due - SystemClock.elapsedRealtime()
+                // Ses çalıyorsa ana saat sestir; yoksa duvar saati.
+                val audioPos = audio?.positionUs()
+                val wait = if (audioPos != null) {
+                    (pts - audioPos) / 1000
+                } else {
+                    playStartWall + (pts - playStartPts) / 1000 - SystemClock.elapsedRealtime()
+                }
                 if (wait > 0) Thread.sleep(wait.coerceAtMost(100))
                 drawNow()
                 postPosition(pts)
@@ -173,6 +186,7 @@ class Player(
         playing = false
         handler.post {
             released = true
+            runCatching { audio?.stop() }
             runCatching { if (::source.isInitialized) source.release() }
             runCatching { if (::program.isInitialized) program.release() }
             runCatching {

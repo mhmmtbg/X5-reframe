@@ -94,6 +94,7 @@ class Exporter(
             val end = settings.endUs.coerceAtMost(clip.durationUs)
             val total = (end - start).coerceAtLeast(1)
 
+            openAudio(inPfd.fileDescriptor, start)
             var pts = source.seekAndShow(start, frameDur)
             var frames = 0
             var lastReport = 0L
@@ -103,6 +104,7 @@ class Exporter(
                 egl.swap(win)
                 frames++
                 drain(false)
+                writeAudioUpTo(pts, start, end)
 
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastReport > 250) {
@@ -119,7 +121,8 @@ class Exporter(
             drain(true)
             if (!muxerStarted) throw IllegalStateException("Kodlayıcı çıktı üretmedi")
 
-            copyAudio(inPfd.fileDescriptor, start, end)
+            writeAudioUpTo(end, start, end)
+            closeAudio()
 
             muxer.stop()
             muxer.release()
@@ -134,6 +137,7 @@ class Exporter(
             outUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             listener.onFailed(if (t is InterruptedException) "İptal edildi" else (t.message ?: t.javaClass.simpleName))
         } finally {
+            runCatching { closeAudio() }
             runCatching { if (::encoder.isInitialized) { encoder.stop(); encoder.release() } }
             runCatching { source?.release() }
             runCatching { program?.release() }
@@ -191,6 +195,7 @@ class Exporter(
                         buf.position(info.offset)
                         buf.limit(info.offset + info.size)
                         muxer.writeSampleData(videoTrack, buf, info)
+                        videoWritten++
                     }
                     encoder.releaseOutputBuffer(i, false)
                     if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
@@ -199,31 +204,61 @@ class Exporter(
         }
     }
 
-    private fun copyAudio(fd: java.io.FileDescriptor, start: Long, end: Long) {
+    // Ses: yeniden kodlanmadan, görüntüyle iç içe (interleaved) yazılır.
+    private var audioEx: MediaExtractor? = null
+    private var audioBuf: ByteBuffer? = null
+    private var audioPending = false
+    private val audioInfo = MediaCodec.BufferInfo()
+
+    private fun openAudio(fd: java.io.FileDescriptor, start: Long) {
         val a = clip.audioTrack ?: return
-        if (audioTrack < 0) return
         val ex = MediaExtractor()
         ex.setDataSource(fd)
         ex.selectTrack(a)
         ex.seekTo(start, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         val fmt = ex.getTrackFormat(a)
         val size = if (fmt.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) fmt.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE) else 64 * 1024
-        val buf = ByteBuffer.allocate(size)
-        val ai = MediaCodec.BufferInfo()
-        while (true) {
-            buf.clear()
-            val n = ex.readSampleData(buf, 0)
-            if (n < 0) break
-            val t = ex.sampleTime
-            if (t > end) break
-            if (t >= start) {
-                ai.set(0, n, t - start, if (ex.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
-                muxer.writeSampleData(audioTrack, buf, ai)
-            }
-            ex.advance()
-        }
-        ex.release()
+        audioBuf = ByteBuffer.allocate(size)
+        audioEx = ex
     }
+
+    /** Başlangıçtan [limitUs] konumuna kadar olan ses örneklerini yazar. */
+    private fun writeAudioUpTo(limitUs: Long, start: Long, end: Long) {
+        val ex = audioEx ?: return
+        val buf = audioBuf ?: return
+        if (!muxerStarted || audioTrack < 0) return
+        while (true) {
+            if (!audioPending) {
+                buf.clear()
+                val n = ex.readSampleData(buf, 0)
+                if (n < 0) { closeAudio(); return }
+                val t = ex.sampleTime
+                if (t > end) { closeAudio(); return }
+                audioInfo.set(0, n, t - start, MediaCodec.BUFFER_FLAG_KEY_FRAME)
+                audioPending = true
+                ex.advance()
+                if (t < start) { audioPending = false; continue }
+            }
+            if (audioInfo.presentationTimeUs + start > limitUs) return
+            buf.position(0); buf.limit(audioInfo.size)
+            muxer.writeSampleData(audioTrack, buf, audioInfo)
+            audioWritten++
+            audioPending = false
+        }
+    }
+
+    private fun closeAudio() {
+        audioEx?.release()
+        audioEx = null
+    }
+
+    /** Test ve teşhis için: yazılan ses örneği sayısı. */
+    var audioWritten = 0
+        private set
+
+    /** Test ve teşhis için: yazılan görüntü karesi sayısı. */
+    var videoWritten = 0
+        private set
 
     private fun createOutput(): Uri {
         val name = "X5_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"

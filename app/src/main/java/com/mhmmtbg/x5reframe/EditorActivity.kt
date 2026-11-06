@@ -8,12 +8,12 @@ import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.HapticFeedbackConstants
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.ProgressBar
-import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
@@ -24,6 +24,7 @@ import com.mhmmtbg.x5reframe.media.Player
 import com.mhmmtbg.x5reframe.model.Keyframe
 import com.mhmmtbg.x5reframe.model.Keyframes
 import com.mhmmtbg.x5reframe.model.ViewParams
+import com.mhmmtbg.x5reframe.ui.TimelineView
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -47,7 +48,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private lateinit var timeText: TextView
     private lateinit var editText: TextView
     private lateinit var statusText: TextView
-    private lateinit var seek: SeekBar
+    private lateinit var timeline: TimelineView
+    private lateinit var feedback: TextView
     private lateinit var progress: ProgressBar
     private lateinit var playBtn: Button
     private lateinit var exportBtn: Button
@@ -73,7 +75,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         timeText = findViewById(R.id.timeText)
         editText = findViewById(R.id.editText)
         statusText = findViewById(R.id.statusText)
-        seek = findViewById(R.id.seek)
+        timeline = findViewById(R.id.timeline)
+        feedback = findViewById(R.id.feedback)
         progress = findViewById(R.id.progress)
         playBtn = findViewById(R.id.playBtn)
         exportBtn = findViewById(R.id.exportBtn)
@@ -173,33 +176,56 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             val p = player ?: return@setOnClickListener
             if (p.playing) p.pause() else { manual = false; p.play() }
         }
-        seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(sb: SeekBar, value: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    manual = false
-                    player?.seekTo(clip.durationUs * value / 1000)
-                }
+        timeline.durationUs = clip.durationUs
+        timeline.inUs = inUs
+        timeline.outUs = outUs
+        timeline.listener = object : TimelineView.Listener {
+            override fun onScrub(us: Long, fromUser: Boolean) {
+                manual = false
+                positionUs = us
+                player?.seekTo(us)
+                updateLabels()
             }
-            override fun onStartTrackingTouch(sb: SeekBar) { userSeeking = true; player?.pause() }
-            override fun onStopTrackingTouch(sb: SeekBar) { userSeeking = false }
-        })
-        findViewById<Button>(R.id.inBtn).setOnClickListener {
-            inUs = positionUs.coerceAtMost(outUs - 100_000); updateLabels()
+            override fun onScrubStart() { userSeeking = true; player?.pause() }
+            override fun onScrubEnd() { userSeeking = false }
+            override fun onTrimChanged(inUs: Long, outUs: Long) {
+                this@EditorActivity.inUs = inUs
+                this@EditorActivity.outUs = outUs
+                updateLabels()
+            }
         }
-        findViewById<Button>(R.id.outBtn).setOnClickListener {
-            outUs = positionUs.coerceAtLeast(inUs + 100_000); updateLabels()
-        }
-        findViewById<Button>(R.id.keyBtn).setOnClickListener {
-            keyframes.put(Keyframe(positionUs, currentView(positionUs)))
-            editView = currentView(positionUs)
-            manual = false
+        findViewById<Button>(R.id.inBtn).setOnClickListener { v ->
+            inUs = positionUs.coerceAtMost(outUs - 200_000).coerceAtLeast(0)
+            timeline.inUs = inUs
+            confirm(v, "Başlangıç: ${fmt(inUs)}")
             updateLabels()
-            toast("Anahtar kare eklendi (${fmt(positionUs)})")
         }
-        findViewById<Button>(R.id.keyDelBtn).setOnClickListener {
-            val removed = keyframes.removeNear(positionUs)
-            if (!removed && !keyframes.isEmpty) toast("Bu konumda anahtar kare yok")
-            player?.requestRedraw(); updateLabels()
+        findViewById<Button>(R.id.outBtn).setOnClickListener { v ->
+            outUs = positionUs.coerceAtLeast(inUs + 200_000).coerceAtMost(clip.durationUs)
+            timeline.outUs = outUs
+            confirm(v, "Bitiş: ${fmt(outUs)}")
+            updateLabels()
+        }
+        findViewById<Button>(R.id.keyBtn).setOnClickListener { v ->
+            val existed = keyframeNear(positionUs) != null
+            val view = currentView(positionUs)
+            keyframes.put(Keyframe(positionUs, view))
+            editView = view
+            manual = false
+            timeline.flashKeyframe(keyframes.items.first { it.timeUs == positionUs }.timeUs)
+            confirm(v, if (existed) "Anahtar kare güncellendi (${fmt(positionUs)})" else "Anahtar kare eklendi (${fmt(positionUs)})")
+            updateLabels()
+        }
+        findViewById<Button>(R.id.keyDelBtn).setOnClickListener { v ->
+            val near = keyframeNear(positionUs)
+            if (near == null) {
+                reject(v, if (keyframes.isEmpty) "Silinecek anahtar kare yok" else "Oynatma çizgisini bir anahtar karenin üstüne getir")
+            } else {
+                keyframes.removeNear(near.timeUs, 1)
+                player?.requestRedraw()
+                confirm(v, "Anahtar kare silindi (${fmt(near.timeUs)})")
+            }
+            updateLabels()
         }
         findViewById<Button>(R.id.aspectBtn).setOnClickListener {
             aspect = Aspect.values()[(aspect.ordinal + 1) % Aspect.values().size]
@@ -279,6 +305,10 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         findViewById<Button>(R.id.resBtn).text = quality.label
         findViewById<Button>(R.id.codecBtn).text = if (hevc) "H.265" else "H.264"
         findViewById<Button>(R.id.wideBtn).text = if (currentView(positionUs).wide) "Geniş ✓" else "Geniş"
+        timeline.keyframes = keyframes.items.map { it.timeUs }
+        val near = keyframeNear(positionUs)
+        findViewById<Button>(R.id.keyBtn).text = if (near != null) "Kare ↻" else "Kare +"
+        findViewById<Button>(R.id.keyDelBtn).alpha = if (near != null) 1f else 0.45f
         val v = currentView(positionUs)
         timeText.text = "${fmt(positionUs)} / ${fmt(clip.durationUs)}   yön ${v.yaw.toInt()}° eğim ${v.pitch.toInt()}° açı ${v.fov.toInt()}°"
         editText.text = "Aralık ${fmt(inUs)} – ${fmt(outUs)} (${"%.1f".format((outUs - inUs) / 1e6)} sn) · " +
@@ -292,10 +322,33 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
+    /** Oynatma çizgisine ~0,3 sn yakın anahtar kare. */
+    private fun keyframeNear(us: Long): Keyframe? =
+        keyframes.items.minByOrNull { kotlin.math.abs(it.timeUs - us) }?.takeIf { kotlin.math.abs(it.timeUs - us) <= 300_000 }
+
+    private val hideFeedback = Runnable { feedback.visibility = View.GONE }
+
+    private fun showFeedback(text: String) {
+        feedback.text = text
+        feedback.visibility = View.VISIBLE
+        feedback.removeCallbacks(hideFeedback)
+        feedback.postDelayed(hideFeedback, 1600)
+    }
+
+    private fun confirm(v: View, text: String) {
+        v.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY)
+        showFeedback("✓ $text")
+    }
+
+    private fun reject(v: View, text: String) {
+        v.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS)
+        showFeedback(text)
+    }
+
     // Player.Listener
     override fun onPosition(us: Long) {
         positionUs = us
-        if (!userSeeking && clip.durationUs > 0) seek.progress = (us * 1000 / clip.durationUs).toInt()
+        if (!userSeeking) timeline.positionUs = us
         updateLabels()
     }
 

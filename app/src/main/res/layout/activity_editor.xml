@@ -17,6 +17,21 @@
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:layout_gravity="center" />
+
+        <TextView
+            android:id="@+id/feedback"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="top|center_horizontal"
+            android:layout_marginTop="12dp"
+            android:background="#E6202020"
+            android:paddingStart="14dp"
+            android:paddingTop="8dp"
+            android:paddingEnd="14dp"
+            android:paddingBottom="8dp"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:visibility="gone" />
     </FrameLayout>
 
     <LinearLayout
@@ -33,12 +48,11 @@
             android:textColor="#DDDDDD"
             android:textSize="13sp" />
 
-        <SeekBar
-            android:id="@+id/seek"
+        <com.mhmmtbg.x5reframe.ui.TimelineView
+            android:id="@+id/timeline"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
-            android:max="1000" />
+            android:layout_marginTop="4dp" />
 
         <LinearLayout
             android:layout_width="match_parent"

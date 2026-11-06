@@ -1,0 +1,86 @@
+name: Emülatör testi
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - "tools/ci_emulator_test.sh"
+      - ".github/workflows/test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  INSV_ID: 1R4PdzliQXXfffxXTTiXfYU3nw-Lb81kh
+
+jobs:
+  emulator:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Örnek klip
+        timeout-minutes: 10
+        run: |
+          mkdir -p media out
+          curl -sSL --retry 3 -o media/clip.insv "https://drive.usercontent.google.com/download?id=$INSV_ID&export=download&confirm=t"
+          ls -la media
+
+      - name: Test APK'larını derle
+        run: gradle :app:assembleDebug :app:assembleDebugAndroidTest --no-daemon
+
+      - name: Emülatörde çalıştır
+        timeout-minutes: 35
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 33
+          arch: x86_64
+          target: google_apis
+          ram-size: 4096M
+          disk-size: 4096M
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          disable-animations: true
+          script: bash tools/ci_emulator_test.sh
+
+      - name: Çıktıyı incele
+        if: always()
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null || true
+          if [ -f out/export.mp4 ]; then
+            ffprobe -v error -show_streams -show_format -of json out/export.mp4 > out/export_ffprobe.json || true
+            ffmpeg -v error -y -ss 1.5 -i out/export.mp4 -frames:v 1 -q:v 3 out/export_frame.jpg || true
+            # Ses gerçekten ses mi: ortalama seviye
+            ffmpeg -v info -i out/export.mp4 -af volumedetect -vn -f null - 2> out/volume.txt || true
+            rm -f out/export.mp4
+          fi
+          echo "commit=${GITHUB_SHA}" > out/STATUS.txt
+          grep -E "BUILD (SUCCESSFUL|FAILED)|tests completed|FAILED" out/test.log >> out/STATUS.txt || true
+
+      - name: Sonucu ci-test dalına yaz
+        if: always()
+        run: |
+          mkdir -p out && cd out
+          git init -q -b ci-test
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "test ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" ci-test
