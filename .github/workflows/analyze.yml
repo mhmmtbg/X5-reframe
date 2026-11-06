@@ -1,0 +1,80 @@
+name: Örnek klip analizi
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tools/**"
+      - ".github/workflows/analyze.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  INSV_ID: 1R4PdzliQXXfffxXTTiXfYU3nw-Lb81kh
+  LRV_ID: 1MnqSVf1MKfwI4mCFDNDyhxS4TtAuHgSW
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Araçlar
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg > /dev/null
+          pip install -q gdown
+
+      - name: Drive'dan indir
+        run: |
+          mkdir -p media
+          gdown -q "$INSV_ID" -O media/clip.insv
+          gdown -q "$LRV_ID" -O media/clip.lrv
+          ls -la media
+
+      - name: Analiz
+        run: |
+          set -x
+          mkdir -p out
+          ls -la media > out/files.txt
+          for f in insv lrv; do
+            ffprobe -v error -show_format -show_streams -of json media/clip.$f > out/ffprobe_$f.json || true
+          done
+          python3 tools/dump_trailer.py media/clip.insv out/insv_trailer
+          python3 tools/dump_trailer.py media/clip.lrv out/lrv_trailer || true
+          # Her video izinden 2. saniyede birer kare (küçültülmüş).
+          for idx in 0 1 2; do
+            ffmpeg -v error -y -ss 2 -i media/clip.insv -map 0:v:$idx -frames:v 1 \
+              -vf "scale='min(2048,iw)':-2" -q:v 3 out/insv_v${idx}.jpg || true
+          done
+          ffmpeg -v error -y -ss 2 -i media/clip.lrv -map 0:v:0 -frames:v 1 -q:v 3 out/lrv_v0.jpg || true
+          # Varsa telemetry-parser ile jiroskop/kalibrasyon dökümü.
+          pip install -q telemetry-parser > out/telemetry_install.txt 2>&1 || true
+          python3 - <<'EOF' > out/telemetry.txt 2>&1 || true
+          import json, telemetry_parser
+          tp = telemetry_parser.Parser("media/clip.insv")
+          print("camera:", tp.camera, "model:", tp.model)
+          meta = tp.telemetry()
+          s = json.dumps(meta, default=str)
+          print("telemetry json length:", len(s))
+          open("out/telemetry.json", "w").write(s[:5_000_000])
+          try:
+              imu = tp.normalized_imu()
+              print("imu samples:", len(imu))
+              json.dump(imu[:2000], open("out/imu_head.json", "w"), default=str)
+          except Exception as e:
+              print("imu error:", e)
+          EOF
+
+      - name: Sonucu analysis dalına yaz
+        if: always()
+        run: |
+          mkdir -p out
+          cd out
+          git init -q -b analysis
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "analysis ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" analysis
