@@ -234,8 +234,15 @@ class ExportTest {
         val pfd = ctx.contentResolver.openFileDescriptor(lrv!!.uri, "r")!!
         try {
             val program = com.mhmmtbg.x5reframe.gl.ReframeProgram(clip.rig)
-            val src = com.mhmmtbg.x5reframe.media.SideBySideFrameSource(pfd.fileDescriptor, lrv.videoTrack, lrv.width, lrv.height)
-            val pts = src.seekAndShow(2_000_000, 33_366)
+            // Emülatörün yazılım çözücüsü önceki testlerden sonra bazen hata durumuna düşüyor: bir kez yeniden dene.
+            var src = com.mhmmtbg.x5reframe.media.SideBySideFrameSource(pfd.fileDescriptor, lrv.videoTrack, lrv.width, lrv.height)
+            val pts = runCatching { src.seekAndShow(2_000_000, 33_366) }.getOrElse {
+                log("lrv first attempt failed: $it")
+                src.release()
+                System.gc(); Thread.sleep(500)
+                src = com.mhmmtbg.x5reframe.media.SideBySideFrameSource(pfd.fileDescriptor, lrv.videoTrack, lrv.width, lrv.height)
+                src.seekAndShow(2_000_000, 33_366)
+            }
             log("lrv ${lrv.width}x${lrv.height} seek pts=$pts")
             assertTrue("LRV karesi çözülemedi", pts >= 1_900_000)
             val pb = egl.createPbuffer(64, 36)
