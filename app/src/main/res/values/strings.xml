@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">X5 Reframe</string>
+    <string name="pick_file">Klip seç (.insv / .lrv)</string>
+    <string name="no_file">Henüz klip seçilmedi.</string>
+</resources>

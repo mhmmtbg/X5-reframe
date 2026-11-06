@@ -1,0 +1,56 @@
+name: APK derle
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Derle
+        id: build
+        run: |
+          set -o pipefail
+          gradle :app:assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+
+      - name: APK'yı Actions'a yükle
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x5-reframe-apk
+          path: app/build/outputs/apk/release/*.apk
+
+      # Sonucu (APK + log) "builds" dalına yazar: telefondan doğrudan indirilebilir,
+      # ayrıca derleme hataları Actions API'sine erişmeden okunabilir.
+      - name: Sonucu builds dalına yaz
+        if: always()
+        run: |
+          mkdir -p out
+          cp build.log out/ 2>/dev/null || echo "log yok" > out/build.log
+          cp app/build/outputs/apk/release/*.apk out/x5-reframe.apk 2>/dev/null || true
+          echo "commit=${GITHUB_SHA}" > out/STATUS.txt
+          echo "result=${{ steps.build.outcome }}" >> out/STATUS.txt
+          date -u >> out/STATUS.txt
+          cd out
+          git init -q -b builds
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add -A
+          git commit -qm "build ${GITHUB_SHA::7}: ${{ steps.build.outcome }}"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" builds
