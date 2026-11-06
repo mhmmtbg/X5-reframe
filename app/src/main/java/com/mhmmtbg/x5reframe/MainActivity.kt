@@ -39,6 +39,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -130,9 +131,10 @@ class MainActivity : AppCompatActivity() {
     @Composable
     private fun Home() {
         var tab by remember { mutableStateOf(0) }
+        var about by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize().background(Palette.Background)) {
             Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 16.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                Image(painterResource(R.drawable.ic_launcher_foreground), null, Modifier.size(52.dp))
+                Image(painterResource(R.drawable.ic_launcher_foreground), "Hakkında", Modifier.size(52.dp).clickable { about = true })
                 Text("X5 Reframe", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                 Button(
                     onClick = { picker.launch(arrayOf("video/*", "application/octet-stream", "*/*")) },
@@ -150,8 +152,63 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
+            ExportBanner()
             if (tab == 0) ProjectsTab() else MediaTab()
         }
+        if (about) AboutDialog { about = false }
+    }
+
+    /** Arka planda süren ya da yeni biten dışa aktarım. */
+    @Composable
+    private fun ExportBanner() {
+        val st by com.mhmmtbg.x5reframe.export.ExportManager.state.collectAsState()
+        when (val s = st) {
+            is com.mhmmtbg.x5reframe.export.ExportManager.Status.Running -> Column(
+                Modifier.fillMaxWidth().padding(16.dp).background(Palette.Surface, RoundedCornerShape(12.dp)).padding(14.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Dışa aktarılıyor: ${s.request.title}", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.bodyMedium)
+                    TextButton(onClick = { com.mhmmtbg.x5reframe.export.ExportManager.cancelCurrent() }) { Text("İptal", color = Palette.Error) }
+                }
+                androidx.compose.material3.LinearProgressIndicator(
+                    progress = { s.fraction }, modifier = Modifier.fillMaxWidth().height(4.dp),
+                    color = Palette.Accent, trackColor = Palette.SurfaceHigh,
+                )
+                Text("%${(s.fraction * 100).toInt()}" + (if (s.speed > 0) " · ${"%.1f".format(s.speed)}× hız" else "") +
+                    (if (s.queued > 0) " · sırada ${s.queued}" else ""), color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 6.dp))
+            }
+            is com.mhmmtbg.x5reframe.export.ExportManager.Status.Done -> Row(
+                Modifier.fillMaxWidth().padding(16.dp).background(Palette.Surface, RoundedCornerShape(12.dp)).padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("✓ Hazır: ${s.request.title}", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+                TextButton(onClick = {
+                    runCatching { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(s.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
+                }) { Text("Aç", color = Palette.Accent) }
+            }
+            else -> {}
+        }
+    }
+
+    @Composable
+    private fun AboutDialog(onClose: () -> Unit) {
+        val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
+        AlertDialog(
+            onDismissRequest = onClose,
+            title = { Text("X5 Reframe $version") },
+            text = {
+                Text(
+                    "Insta360 X5 360° kliplerini telefonda, internetsiz kadrajlar ve hızlıca dışa aktarır.\n\n" +
+                        "Insta360 dosya yapısı ve lens modeli için telemetry-parser (AdrianEddy, MIT/Apache-2.0) belgelerinden yararlanıldı. " +
+                        "Yüz ve nesne algılama: Google ML Kit (cihaz içi). Simgeler: Material Icons (Apache-2.0).",
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = { TextButton(onClick = onClose) { Text("Tamam", color = Palette.Accent) } },
+            containerColor = Palette.Surface, tonalElevation = 0.dp,
+        )
     }
 
     @Composable
