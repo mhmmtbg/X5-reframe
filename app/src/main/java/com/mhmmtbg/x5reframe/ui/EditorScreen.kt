@@ -685,6 +685,8 @@ private fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi) 
                     "%${(ex.fraction * 100).toInt()}" + if (ex.speed > 0) "  ·  ${"%.1f".format(ex.speed)}× gerçek zaman" else "",
                     style = MaterialTheme.typography.bodyMedium,
                 )
+                if (c.exportQueued > 0) Text("Sırada ${c.exportQueued} iş daha var.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+                Text("Uygulamadan çıkabilir ya da ekranı kapatabilirsin; dışa aktarım bildirimde sürer.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
                 ActionButton("İptal", Modifier.fillMaxWidth()) { a.cancelExport() }
             }
             is EditorController.ExportUi.Done -> {
@@ -704,6 +706,9 @@ private fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi) 
                 }
                 LabeledRow("Kalite") {
                     Segmented(Quality.values().toList(), s.quality, { it.label }, { c.commit(s.copy(quality = it)) }, Modifier.weight(1f))
+                }
+                LabeledRow("Bit hızı") {
+                    Segmented(com.mhmmtbg.x5reframe.model.BitrateLevel.values().toList(), s.bitrate, { it.label }, { c.commit(s.copy(bitrate = it)) }, Modifier.weight(1f))
                 }
                 LabeledRow("Kodek") {
                     Segmented(listOf(false, true), s.hevc, { if (it) "H.265" else "H.264" }, { c.commit(s.copy(hevc = it)) }, Modifier.weight(1f))

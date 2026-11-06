@@ -32,6 +32,8 @@ data class Pane(val keyframes: List<Keyframe> = emptyList(), val baseView: ViewP
 /** Yeni bölmelerin varsayılan bakış yönleri: ön, arka, sağ, sol. */
 private val defaultPaneYaw = doubleArrayOf(0.0, 180.0, 90.0, -90.0)
 
+enum class BitrateLevel(val label: String, val factor: Float) { STANDARD("Standart", 1f), HIGH("Yüksek", 1.6f), MAX("En yüksek", 2.5f) }
+
 /** Geri alınabilir düzenleme durumu (değişmez). */
 data class EditState(
     val inUs: Long = 0,
@@ -53,6 +55,7 @@ data class EditState(
     val extraPanes: List<Pane> = emptyList(),
     /** Üst katmanlar (metin, görsel); listede sonraki üstte çizilir. */
     val layers: List<Layer> = emptyList(),
+    val bitrate: BitrateLevel = BitrateLevel.STANDARD,
 ) {
     fun pane(i: Int): Pane = if (i == 0) Pane(keyframes, baseView)
         else extraPanes.getOrNull(i - 1) ?: Pane(baseView = baseView.copy(yaw = ViewParams.wrap(baseView.yaw + defaultPaneYaw[i % 4])))

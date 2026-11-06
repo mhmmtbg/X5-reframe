@@ -48,7 +48,6 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private val saveHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val saveTask = Runnable { saveNow() }
     private var player: Player? = null
-    @Volatile private var exporter: Exporter? = null
     private var userScrubbing = false
     private var loadError by mutableStateOf<String?>(null)
     private var loaded by mutableStateOf(false)
@@ -213,6 +212,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             projectAudio = proj.audio
             setupMusicPreview()
             openSegment(0)
+            observeExports()
         }
     }
 
@@ -383,7 +383,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         },
         seek = { us -> c.clearLive(); c.positionUs = us; player?.seekTo(us) },
         startExport = { whole -> startExport(c, whole) },
-        cancelExport = { exporter?.cancelled = true },
+        cancelExport = { com.mhmmtbg.x5reframe.export.ExportManager.cancelCurrent() },
         open = { uri ->
             runCatching {
                 startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
@@ -530,78 +530,48 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     // ---- Dışa aktarım ----
 
+    private val notifPermission = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
+
+    /** Dışa aktarımı kuyruğa ekle; arka planda (ön plan hizmetinde) çalışır. */
     private fun startExport(c: EditorController, whole: Boolean) {
-        if (exporter != null || pendingExport) return
         player?.pause()
         storeCurrentEdit()
-        val cur = c.state // dışa aktarım sırasında yapılan düzenlemeler bu işi etkilemesin
-        val segs = if (whole) segments else listOf(segments[segIndex])
-        val (w, h) = cur.outputSize()
-        val mbps = if (cur.hevc) cur.quality.mbpsAvc * 7 / 10 else cur.quality.mbpsAvc
-        val spherical = segs.all { it.edit.copy(aspect = cur.aspect).isSpherical }
-        val au = projectAudio
-        val mix = if (au.needsMix) Exporter.Mix(
-            au.musicUri?.let { com.mhmmtbg.x5reframe.media.MusicSpec(it, au.musicVolume, au.loop, if (au.fade) 1_500_000 else 0, if (au.fade) 2_000_000 else 0) },
-            au.originalVolume,
-        ) else null
-        val output = Exporter.Output(w, h, cur.hevc, mbps * 1_000_000, cur.includeAudio, spherical, mix)
-        val totalSec = segs.sumOf { it.outputDurationUs } / 1e6f
-        c.exportUi = EditorController.ExportUi.Running(0f, 0f)
-        val listener = object : Exporter.Listener {
-            override fun onProgress(fraction: Float, speed: Float) = runOnUiThread {
-                if (exporter != null) c.exportUi = EditorController.ExportUi.Running(fraction, speed)
-            }
-            override fun onDone(uri: Uri, seconds: Float) = runOnUiThread {
-                endExport()
-                c.exportUi = EditorController.ExportUi.Done(uri, totalSec, seconds)
-                window.decorView.performHapticFeedback(
-                    if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
-                )
-            }
-            override fun onFailed(message: String) = runOnUiThread {
-                endExport()
-                if (message == CANCELLED) {
-                    c.exportUi = EditorController.ExportUi.Idle
-                    c.say("Dışa aktarım iptal edildi", false)
-                } else {
-                    c.exportUi = EditorController.ExportUi.Failed(message)
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            notifPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+        val cur = c.state
+        val segs = if (whole) segments else listOf(segments[segIndex].copy(edit = cur))
+        val title = project?.name ?: c.fileName
+        val req = com.mhmmtbg.x5reframe.export.ExportManager.enqueue(this, title, segs, cur, projectAudio, cur.bitrate.factor)
+        if (com.mhmmtbg.x5reframe.export.ExportManager.queuedCount > 0 && req.id > 1) c.say("Sıraya eklendi")
+    }
+
+    /** Kuyruk durumunu düzenleyici arayüzüne yansıt. */
+    private fun observeExports() {
+        lifecycleScope.launch {
+            com.mhmmtbg.x5reframe.export.ExportManager.state.collect { st ->
+                val c = controller ?: return@collect
+                c.exportUi = when (st) {
+                    is com.mhmmtbg.x5reframe.export.ExportManager.Status.Idle -> EditorController.ExportUi.Idle
+                    is com.mhmmtbg.x5reframe.export.ExportManager.Status.Running -> EditorController.ExportUi.Running(st.fraction, st.speed)
+                    is com.mhmmtbg.x5reframe.export.ExportManager.Status.Done -> {
+                        window.decorView.performHapticFeedback(
+                            if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+                        )
+                        EditorController.ExportUi.Done(st.uri, st.request.durationUs / 1e6f, st.seconds)
+                    }
+                    is com.mhmmtbg.x5reframe.export.ExportManager.Status.Failed -> EditorController.ExportUi.Failed(st.message)
+                }
+                c.exportQueued = when (st) {
+                    is com.mhmmtbg.x5reframe.export.ExportManager.Status.Running -> st.queued
+                    else -> com.mhmmtbg.x5reframe.export.ExportManager.queuedCount
                 }
             }
         }
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        val fade = 400_000L
-        Thread({
-            val jobs = runCatching {
-                segs.mapIndexed { i, seg ->
-                    val clip = clipCache[seg.clipUri.toString()] ?: ClipInfo.load(this, seg.clipUri, seg.lrvUri).also { clipCache[seg.clipUri.toString()] = it }
-                    val e = if (whole) seg.edit else cur
-                    val stab = if (e.stabMode == com.mhmmtbg.x5reframe.stab.StabMode.OFF) null else clip.imu?.let {
-                        com.mhmmtbg.x5reframe.stab.Stabilizer(it, com.mhmmtbg.x5reframe.stab.Stabilizer.rigFromImuFor(clip.cameraType))
-                    }
-                    Exporter.Job(
-                        clip, e.inUs, e.outUs, { t -> e.sceneAt(t) },
-                        { t -> stab?.base(t / 1e6, e.stabMode, e.stabStrength, e.inUs / 1e6) },
-                        e.layout.rects, e.stitchInv, seg.speed,
-                        layers = e.layers,
-                        fadeInUs = if (i > 0 && segs[i - 1].transitionOut == com.mhmmtbg.x5reframe.project.Transition.FADE) fade else 0,
-                        fadeOutUs = if (i < segs.size - 1 && seg.transitionOut == com.mhmmtbg.x5reframe.project.Transition.FADE) fade else 0,
-                    )
-                }
-            }.getOrElse { listener.onFailed(it.message ?: "Klip açılamadı"); return@Thread }
-            val ex = Exporter(applicationContext, output, jobs, listener)
-            exporter = ex
-            ex.run()
-        }, "export").start()
-        pendingExport = true
     }
 
-    @Volatile private var pendingExport = false
 
-    private fun endExport() {
-        exporter = null
-        pendingExport = false
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-    }
 
     // ---- Player.Listener ----
 
@@ -670,7 +640,6 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     override fun onDestroy() {
         super.onDestroy()
-        exporter?.cancelled = true
         autoEditor?.cancelled = true
         player?.release()
         musicPreview?.release()

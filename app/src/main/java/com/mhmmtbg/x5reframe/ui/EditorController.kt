@@ -42,6 +42,8 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
     var feedback by mutableStateOf<Feedback?>(null)
         private set
     var exportUi by mutableStateOf<ExportUi>(ExportUi.Idle)
+    /** Kuyrukta bekleyen dışa aktarım sayısı. */
+    var exportQueued by mutableIntStateOf(0)
     var previewMuted by mutableStateOf(false)
     private var feedbackId by mutableIntStateOf(0)
 
