@@ -75,7 +75,7 @@ class TrackDecoder(fd: FileDescriptor, track: Int, surface: Surface, realtime: B
 
     fun release(index: Int, render: Boolean) = codec.releaseOutputBuffer(index, render)
 
-    override fun seek(us: Long) {
+    fun seek(us: Long) {
         extractor.seekTo(us, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
         codec.flush()
         inputEos = false
