@@ -47,8 +47,7 @@ object SphericalMetadata {
         val fileSize = ch.size()
         // Üst düzey kutuları dolaş.
         var pos = 0L
-        var moov: Box? = null
-        var mdatOffset = -1L
+        val top = ArrayList<Box>()
         val hdr = ByteBuffer.allocate(16).order(ByteOrder.BIG_ENDIAN)
         while (pos + 8 <= fileSize) {
             hdr.clear(); ch.read(hdr, pos)
@@ -57,15 +56,20 @@ object SphericalMetadata {
             if (size == 1L) size = hdr.getLong(8)
             if (size == 0L) size = fileSize - pos
             if (size < 8) return false
-            if (type == "moov") moov = Box(type, pos, size, 8)
-            if (type == "mdat") mdatOffset = pos
+            top += Box(type, pos, size, 8)
             pos += size
         }
-        val m = moov ?: return false
-        // moov mdat'tan önceyse ofsetler kayar; bu durumda dokunma.
-        if (mdatOffset < 0 || mdatOffset > m.offset) return false
-        if (m.offset + m.size != fileSize) return false
+        val mi = top.indexOfFirst { it.type == "moov" }
+        if (mi < 0) return false
+        val m = top[mi]
         if (m.size > 64L * 1024 * 1024) return false
+        val xmlLen = 8 + 16 + XML.toByteArray(Charsets.UTF_8).size
+        // İki güvenli durum: moov dosyanın sonunda, ya da hemen arkasında yeterli boş (free) kutu var
+        // (MediaMuxer moov için dosya başında yer ayırır). Her ikisinde de medya ofsetleri değişmez.
+        val next = top.getOrNull(mi + 1)
+        val atEnd = m.offset + m.size == fileSize
+        val freeAfter = next != null && (next.type == "free" || next.type == "skip") && next.size >= xmlLen + 8
+        if (!atEnd && !freeAfter) return false
 
         val moovBuf = ByteBuffer.allocate(m.size.toInt()).order(ByteOrder.BIG_ENDIAN)
         ch.read(moovBuf, m.offset)
@@ -85,6 +89,12 @@ object SphericalMetadata {
         newMoov.flip()
         var w = m.offset
         while (newMoov.hasRemaining()) w += ch.write(newMoov, w)
+        if (!atEnd && freeAfter) {
+            // Boş kutuyu küçült: yeni boyutuyla başlığını moov'un hemen arkasına yaz.
+            val f = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN)
+            f.putInt((next!!.size - uuidSize).toInt()); f.put("free".toByteArray(Charsets.ISO_8859_1)); f.flip()
+            ch.write(f, w)
+        }
         return true
     }
 
