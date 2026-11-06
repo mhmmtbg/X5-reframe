@@ -74,10 +74,14 @@ class EditorActions(
     val share: (Uri) -> Unit,
     val setMuted: (Boolean) -> Unit,
     val pickImage: () -> Unit,
+    val autoFrame: () -> Unit,
+    val autoHighlights: (targetSec: Int) -> Unit,
+    val autoTrack: () -> Unit,
+    val cancelAuto: () -> Unit,
     val step: (Boolean) -> Unit,
 )
 
-private enum class Tool(val label: String) { FRAME("Kadraj"), MULTI("Çoklu"), TRIM("Kes"), STAB("Sabit"), LAYER("Katman"), AUDIO("Ses") }
+private enum class Tool(val label: String) { FRAME("Kadraj"), AUTO("Oto"), MULTI("Çoklu"), TRIM("Kes"), STAB("Sabit"), LAYER("Katman"), AUDIO("Ses") }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -153,6 +157,7 @@ fun EditorScreen(
                 Tool.STAB -> StabPanel(c)
                 Tool.MULTI -> MultiPanel(c)
                 Tool.LAYER -> LayerPanel(c, actions)
+                Tool.AUTO -> AutoPanel(c, actions)
                 Tool.AUDIO -> AudioPanel(c, actions, seq)
             }
         }
@@ -420,6 +425,33 @@ private fun TrimPanel(c: EditorController) {
             "Düğmeler oynatma çizgisinin olduğu yeri kullanır. Zaman çizelgesindeki sarı tutamakları sürükleyerek de ayarlayabilirsin.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+@Composable
+private fun AutoPanel(c: EditorController, a: EditorActions) {
+    val task = c.autoTask
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (task != null) {
+            Text(task.first, style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(progress = { task.second }, modifier = Modifier.fillMaxWidth().height(6.dp), color = Palette.Accent, trackColor = Palette.SurfaceHigh)
+            ActionButton("Durdur", Modifier.fillMaxWidth()) { a.cancelAuto() }
+            return
+        }
+        ActionButton("Akıllı kadraj: kişileri takip et", Modifier.fillMaxWidth(), primary = true) { a.autoFrame() }
+        Text("Klipteki yüzleri bulur, kamerayı en belirgin kişiye yumuşakça çeviren anahtar kareler oluşturur (kesme aralığında).",
+            color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        ActionButton("Ortadakini takip et", Modifier.fillMaxWidth(), primary = true) { a.autoTrack() }
+        Text("Takip edilecek kişiyi ya da nesneyi kadrajın ortasına al; oynatma çizgisinden itibaren kaybolana kadar takip edilir.",
+            color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        LabeledRow("Öne çıkan") {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(15, 30, 60).forEach { sec -> ActionButton("$sec sn", Modifier.weight(1f)) { a.autoHighlights(sec) } }
+            }
+        }
+        Text("Kişi, ses ve hareketin en yoğun olduğu anları seçip bu parçayı o anlardan oluşan kısa bir kurguya böler (geri alınabilir değil; önce Çoğalt önerilir).",
+            color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        Text("Tümü telefonda, internetsiz çalışır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 

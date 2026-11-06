@@ -11,8 +11,8 @@ android {
         applicationId = "com.mhmmtbg.x5reframe"
         minSdk = 29
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.12.1"
+        versionCode = 14
+        versionName = "0.13.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -44,6 +44,9 @@ dependencies {
     implementation("androidx.appcompat:appcompat:1.7.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
     implementation("androidx.documentfile:documentfile:1.0.1")
+    // Cihaz içi (modeli APK'ya gömülü, internetsiz) yüz ve nesne algılama
+    implementation("com.google.mlkit:face-detection:16.1.7")
+    implementation("com.google.mlkit:object-detection:17.0.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")

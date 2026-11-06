@@ -136,6 +136,41 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         } else if (mp.isPlaying) mp.pause()
     }
 
+    @Volatile private var autoEditor: com.mhmmtbg.x5reframe.auto.AutoEditor? = null
+
+    /** Otomatik düzenleme işini arka planda çalıştır. */
+    private fun runAuto(c: EditorController, job: (com.mhmmtbg.x5reframe.auto.AutoEditor) -> Unit) {
+        if (autoEditor != null) return
+        player?.pause()
+        val ed = com.mhmmtbg.x5reframe.auto.AutoEditor(applicationContext, c.clip) { t -> c.baseAt(t) }
+        autoEditor = ed
+        c.autoTask = "Hazırlanıyor…" to 0f
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        Thread({
+            runCatching { job(ed) }.onFailure { e -> runOnUiThread { c.say("Otomatik düzenleme hatası: ${e.message}", false) } }
+            runOnUiThread {
+                if (ed.cancelled) c.say("Durduruldu", false)
+                c.autoTask = null
+                autoEditor = null
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+        }, "auto-edit").start()
+    }
+
+    /** Seçili parçayı öne çıkan aralıklara böl (siyaha geçişlerle). */
+    private fun replaceWithHighlights(ranges: List<LongRange>) {
+        storeCurrentEdit()
+        val seg = segments[segIndex]
+        val parts = ranges.mapIndexed { k, r ->
+            val e = seg.edit.copy(inUs = r.first.coerceAtLeast(0), outUs = r.last.coerceAtMost(seg.durationUs))
+            val base = if (k == 0) seg.copy(edit = e) else store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, e).copy(speed = seg.speed)
+            base.copy(transitionOut = if (k < ranges.size - 1) com.mhmmtbg.x5reframe.project.Transition.FADE else seg.transitionOut)
+        }
+        val list = segments.toMutableList().apply { removeAt(segIndex); addAll(segIndex, parts) }
+        updateSegments(list, segIndex, reopen = true)
+        controller?.say("Kurgu: ${parts.size} öne çıkan an")
+    }
+
     private val addClipPicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -364,6 +399,39 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         },
         setMuted = { player?.setMuted(it); syncMusic(player?.playing == true) },
         pickImage = { imagePicker.launch("image/*") },
+        autoFrame = { runAuto(c) { ed ->
+            val s0 = c.state
+            val samples = ed.scan(s0.inUs, s0.outUs) { p -> runOnUiThread { c.autoTask = "Yüzler aranıyor…" to p } }
+            val keys = ed.smartFraming(samples, c.currentView.fov.coerceIn(50.0, 100.0))
+            val faces = samples.count { it.faces.isNotEmpty() }
+            runOnUiThread {
+                if (faces == 0) c.say("Klipte yüz bulunamadı", false)
+                else { c.replaceKeyframes(s0.inUs, s0.outUs, keys); c.say("Akıllı kadraj: ${keys.size} anahtar kare") }
+            }
+        } },
+        autoTrack = { runAuto(c) { ed ->
+            val from = c.positionUs; val to = c.state.outUs
+            val start = c.currentView
+            val keys = ed.track(from, to, start) { p -> runOnUiThread { c.autoTask = "Takip ediliyor…" to p } }
+            runOnUiThread {
+                if (keys.size < 3) c.say("Ortada takip edilecek bir şey bulunamadı", false)
+                else {
+                    c.replaceKeyframes(from, keys.last().timeUs, keys)
+                    c.say("Takip: ${"%.1f".format((keys.last().timeUs - from) / 1e6)} sn")
+                }
+            }
+        } },
+        autoHighlights = { sec -> runAuto(c) { ed ->
+            val s0 = c.state
+            val samples = ed.scan(s0.inUs, s0.outUs) { p -> runOnUiThread { c.autoTask = "Öne çıkan anlar aranıyor…" to p } }
+            val windowUs = if (sec <= 15) 2_500_000L else 4_000_000L
+            val ranges = ed.highlights(samples, windowUs, sec * 1_000_000L)
+            runOnUiThread {
+                if (ranges.size < 2) c.say("Klip kısa: öne çıkan an bulunamadı", false)
+                else replaceWithHighlights(ranges)
+            }
+        } },
+        cancelAuto = { autoEditor?.cancelled = true },
         step = { fwd -> c.clearLive(); player?.step(fwd) },
     )
 
@@ -603,6 +671,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     override fun onDestroy() {
         super.onDestroy()
         exporter?.cancelled = true
+        autoEditor?.cancelled = true
         player?.release()
         musicPreview?.release()
     }

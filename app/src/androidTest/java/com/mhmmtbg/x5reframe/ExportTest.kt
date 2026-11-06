@@ -180,6 +180,26 @@ class ExportTest {
     }
 
     @Test
+    fun autoEditFindsPeopleAndTracks() {
+        val lrvFile = File("/data/local/tmp/clip.lrv")
+        assumeTrue("örnek klip yok", clipFile.exists() && lrvFile.exists())
+        val clip = ClipInfo.load(ctx, Uri.fromFile(clipFile), Uri.fromFile(lrvFile))
+        val ed = com.mhmmtbg.x5reframe.auto.AutoEditor(ctx, clip) { null }
+        val samples = ed.scan(0, 4_000_000) {}
+        val withFaces = samples.count { it.faces.isNotEmpty() }
+        log("auto scan samples=${samples.size} withFaces=$withFaces faces=${samples.flatMap { it.faces }.take(5)}")
+        val keys = ed.smartFraming(samples)
+        log("auto smart keys=${keys.size} first=${keys.firstOrNull()?.view}")
+        val hl = ed.highlights(samples, 1_000_000, 2_000_000)
+        log("auto highlights=$hl")
+        val tr = ed.track(0, 2_000_000, ViewParams(yaw = 180.0, fov = 80.0)) {}
+        log("auto track keys=${tr.size} last=${tr.lastOrNull()?.view}")
+        writeReport()
+        assertTrue("tarama örneği az", samples.size >= 12)
+        assertTrue("akıllı kadraj anahtar karesi yok", keys.isNotEmpty())
+    }
+
+    @Test
     fun overlayDrawsTextLayer() {
         val egl = com.mhmmtbg.x5reframe.gl.EglCore()
         try {

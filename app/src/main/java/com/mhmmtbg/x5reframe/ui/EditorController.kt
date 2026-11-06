@@ -196,6 +196,18 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         say("Düzen: ${l.label}")
     }
 
+    // ---- Otomatik düzenleme ----
+
+    /** null: boşta; değilse çalışan işin adı ve ilerlemesi. */
+    var autoTask by mutableStateOf<Pair<String, Float>?>(null)
+
+    /** Etkin bölmenin [from, to] aralığındaki anahtar karelerini yenileriyle değiştir. */
+    fun replaceKeyframes(from: Long, to: Long, keys: List<Keyframe>) {
+        val kept = ap.keyframes.filter { it.timeUs < from || it.timeUs > to }
+        commit(withActive(ap.copy(keyframes = (kept + keys).sortedBy { it.timeUs })))
+        setLive(null)
+    }
+
     // ---- Katmanlar ----
 
     var selectedLayer by mutableStateOf<String?>(null)
