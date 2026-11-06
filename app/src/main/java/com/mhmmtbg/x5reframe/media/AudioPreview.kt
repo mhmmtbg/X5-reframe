@@ -20,6 +20,8 @@ class AudioPreview(private val fd: FileDescriptor, private val track: Int) {
     @Volatile private var audioTrack: AudioTrack? = null
     @Volatile private var startUs = 0L
     @Volatile private var sampleRate = 48_000
+    @Volatile var muted = false
+        set(v) { field = v; audioTrack?.setVolume(if (v) 0f else 1f) }
 
     /** Çalan sesin konumu (µs); ses henüz başlamadıysa null. */
     fun positionUs(): Long? {
@@ -69,6 +71,7 @@ class AudioPreview(private val fd: FileDescriptor, private val track: Int) {
                 .setBufferSizeInBytes(minBuf * 2)
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
+            at.setVolume(if (muted) 0f else 1f)
             audioTrack = at
             at.play()
 

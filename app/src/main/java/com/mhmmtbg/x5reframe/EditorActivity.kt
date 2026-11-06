@@ -3,28 +3,38 @@ package com.mhmmtbg.x5reframe
 import android.annotation.SuppressLint
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.OpenableColumns
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import android.view.HapticFeedbackConstants
-import android.view.View
 import android.view.WindowManager
-import android.widget.Button
-import android.widget.FrameLayout
-import android.widget.ProgressBar
-import android.widget.TextView
-import android.widget.Toast
+import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.mhmmtbg.x5reframe.insv.ClipInfo
 import com.mhmmtbg.x5reframe.media.Exporter
 import com.mhmmtbg.x5reframe.media.Player
-import com.mhmmtbg.x5reframe.model.Keyframe
-import com.mhmmtbg.x5reframe.model.Keyframes
-import com.mhmmtbg.x5reframe.model.ViewParams
+import com.mhmmtbg.x5reframe.ui.EditorActions
+import com.mhmmtbg.x5reframe.ui.EditorController
+import com.mhmmtbg.x5reframe.ui.EditorScreen
 import com.mhmmtbg.x5reframe.ui.TimelineView
+import com.mhmmtbg.x5reframe.ui.theme.Palette
+import com.mhmmtbg.x5reframe.ui.theme.X5Theme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -32,332 +42,198 @@ import kotlin.math.max
 
 class EditorActivity : AppCompatActivity(), Player.Listener {
 
-    private enum class Aspect(val label: String, val w: Int, val h: Int) {
-        LANDSCAPE("16:9", 16, 9), PORTRAIT("9:16", 9, 16), SQUARE("1:1", 1, 1)
-    }
-
-    private enum class Quality(val label: String, val longSide: Int, val mbpsAvc: Int) {
-        FHD("1080p", 1920, 18), QHD("2.7K", 2704, 32), UHD("4K", 3840, 55)
-    }
-
-    private lateinit var clip: ClipInfo
+    private var controller: EditorController? = null
     private var player: Player? = null
-
-    private lateinit var preview: SurfaceView
-    private lateinit var container: FrameLayout
-    private lateinit var timeText: TextView
-    private lateinit var editText: TextView
-    private lateinit var statusText: TextView
-    private lateinit var timeline: TimelineView
-    private lateinit var feedback: TextView
-    private lateinit var progress: ProgressBar
-    private lateinit var playBtn: Button
-    private lateinit var exportBtn: Button
-
-    private var aspect = Aspect.LANDSCAPE
-    private var quality = Quality.FHD
-    private var hevc = false
-
-    private val keyframes = Keyframes()
-    @Volatile private var editView = ViewParams()
-    @Volatile private var manual = false
-    private var positionUs = 0L
-    private var inUs = 0L
-    private var outUs = 0L
-    private var userSeeking = false
     private var exporter: Exporter? = null
+    private var userScrubbing = false
+    private var loadError by mutableStateOf<String?>(null)
+    private var loaded by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_editor)
-        preview = findViewById(R.id.preview)
-        container = findViewById(R.id.previewContainer)
-        timeText = findViewById(R.id.timeText)
-        editText = findViewById(R.id.editText)
-        statusText = findViewById(R.id.statusText)
-        timeline = findViewById(R.id.timeline)
-        feedback = findViewById(R.id.feedback)
-        progress = findViewById(R.id.progress)
-        playBtn = findViewById(R.id.playBtn)
-        exportBtn = findViewById(R.id.exportBtn)
-
         val uri: Uri = intent.data ?: run { finish(); return }
-        statusText.text = "Klip okunuyor…"
-        lifecycleScope.launch {
-            val result = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, uri) } }
-            result.onSuccess { onClipLoaded(it) }.onFailure {
-                statusText.text = "Açılamadı: ${it.message}"
+        setContent {
+            X5Theme {
+                val c = controller
+                if (loaded && c != null) {
+                    EditorScreen(c, actions(c), ::createSurface, ::createTimeline)
+                } else {
+                    Box(Modifier.fillMaxSize().background(Palette.Background), contentAlignment = Alignment.Center) {
+                        Text(
+                            loadError?.let { "Açılamadı: $it" } ?: "Klip okunuyor…",
+                            color = if (loadError != null) Palette.Error else Palette.Muted,
+                            modifier = Modifier.padding(24.dp),
+                        )
+                    }
+                }
             }
+        }
+        lifecycleScope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, uri) } }
+            r.onSuccess { clip ->
+                val c = EditorController(clip, displayName(uri))
+                val p = Player(this@EditorActivity, clip, this@EditorActivity)
+                p.viewProvider = { t -> c.displayedView(t) }
+                c.onChanged = { p.requestRedraw() }
+                controller = c
+                player = p
+                loaded = true
+            }.onFailure { loadError = it.message ?: it.javaClass.simpleName }
         }
     }
 
-    private fun onClipLoaded(c: ClipInfo) {
-        clip = c
-        outUs = c.durationUs
-        statusText.text = "${c.cameraType} · ${c.width}×${c.height} ×2 · ${"%.1f".format(c.durationUs / 1e6)} sn"
-        val p = Player(this, c, this)
-        p.viewProvider = { t -> currentView(t) }
-        player = p
-        setupSurface()
-        setupControls()
-        updateLabels()
-    }
+    private fun displayName(uri: Uri): String = runCatching {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+            if (it.moveToFirst()) it.getString(0) else null
+        }
+    }.getOrNull() ?: (uri.lastPathSegment ?: "Klip")
 
-    /** O andaki kadraj: kullanıcı dokunuyorsa elle ayarlanan, değilse anahtar karelerden. */
-    private fun currentView(t: Long): ViewParams = if (manual) editView else keyframes.at(t, editView)
+    private fun actions(c: EditorController) = EditorActions(
+        back = { finish() },
+        playPause = {
+            val p = player
+            if (p != null) { if (p.playing) p.pause() else { c.clearLive(); p.play() } }
+        },
+        seek = { us -> c.clearLive(); c.positionUs = us; player?.seekTo(us) },
+        startExport = { startExport(c) },
+        cancelExport = { exporter?.cancelled = true },
+        open = { uri ->
+            runCatching {
+                startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            }
+        },
+        share = { uri ->
+            startActivity(
+                Intent.createChooser(
+                    Intent(Intent.ACTION_SEND).setType("video/mp4").putExtra(Intent.EXTRA_STREAM, uri)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Paylaş"
+                )
+            )
+        },
+        setMuted = { player?.setMuted(it) },
+    )
 
-    private fun setupSurface() {
-        preview.holder.addCallback(object : SurfaceHolder.Callback {
+    // ---- Önizleme yüzeyi ----
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun createSurface(ctx: android.content.Context): SurfaceView {
+        val sv = SurfaceView(ctx)
+        sv.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {}
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
                 player?.attachSurface(holder.surface, width, height)
             }
             override fun surfaceDestroyed(holder: SurfaceHolder) { player?.detachSurface() }
         })
-        container.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> fitPreview() }
-        fitPreview()
-        setupGestures()
-    }
-
-    /** Önizlemeyi çıktı en-boy oranına sığdır. */
-    private fun fitPreview() {
-        val cw = container.width; val ch = container.height
-        if (cw == 0 || ch == 0) return
-        val target = aspect.w.toFloat() / aspect.h
-        var w = cw; var h = (cw / target).toInt()
-        if (h > ch) { h = ch; w = (ch * target).toInt() }
-        val lp = preview.layoutParams as FrameLayout.LayoutParams
-        if (lp.width != w || lp.height != h) {
-            lp.width = w; lp.height = h
-            preview.layoutParams = lp
-        }
-    }
-
-    @SuppressLint("ClickableViewAccessibility")
-    private fun setupGestures() {
-        var lastX = 0f; var lastY = 0f
+        var lastX = 0f
+        var lastY = 0f
         var scaling = false
-        val scale = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean { scaling = true; return true }
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                editView = editView.copy(fov = editView.fov / detector.scaleFactor).clamped()
-                player?.requestRedraw(); updateLabels()
+        val scale = ScaleGestureDetector(ctx, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScaleBegin(d: ScaleGestureDetector): Boolean { scaling = true; return true }
+            override fun onScale(d: ScaleGestureDetector): Boolean {
+                controller?.updateView { it.copy(fov = it.fov / d.scaleFactor) }
                 return true
             }
         })
-        preview.setOnTouchListener { v, e ->
+        sv.setOnTouchListener { v, e ->
+            val c = controller ?: return@setOnTouchListener false
             scale.onTouchEvent(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    if (!manual) { editView = currentView(positionUs); manual = true }
+                    if (player?.playing == true) player?.pause()
+                    c.beginViewGesture()
                     lastX = e.x; lastY = e.y; scaling = false
                 }
                 MotionEvent.ACTION_MOVE -> if (!scaling && e.pointerCount == 1) {
-                    val degPerPx = editView.fov / max(v.width, v.height)
-                    editView = editView.copy(
-                        yaw = editView.yaw - (e.x - lastX) * degPerPx,
-                        pitch = editView.pitch + (e.y - lastY) * degPerPx,
-                    ).clamped()
+                    val degPerPx = c.currentView.fov / max(v.width, v.height)
+                    val dx = e.x - lastX
+                    val dy = e.y - lastY
+                    c.updateView { it.copy(yaw = it.yaw - dx * degPerPx, pitch = it.pitch + dy * degPerPx) }
                     lastX = e.x; lastY = e.y
-                    player?.requestRedraw(); updateLabels()
                 }
                 MotionEvent.ACTION_POINTER_UP -> {
-                    // Kalan parmaktan devam ederken sıçramayı önle.
                     val idx = if (e.actionIndex == 0) 1 else 0
                     lastX = e.getX(idx); lastY = e.getY(idx)
                 }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> c.endViewGesture()
             }
             true
         }
+        return sv
     }
 
-    private fun setupControls() {
-        playBtn.setOnClickListener {
-            val p = player ?: return@setOnClickListener
-            if (p.playing) p.pause() else { manual = false; p.play() }
-        }
-        timeline.durationUs = clip.durationUs
-        timeline.inUs = inUs
-        timeline.outUs = outUs
-        timeline.listener = object : TimelineView.Listener {
+    private fun createTimeline(ctx: android.content.Context): TimelineView {
+        val t = TimelineView(ctx)
+        t.listener = object : TimelineView.Listener {
             override fun onScrub(us: Long, fromUser: Boolean) {
-                manual = false
-                positionUs = us
+                val c = controller ?: return
+                c.clearLive()
+                c.positionUs = us
                 player?.seekTo(us)
-                updateLabels()
             }
-            override fun onScrubStart() { userSeeking = true; player?.pause() }
-            override fun onScrubEnd() { userSeeking = false }
-            override fun onTrimChanged(inUs: Long, outUs: Long) {
-                this@EditorActivity.inUs = inUs
-                this@EditorActivity.outUs = outUs
-                updateLabels()
+            override fun onScrubStart() { userScrubbing = true; player?.pause() }
+            override fun onScrubEnd() {
+                userScrubbing = false
+                controller?.endTrimDrag()
             }
+            override fun onTrimChanged(inUs: Long, outUs: Long) { controller?.dragTrim(inUs, outUs) }
         }
-        findViewById<Button>(R.id.inBtn).setOnClickListener { v ->
-            inUs = positionUs.coerceAtMost(outUs - 200_000).coerceAtLeast(0)
-            timeline.inUs = inUs
-            confirm(v, "Başlangıç: ${fmt(inUs)}")
-            updateLabels()
-        }
-        findViewById<Button>(R.id.outBtn).setOnClickListener { v ->
-            outUs = positionUs.coerceAtLeast(inUs + 200_000).coerceAtMost(clip.durationUs)
-            timeline.outUs = outUs
-            confirm(v, "Bitiş: ${fmt(outUs)}")
-            updateLabels()
-        }
-        findViewById<Button>(R.id.keyBtn).setOnClickListener { v ->
-            val existed = keyframeNear(positionUs) != null
-            val view = currentView(positionUs)
-            keyframes.put(Keyframe(positionUs, view))
-            editView = view
-            manual = false
-            timeline.flashKeyframe(keyframes.items.first { it.timeUs == positionUs }.timeUs)
-            confirm(v, if (existed) "Anahtar kare güncellendi (${fmt(positionUs)})" else "Anahtar kare eklendi (${fmt(positionUs)})")
-            updateLabels()
-        }
-        findViewById<Button>(R.id.keyDelBtn).setOnClickListener { v ->
-            val near = keyframeNear(positionUs)
-            if (near == null) {
-                reject(v, if (keyframes.isEmpty) "Silinecek anahtar kare yok" else "Oynatma çizgisini bir anahtar karenin üstüne getir")
-            } else {
-                keyframes.removeNear(near.timeUs, 1)
-                player?.requestRedraw()
-                confirm(v, "Anahtar kare silindi (${fmt(near.timeUs)})")
-            }
-            updateLabels()
-        }
-        findViewById<Button>(R.id.aspectBtn).setOnClickListener {
-            aspect = Aspect.values()[(aspect.ordinal + 1) % Aspect.values().size]
-            fitPreview(); updateLabels()
-        }
-        findViewById<Button>(R.id.resBtn).setOnClickListener {
-            quality = Quality.values()[(quality.ordinal + 1) % Quality.values().size]; updateLabels()
-        }
-        findViewById<Button>(R.id.codecBtn).setOnClickListener { hevc = !hevc; updateLabels() }
-        findViewById<Button>(R.id.wideBtn).setOnClickListener {
-            if (!manual) { editView = currentView(positionUs); manual = true }
-            editView = editView.copy(wide = !editView.wide).clamped()
-            player?.requestRedraw(); updateLabels()
-        }
-        findViewById<Button>(R.id.levelBtn).setOnClickListener {
-            if (!manual) { editView = currentView(positionUs); manual = true }
-            editView = editView.copy(pitch = 0.0, roll = 0.0, fov = 90.0)
-            player?.requestRedraw(); updateLabels()
-        }
-        exportBtn.setOnClickListener { if (exporter == null) startExport() else exporter?.cancelled = true }
+        return t
     }
 
-    private fun outputSize(): Pair<Int, Int> {
-        val long = quality.longSide
-        fun even(x: Int) = x / 2 * 2
-        return when (aspect) {
-            Aspect.LANDSCAPE -> long to even(long * 9 / 16)
-            Aspect.PORTRAIT -> even(long * 9 / 16) to long
-            Aspect.SQUARE -> even(long * 9 / 16) to even(long * 9 / 16)
-        }
-    }
+    // ---- Dışa aktarım ----
 
-    private fun startExport() {
+    private fun startExport(c: EditorController) {
+        if (exporter != null) return
         player?.pause()
-        val (w, h) = outputSize()
-        val mbps = if (hevc) quality.mbpsAvc * 7 / 10 else quality.mbpsAvc
-        val kf = Keyframes().also { k -> keyframes.items.forEach { k.put(it) } }
-        val fixed = if (keyframes.isEmpty) editView else null
-        val settings = Exporter.Settings(w, h, hevc, mbps * 1_000_000, inUs, outUs)
-        val ex = Exporter(applicationContext, clip, settings, { t -> fixed ?: kf.at(t, editView) }, object : Exporter.Listener {
+        val s = c.state // dışa aktarım sırasında yapılan düzenlemeler bu işi etkilemesin
+        val (w, h) = s.outputSize()
+        val mbps = if (s.hevc) s.quality.mbpsAvc * 7 / 10 else s.quality.mbpsAvc
+        val settings = Exporter.Settings(w, h, s.hevc, mbps * 1_000_000, s.inUs, s.outUs, s.includeAudio)
+        c.exportUi = EditorController.ExportUi.Running(0f, 0f)
+        val ex = Exporter(applicationContext, c.clip, settings, { t -> s.viewAt(t) }, object : Exporter.Listener {
             override fun onProgress(fraction: Float, speed: Float) = runOnUiThread {
-                progress.progress = (fraction * 1000).toInt()
-                if (speed > 0) statusText.text = "Dışa aktarılıyor… %${(fraction * 100).toInt()} · ${"%.1f".format(speed)}× hız"
+                if (exporter != null) c.exportUi = EditorController.ExportUi.Running(fraction, speed)
             }
             override fun onDone(uri: Uri, seconds: Float) = runOnUiThread {
                 endExport()
-                val dur = (outUs - inUs) / 1e6f
-                statusText.text = "Bitti: ${"%.1f".format(dur)} sn video ${"%.1f".format(seconds)} sn'de (${"%.1f".format(dur / seconds)}×). Filmler/X5Reframe"
-                startActivity(Intent.createChooser(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Videoyu aç"))
+                c.exportUi = EditorController.ExportUi.Done(uri, (s.outUs - s.inUs) / 1e6f, seconds)
+                window.decorView.performHapticFeedback(
+                    if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
+                )
             }
             override fun onFailed(message: String) = runOnUiThread {
                 endExport()
-                statusText.text = "Dışa aktarılamadı: $message"
+                if (message == CANCELLED) {
+                    c.exportUi = EditorController.ExportUi.Idle
+                    c.say("Dışa aktarım iptal edildi", false)
+                } else {
+                    c.exportUi = EditorController.ExportUi.Failed(message)
+                }
             }
         })
         exporter = ex
-        exportBtn.text = "İptal"
-        progress.visibility = View.VISIBLE
-        progress.progress = 0
-        statusText.text = "Dışa aktarılıyor… ${w}×$h ${if (hevc) "H.265" else "H.264"}"
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         Thread({ ex.run() }, "export").start()
     }
 
     private fun endExport() {
         exporter = null
-        exportBtn.text = "Dışa aktar"
-        progress.visibility = View.GONE
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
-    private fun updateLabels() {
-        if (!::clip.isInitialized) return
-        val (w, h) = outputSize()
-        findViewById<Button>(R.id.aspectBtn).text = aspect.label
-        findViewById<Button>(R.id.resBtn).text = quality.label
-        findViewById<Button>(R.id.codecBtn).text = if (hevc) "H.265" else "H.264"
-        findViewById<Button>(R.id.wideBtn).text = if (currentView(positionUs).wide) "Geniş ✓" else "Geniş"
-        timeline.keyframes = keyframes.items.map { it.timeUs }
-        val near = keyframeNear(positionUs)
-        findViewById<Button>(R.id.keyBtn).text = if (near != null) "Kare ↻" else "Kare +"
-        findViewById<Button>(R.id.keyDelBtn).alpha = if (near != null) 1f else 0.45f
-        val v = currentView(positionUs)
-        timeText.text = "${fmt(positionUs)} / ${fmt(clip.durationUs)}   yön ${v.yaw.toInt()}° eğim ${v.pitch.toInt()}° açı ${v.fov.toInt()}°"
-        editText.text = "Aralık ${fmt(inUs)} – ${fmt(outUs)} (${"%.1f".format((outUs - inUs) / 1e6)} sn) · " +
-            "${keyframes.items.size} anahtar kare · çıktı ${w}×$h"
-    }
+    // ---- Player.Listener ----
 
-    private fun fmt(us: Long): String {
-        val s = us / 1_000_000.0
-        return "%d:%04.1f".format((s / 60).toInt(), s % 60)
-    }
-
-    private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-
-    /** Oynatma çizgisine ~0,3 sn yakın anahtar kare. */
-    private fun keyframeNear(us: Long): Keyframe? =
-        keyframes.items.minByOrNull { kotlin.math.abs(it.timeUs - us) }?.takeIf { kotlin.math.abs(it.timeUs - us) <= 300_000 }
-
-    private val hideFeedback = Runnable { feedback.visibility = View.GONE }
-
-    private fun showFeedback(text: String) {
-        feedback.text = text
-        feedback.visibility = View.VISIBLE
-        feedback.removeCallbacks(hideFeedback)
-        feedback.postDelayed(hideFeedback, 1600)
-    }
-
-    private fun confirm(v: View, text: String) {
-        v.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY)
-        showFeedback("✓ $text")
-    }
-
-    private fun reject(v: View, text: String) {
-        v.performHapticFeedback(if (android.os.Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS)
-        showFeedback(text)
-    }
-
-    // Player.Listener
     override fun onPosition(us: Long) {
-        positionUs = us
-        if (!userSeeking) timeline.positionUs = us
-        updateLabels()
+        if (!userScrubbing) controller?.positionUs = us
     }
 
     override fun onPlayingChanged(playing: Boolean) {
-        playBtn.text = if (playing) "❚❚" else "▶"
+        controller?.playing = playing
     }
 
     override fun onError(message: String) {
-        statusText.text = "Hata: $message"
+        controller?.say("Hata: $message", false)
     }
 
     override fun onPause() {
@@ -369,5 +245,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         super.onDestroy()
         exporter?.cancelled = true
         player?.release()
+    }
+
+    companion object {
+        const val CANCELLED = "İptal edildi"
     }
 }

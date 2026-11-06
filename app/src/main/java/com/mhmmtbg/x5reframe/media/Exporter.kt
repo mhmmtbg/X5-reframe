@@ -38,6 +38,7 @@ class Exporter(
         val bitrate: Int,
         val startUs: Long,
         val endUs: Long,
+        val includeAudio: Boolean = true,
     )
 
     interface Listener {
@@ -72,7 +73,7 @@ class Exporter(
             val outPfd = context.contentResolver.openFileDescriptor(outUri, "rw")!!
             muxer = MediaMuxer(outPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-            clip.audioTrack?.let { a ->
+            clip.audioTrack?.takeIf { settings.includeAudio }?.let { a ->
                 val ex = MediaExtractor()
                 ex.setDataSource(inPfd.fileDescriptor)
                 audioFormat = ex.getTrackFormat(a)
@@ -211,6 +212,7 @@ class Exporter(
     private val audioInfo = MediaCodec.BufferInfo()
 
     private fun openAudio(fd: java.io.FileDescriptor, start: Long) {
+        if (!settings.includeAudio) return
         val a = clip.audioTrack ?: return
         val ex = MediaExtractor()
         ex.setDataSource(fd)

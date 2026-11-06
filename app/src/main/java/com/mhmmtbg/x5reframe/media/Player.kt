@@ -98,6 +98,8 @@ class Player(
         done.await(1, java.util.concurrent.TimeUnit.SECONDS)
     }
 
+    fun setMuted(m: Boolean) { audio?.muted = m }
+
     fun requestRedraw() {
         if (playing || redrawQueued) return
         redrawQueued = true
