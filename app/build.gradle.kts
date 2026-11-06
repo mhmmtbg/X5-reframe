@@ -11,14 +11,16 @@ android {
         applicationId = "com.mhmmtbg.x5reframe"
         minSdk = 29
         targetSdk = 34
-        versionCode = 17
-        versionName = "0.15.1"
+        versionCode = 18
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Telefonlar 64 bit ARM: diğer mimarilerin yerel kütüphaneleri APK'yı gereksiz büyütüyor.
+            ndk { abiFilters += listOf("arm64-v8a") }
             // Kişisel kullanım: release de debug anahtarıyla imzalanır, doğrudan kurulabilir.
             signingConfig = signingConfigs.getByName("debug")
         }

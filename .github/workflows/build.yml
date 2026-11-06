@@ -46,6 +46,11 @@ jobs:
           cp app/build/outputs/apk/release/*.apk out/x5-reframe.apk 2>/dev/null || true
           echo "commit=${GITHUB_SHA}" > out/STATUS.txt
           echo "result=${{ steps.build.outcome }}" >> out/STATUS.txt
+          ls -la app/build/outputs/apk/release/ >> out/STATUS.txt 2>/dev/null || true
+          # GitHub 100 MB'tan büyük dosyayı kabul etmez
+          if [ -f out/x5-reframe.apk ] && [ $(stat -c%s out/x5-reframe.apk) -gt 99000000 ]; then
+            echo "apk too large, not pushed" >> out/STATUS.txt; rm out/x5-reframe.apk
+          fi
           date -u >> out/STATUS.txt
           cd out
           git init -q -b builds
