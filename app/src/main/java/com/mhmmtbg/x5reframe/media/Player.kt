@@ -110,6 +110,9 @@ class Player(
 
     fun setMuted(m: Boolean) { audio?.muted = m }
 
+    /** 1 / dikiş mesafesi (m); 0 = sonsuz. */
+    fun setStitchInv(v: Float) = handler.post { if (::program.isInitialized) { program.stitchInvDistance = v; drawNow() } }
+
     fun requestRedraw() {
         if (playing || redrawQueued) return
         redrawQueued = true

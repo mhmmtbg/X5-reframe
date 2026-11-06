@@ -40,6 +40,10 @@ class Exporter(
         val startUs: Long,
         val endUs: Long,
         val includeAudio: Boolean = true,
+        /** 360° equirect çıktı: küresel video bilgisi eklenir. */
+        val spherical: Boolean = false,
+        /** 1 / dikiş mesafesi (m). */
+        val stitchInv: Float = 0f,
     )
 
     interface Listener {
@@ -72,7 +76,10 @@ class Exporter(
 
             outUri = createOutput()
             val outPfd = context.contentResolver.openFileDescriptor(outUri, "rw")!!
-            muxer = MediaMuxer(outPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            // 360° çıktıda önce geçici dosyaya yazılır (moov kutusu düzenlenebilsin diye).
+            val tmp = if (settings.spherical) java.io.File(context.cacheDir, "export360.mp4").also { it.delete() } else null
+            muxer = if (tmp != null) MediaMuxer(tmp.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            else MediaMuxer(outPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
             clip.audioTrack?.takeIf { settings.includeAudio }?.let { a ->
                 val ex = MediaExtractor()
@@ -89,6 +96,7 @@ class Exporter(
             val win = egl.createWindowSurface(inputSurface)
             egl.makeCurrent(win)
             program = ReframeProgram(clip.rig)
+            program.stitchInvDistance = settings.stitchInv
             source = DualFrameSource(inPfd.fileDescriptor, clip, realtime = false)
 
             val frameDur = (1_000_000 / clip.frameRate).toLong()
@@ -128,6 +136,13 @@ class Exporter(
 
             muxer.stop()
             muxer.release()
+            if (tmp != null) {
+                java.io.RandomAccessFile(tmp, "rw").use { raf -> sphericalTagged = SphericalMetadata.inject(raf.channel) }
+                java.io.FileInputStream(tmp).use { inp ->
+                    java.io.FileOutputStream(outPfd.fileDescriptor).use { out -> inp.copyTo(out, 1 shl 20) }
+                }
+                tmp.delete()
+            }
             outPfd.close()
             egl.releaseSurface(win)
             inputSurface.release()
@@ -254,6 +269,10 @@ class Exporter(
         audioEx?.release()
         audioEx = null
     }
+
+    /** Test ve teşhis için: 360° bilgisi eklendi mi. */
+    var sphericalTagged = false
+        private set
 
     /** Test ve teşhis için: yazılan ses örneği sayısı. */
     var audioWritten = 0

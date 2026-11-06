@@ -85,7 +85,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 val p = Player(this@EditorActivity, clip, this@EditorActivity)
                 p.viewProvider = { t -> c.displayedView(t) }
                 p.baseProvider = { t -> c.baseAt(t) }
+                p.setStitchInv(c.state.stitchInv)
                 c.onChanged = {
+                    p.setStitchInv(c.state.stitchInv)
                     p.requestRedraw()
                     saveHandler.removeCallbacks(saveTask)
                     saveHandler.postDelayed(saveTask, 800)
@@ -212,7 +214,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val s = c.state // dışa aktarım sırasında yapılan düzenlemeler bu işi etkilemesin
         val (w, h) = s.outputSize()
         val mbps = if (s.hevc) s.quality.mbpsAvc * 7 / 10 else s.quality.mbpsAvc
-        val settings = Exporter.Settings(w, h, s.hevc, mbps * 1_000_000, s.inUs, s.outUs, s.includeAudio)
+        val settings = Exporter.Settings(w, h, s.hevc, mbps * 1_000_000, s.inUs, s.outUs, s.includeAudio, s.isSpherical, s.stitchInv)
         c.exportUi = EditorController.ExportUi.Running(0f, 0f)
         val ex = Exporter(applicationContext, c.clip, settings, { t -> s.viewAt(t) }, baseAt = { t -> c.baseAt(t, s) }, listener = object : Exporter.Listener {
             override fun onProgress(fraction: Float, speed: Float) = runOnUiThread {

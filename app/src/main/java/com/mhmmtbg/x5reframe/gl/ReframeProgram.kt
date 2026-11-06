@@ -4,6 +4,7 @@ import android.opengl.GLES11Ext
 import android.opengl.GLES30
 import com.mhmmtbg.x5reframe.insv.Lens
 import com.mhmmtbg.x5reframe.insv.Rig
+import com.mhmmtbg.x5reframe.model.Projection
 import com.mhmmtbg.x5reframe.model.ViewParams
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -27,6 +28,11 @@ class ReframeProgram(private val rig: Rig) {
     private val uView: Int
     private val uScale: Int
     private val uMode: Int
+    private val uStitch: Int
+    private val uTrans = IntArray(2)
+
+    /** 1 / dikiş mesafesi (m); 0 = sonsuz. Yakın nesnelerde çift görüntüyü azaltır. */
+    var stitchInvDistance = 0f
 
     init {
         program = link(VS, FS)
@@ -42,6 +48,8 @@ class ReframeProgram(private val rig: Rig) {
         uView = GLES30.glGetUniformLocation(program, "uView")
         uScale = GLES30.glGetUniformLocation(program, "uScale")
         uMode = GLES30.glGetUniformLocation(program, "uMode")
+        uStitch = GLES30.glGetUniformLocation(program, "uStitchInv")
+        for (i in 0..1) uTrans[i] = GLES30.glGetUniformLocation(program, "uTrans$i")
 
         val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
@@ -78,9 +86,21 @@ class ReframeProgram(private val rig: Rig) {
         val sx: Float; val sy: Float
         if (width >= height) { sx = 1f; sy = height.toFloat() / width } else { sx = width.toFloat() / height; sy = 1f }
         val half = Math.toRadians(view.fov) / 2.0
-        val k = if (view.wide) (2.0 * tan(half / 2.0)).toFloat() else tan(half).toFloat()
-        GLES30.glUniform2f(uScale, sx * k, sy * k)
-        GLES30.glUniform1i(uMode, if (view.wide) 1 else 0)
+        val k = when (view.projection) {
+            Projection.RECTILINEAR -> tan(half)
+            Projection.WIDE -> 2.0 * tan(minOf(half, Math.toRadians(179.0)) / 2.0)
+            Projection.SUPERWIDE -> 2.0 * tan(half / 2.0)
+            Projection.FISHEYE -> half
+            Projection.EQUIRECT -> 1.0
+        }.toFloat()
+        if (view.projection == Projection.EQUIRECT) GLES30.glUniform2f(uScale, 1f, 1f)
+        else GLES30.glUniform2f(uScale, sx * k, sy * k)
+        GLES30.glUniform1i(uMode, view.projection.ordinal)
+        GLES30.glUniform1f(uStitch, stitchInvDistance)
+        for (i in 0..1) {
+            val t = rig.lenses[i].translationRig
+            GLES30.glUniform3f(uTrans[i], t[0].toFloat(), t[1].toFloat(), t[2].toFloat())
+        }
 
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo)
         GLES30.glEnableVertexAttribArray(0)
@@ -164,7 +184,10 @@ uniform vec4 uSub0;    // lensin doku içindeki alt bölgesi (LRV: yan yana)
 uniform vec4 uSub1;
 uniform mat3 uView;    // rig_from_view
 uniform vec2 uScale;
-uniform int uMode;     // 0: düz (rectilinear), 1: geniş (stereografik)
+uniform int uMode;     // 0 doğrusal, 1 stereografik, 2 pannini, 3 fisheye, 4 equirect
+uniform float uStitchInv; // 1 / dikiş mesafesi
+uniform vec3 uTrans0;  // lens merkezleri (rig, metre)
+uniform vec3 uTrans1;
 
 const float COS_LIMIT = -0.17365; // lens alanı ~100 derece
 
@@ -188,18 +211,31 @@ vec2 texCoord(mat4 texMat, vec4 sub, vec2 uv) {
 void main() {
     vec2 p = vNdc * uScale;
     vec3 dv;
-    if (uMode == 1) {
+    if (uMode == 1) {            // stereografik
         float r = length(p);
         float theta = 2.0 * atan(r * 0.5);
         vec2 dir = r > 1e-6 ? p / r : vec2(0.0);
         dv = vec3(dir.x * sin(theta), -dir.y * sin(theta), cos(theta));
+    } else if (uMode == 2) {     // pannini (d = 1)
+        float phi = 2.0 * atan(p.x * 0.5);
+        float t = p.y * (1.0 + cos(phi)) * 0.5;
+        dv = normalize(vec3(sin(phi), -t, cos(phi)));
+    } else if (uMode == 3) {     // eşit uzaklıklı fisheye
+        float theta = length(p);
+        vec2 dir = theta > 1e-6 ? p / theta : vec2(0.0);
+        dv = vec3(dir.x * sin(theta), -dir.y * sin(theta), cos(theta));
+    } else if (uMode == 4) {     // equirect
+        float lon = vNdc.x * 3.14159265;
+        float lat = -vNdc.y * 1.57079633;
+        dv = vec3(cos(lat) * sin(lon), sin(lat), cos(lat) * cos(lon));
     } else {
         dv = normalize(vec3(p.x, -p.y, 1.0)); // +y aşağı
     }
     vec3 d = uView * dv;
 
-    vec3 c0 = uCamFromRig0 * d;
-    vec3 c1 = uCamFromRig1 * d;
+    // Dikiş mesafesi: noktayı R uzaklığa koy ve her lensin kendi merkezinden bak.
+    vec3 c0 = uCamFromRig0 * (d - uTrans0 * uStitchInv);
+    vec3 c1 = uCamFromRig1 * (d - uTrans1 * uStitchInv);
     // Dikiş: iki lensin optik eksen farkına göre yumuşak geçiş (~±5 derece).
     float w0 = smoothstep(-0.09, 0.09, c0.z - c1.z);
     if (c0.z < COS_LIMIT) w0 = 0.0;

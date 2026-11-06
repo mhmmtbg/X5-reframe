@@ -102,6 +102,7 @@ class ProjectStore(context: Context) {
             put("aspect", e.aspect.name); put("quality", e.quality.name)
             put("hevc", e.hevc); put("includeAudio", e.includeAudio)
             put("stabMode", e.stabMode.name); put("stabStrength", e.stabStrength)
+            put("stitchDistance", e.stitchDistance)
         }
 
         fun editFromJson(o: JSONObject): EditState {
@@ -118,14 +119,18 @@ class ProjectStore(context: Context) {
                 stabMode = runCatching { com.mhmmtbg.x5reframe.stab.StabMode.valueOf(o.optString("stabMode")) }
                     .getOrDefault(com.mhmmtbg.x5reframe.stab.StabMode.OFF),
                 stabStrength = o.optDouble("stabStrength", 0.5),
+                stitchDistance = o.optDouble("stitchDistance", 0.0),
             )
         }
 
         private fun viewToJson(v: ViewParams) = JSONObject()
-            .put("yaw", v.yaw).put("pitch", v.pitch).put("roll", v.roll).put("fov", v.fov).put("wide", v.wide)
+            .put("yaw", v.yaw).put("pitch", v.pitch).put("roll", v.roll).put("fov", v.fov).put("projection", v.projection.name)
 
         private fun viewFromJson(o: JSONObject) = ViewParams(
-            o.optDouble("yaw", 0.0), o.optDouble("pitch", 0.0), o.optDouble("roll", 0.0), o.optDouble("fov", 90.0), o.optBoolean("wide"),
+            o.optDouble("yaw", 0.0), o.optDouble("pitch", 0.0), o.optDouble("roll", 0.0), o.optDouble("fov", 90.0),
+            runCatching { com.mhmmtbg.x5reframe.model.Projection.valueOf(o.optString("projection")) }.getOrElse {
+                if (o.optBoolean("wide")) com.mhmmtbg.x5reframe.model.Projection.WIDE else com.mhmmtbg.x5reframe.model.Projection.RECTILINEAR
+            },
         )
     }
 }

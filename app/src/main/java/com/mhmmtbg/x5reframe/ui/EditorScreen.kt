@@ -322,17 +322,50 @@ private fun FramePanel(c: EditorController) {
         LabeledRow("Oran") {
             Segmented(Aspect.values().toList(), s.aspect, { it.label }, { c.commit(s.copy(aspect = it)); c.say("Oran ${it.label}") }, Modifier.weight(1f))
         }
-        LabeledRow("Lens") {
-            Segmented(listOf(false, true), v.wide, { if (it) "Geniş" else "Doğrusal" }, { w -> c.changeView { it.copy(wide = w) } }, Modifier.weight(1f))
+        Segmented(
+            com.mhmmtbg.x5reframe.model.Projection.values().toList(), v.projection, { it.label },
+            { p ->
+                c.changeView { it.copy(projection = p, fov = if (it.fov in p.minFov..p.maxFov) it.fov else p.defaultFov) }
+                if (p == com.mhmmtbg.x5reframe.model.Projection.EQUIRECT && s.aspect != Aspect.PANO) c.commit(c.state.copy(aspect = Aspect.PANO))
+                c.say(p.label)
+            },
+            Modifier.fillMaxWidth(),
+        )
+        Text(v.projection.hint, color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        if (v.projection != com.mhmmtbg.x5reframe.model.Projection.EQUIRECT) {
+            LabeledRow("Açı ${v.fov.toInt()}°") {
+                Slider(
+                    value = v.fov.toFloat(),
+                    onValueChange = { f -> c.beginViewGestureOnce(); c.updateView { it.copy(fov = f.toDouble()) } },
+                    onValueChangeFinished = { c.endViewGestureOnce() },
+                    valueRange = v.projection.minFov.toFloat()..v.projection.maxFov.toFloat(),
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                )
+            }
         }
-        LabeledRow("Açı ${v.fov.toInt()}°") {
-            Slider(
-                value = v.fov.toFloat(),
-                onValueChange = { f -> c.beginViewGestureOnce(); c.updateView { it.copy(fov = f.toDouble()) } },
-                onValueChangeFinished = { c.endViewGestureOnce() },
-                valueRange = 20f..(if (v.wide) 220f else 120f),
-                modifier = Modifier.weight(1f),
-                colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+        LabeledRow("Hazır") {
+            Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                val W = com.mhmmtbg.x5reframe.model.Projection.WIDE
+                ActionButton("Ön", Modifier.weight(1f)) { c.changeView { it.copy(yaw = 0.0, pitch = 0.0, roll = 0.0) }; c.say("Ön lens yönü") }
+                ActionButton("Arka", Modifier.weight(1f)) { c.changeView { it.copy(yaw = 180.0, pitch = 0.0, roll = 0.0) }; c.say("Arka lens yönü") }
+                ActionButton("Gezegen", Modifier.weight(1.2f)) {
+                    c.changeView { it.copy(projection = W, pitch = -90.0, roll = 0.0, fov = 250.0) }
+                    if (s.aspect == Aspect.LANDSCAPE || s.aspect == Aspect.PANO) c.commit(c.state.copy(aspect = Aspect.SQUARE))
+                    c.say("Küçük gezegen")
+                }
+                ActionButton("Tünel", Modifier.weight(1f)) {
+                    c.changeView { it.copy(projection = W, pitch = 90.0, roll = 0.0, fov = 250.0) }
+                    if (s.aspect == Aspect.LANDSCAPE || s.aspect == Aspect.PANO) c.commit(c.state.copy(aspect = Aspect.SQUARE))
+                    c.say("Tavşan deliği")
+                }
+            }
+        }
+        LabeledRow("Dikiş") {
+            Segmented(
+                listOf(0.0, 5.0, 2.0, 1.0, 0.5), s.stitchDistance, { if (it == 0.0) "Uzak" else "${if (it < 1) it.toString().replace('.', ',') else it.toInt().toString()} m" },
+                { d -> c.commit(s.copy(stitchDistance = d)); c.say(if (d == 0.0) "Dikiş: uzak" else "Dikiş mesafesi ${d} m") },
+                Modifier.weight(1f),
             )
         }
         val near = s.keyframeNear(c.positionUs) != null

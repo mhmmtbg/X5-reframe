@@ -22,7 +22,11 @@ data class EditState(
     val stabMode: com.mhmmtbg.x5reframe.stab.StabMode = com.mhmmtbg.x5reframe.stab.StabMode.OFF,
     /** 0..1 yumuşatma şiddeti */
     val stabStrength: Double = 0.5,
+    /** Dikiş mesafesi (m); 0 = uzak (sonsuz). */
+    val stitchDistance: Double = 0.0,
 ) {
+    val stitchInv: Float get() = if (stitchDistance <= 0) 0f else (1.0 / stitchDistance).toFloat()
+
     fun viewAt(t: Long): ViewParams = keyframes.viewAt(t, baseView)
 
     fun withKeyframe(k: Keyframe): EditState =
@@ -30,6 +34,10 @@ data class EditState(
 
     fun keyframeNear(t: Long, tolUs: Long = 300_000): Keyframe? =
         keyframes.minByOrNull { kotlin.math.abs(it.timeUs - t) }?.takeIf { kotlin.math.abs(it.timeUs - t) <= tolUs }
+
+    /** Çıktı 360° mi (tüm anahtar kareler ve sabit kadraj equirect ise). */
+    val isSpherical: Boolean get() = aspect == Aspect.PANO &&
+        (keyframes.map { it.view } + baseView).all { it.projection == Projection.EQUIRECT }
 
     fun outputSize(): Pair<Int, Int> {
         fun even(x: Int) = x / 2 * 2
@@ -54,7 +62,7 @@ fun List<Keyframe>.viewAt(timeUs: Long, fallback: ViewParams): ViewParams {
         pitch = a.view.pitch + (b.view.pitch - a.view.pitch) * t,
         roll = a.view.roll + (b.view.roll - a.view.roll) * t,
         fov = a.view.fov + (b.view.fov - a.view.fov) * t,
-        wide = if (t < 0.5) a.view.wide else b.view.wide,
+        projection = if (t < 0.5) a.view.projection else b.view.projection,
     )
 }
 

@@ -20,6 +20,8 @@ class Lens(
     val camFromRig: DoubleArray,
     /** Bu lensin görüntüsünü taşıyan video izinin sırası (0 ya da 1). */
     val videoTrackOrder: Int,
+    /** Lens merkezi, rig çerçevesinde (metre). Dikiş mesafesi için. */
+    val translationRig: DoubleArray = DoubleArray(3),
 )
 
 class Rig(val lenses: List<Lens>) {
@@ -64,7 +66,9 @@ class Rig(val lenses: List<Lens>) {
                 val norm = calibW - 1.0
                 val rigFromCam = mul(base, transpose(vendorRotation(ypr, i, n)))
                 val track = if (tracksReversed) (n - 1 - i) else i
-                out += Lens(xi, fx / norm, fy / norm, cx / norm, cy / norm, k, transpose(rigFromCam), track)
+                val tr = doubleArrayOf(t[b + 8], t[b + 9], t[b + 10])
+                val trRig = DoubleArray(3) { r -> base[r * 3] * tr[0] + base[r * 3 + 1] * tr[1] + base[r * 3 + 2] * tr[2] }
+                out += Lens(xi, fx / norm, fy / norm, cx / norm, cy / norm, k, transpose(rigFromCam), track, trRig)
             }
             return Rig(out)
         }

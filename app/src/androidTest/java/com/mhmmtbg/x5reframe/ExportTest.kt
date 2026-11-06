@@ -77,6 +77,36 @@ class ExportTest {
     }
 
     @Test
+    fun exports360WithSphericalMetadata() {
+        assumeTrue("örnek klip yok", clipFile.exists())
+        val clip = ClipInfo.load(ctx, Uri.fromFile(clipFile))
+        val done = CountDownLatch(1)
+        var outUri: Uri? = null
+        var error: String? = null
+        val view = ViewParams(projection = com.mhmmtbg.x5reframe.model.Projection.EQUIRECT, fov = 360.0)
+        val settings = Exporter.Settings(1920, 960, false, 10_000_000, 1_000_000, 2_000_000, true, spherical = true)
+        val ex = Exporter(ctx, clip, settings, { view }, object : Exporter.Listener {
+            override fun onProgress(fraction: Float, speed: Float) {}
+            override fun onDone(uri: Uri, seconds: Float) { outUri = uri; done.countDown() }
+            override fun onFailed(message: String) { error = message; done.countDown() }
+        })
+        Thread { ex.run() }.start()
+        assertTrue("zaman aşımı", done.await(10, TimeUnit.MINUTES))
+        log("360 export error=$error tagged=${ex.sphericalTagged} frames=${ex.videoWritten}")
+        writeReport()
+        assertTrue("dışa aktarım hatası: $error", error == null && outUri != null)
+        assertTrue("küresel bilgi eklenmedi", ex.sphericalTagged)
+        val bytes = ctx.contentResolver.openInputStream(outUri!!)!!.use { it.readBytes() }
+        val text = String(bytes, Charsets.ISO_8859_1)
+        assertTrue("dosyada küresel XML yok", text.contains("GSpherical:Spherical>true"))
+        val mx = MediaExtractor()
+        ctx.contentResolver.openFileDescriptor(outUri!!, "r")!!.use { mx.setDataSource(it.fileDescriptor) }
+        log("360 out tracks=${mx.trackCount}")
+        assertTrue("360 dosyası okunamıyor", mx.trackCount >= 1)
+        mx.release()
+    }
+
+    @Test
     fun lrvPreviewDecodes() {
         val lrvFile = File("/data/local/tmp/clip.lrv")
         assumeTrue("örnek LRV yok", clipFile.exists() && lrvFile.exists())
