@@ -93,6 +93,7 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
     private fun sync() {
         state = history.current
         snapshotState = state
+        refreshColor()
         canUndo = history.canUndo
         canRedo = history.canRedo
         onChanged()
@@ -212,6 +213,33 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         commit(withActive(ap.copy(keyframes = (kept + keys).sortedBy { it.timeUs })))
         setLive(null)
     }
+
+    // ---- Renk ----
+
+    /** Oynatıcı için hazır renk değerleri (her değişiklikte yeniden hesaplanır). */
+    @Volatile var colorUniforms: FloatArray? = null
+        private set
+    private var colorGestureStart: EditState? = null
+
+    private fun refreshColor() { colorUniforms = state.color.let { if (it.isIdentity) null else it.uniforms() } }
+    init { refreshColor() }
+
+    /** Kaydırıcı sürüklenirken: geçmişe yazmadan uygula. */
+    fun updateColorLive(f: (com.mhmmtbg.x5reframe.model.ColorGrade) -> com.mhmmtbg.x5reframe.model.ColorGrade) {
+        if (colorGestureStart == null) colorGestureStart = state
+        history.replace(state.copy(color = f(state.color)))
+        state = history.current; snapshotState = state
+        refreshColor(); onChanged()
+    }
+
+    fun endColorGesture() {
+        val before = colorGestureStart ?: return
+        colorGestureStart = null
+        val after = state
+        if (before != after) { history.replace(before); history.push(after); sync() }
+    }
+
+    fun setColor(g: com.mhmmtbg.x5reframe.model.ColorGrade) { commit(state.copy(color = g)) }
 
     // ---- Derin takip ----
 

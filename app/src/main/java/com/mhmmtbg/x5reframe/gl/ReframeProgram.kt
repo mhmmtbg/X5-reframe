@@ -34,6 +34,11 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
     /** 1 / dikiş mesafesi (m); 0 = sonsuz. Yakın nesnelerde çift görüntüyü azaltır. */
     var stitchInvDistance = 0f
 
+    /** Renk düzenlemesi (ColorGrade.uniforms()); null = dokunulmaz. */
+    var color: FloatArray? = null
+    private val uGrade = IntArray(4)
+    private val uGradeOn: Int
+
     /** 0..1 parlaklık çarpanı (siyaha geçiş). */
     var fade = 1f
     private val uFade: Int
@@ -45,7 +50,7 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
     /** Bölgesel (dinamik) dikiş; kapalıyken klasik tek mesafeli dikiş. */
     var dynamicStitch = true
     /** Önizleme: 48 bölge; dışa aktarım: 192 bölge x 3 kuşak (ince taneli). */
-    val stitch = if (highQualityStitch) StitchEstimator(rig, 192, 3).apply { async = false } else StitchEstimator(rig, 48, 1)
+    val stitch = if (highQualityStitch) StitchEstimator(rig, 192, 5).apply { async = false } else StitchEstimator(rig, 48, 1)
     private var framesSinceEstimate = Int.MAX_VALUE / 2
 
     init {
@@ -65,6 +70,8 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
         uStitch = GLES30.glGetUniformLocation(program, "uStitchInv")
         uFade = GLES30.glGetUniformLocation(program, "uFade")
         for (i in 0..1) uTrans[i] = GLES30.glGetUniformLocation(program, "uTrans$i")
+        for (i in 0..3) uGrade[i] = GLES30.glGetUniformLocation(program, "uGrade$i")
+        uGradeOn = GLES30.glGetUniformLocation(program, "uGradeOn")
         uSeam = GLES30.glGetUniformLocation(program, "uSeam")
         uSeamOn = GLES30.glGetUniformLocation(program, "uSeamOn")
         uSeamRange = GLES30.glGetUniformLocation(program, "uSeamRange")
@@ -158,6 +165,9 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
         GLES30.glUniform1i(uMode, view.projection.ordinal)
         GLES30.glUniform1f(uStitch, stitchInvDistance)
         GLES30.glUniform1f(uFade, fade)
+        val g = color
+        GLES30.glUniform1f(uGradeOn, if (g != null) 1f else 0f)
+        if (g != null) for (i in 0..3) GLES30.glUniform4f(uGrade[i], g[i * 4], g[i * 4 + 1], g[i * 4 + 2], g[i * 4 + 3])
         GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, stitch.seamTexture)
         GLES30.glUniform1i(uSeam, 2)
@@ -261,6 +271,27 @@ uniform sampler2D uSeam;  // bölgesel dikiş: R kayma, G lens1 kazancı
 uniform float uSeamOn;
 uniform vec2 uSeamRange; // kayma aralığı (derece)
 uniform vec2 uSeamBands; // kuşak sayısı, kuşak merkezlerinin dikişe uzaklığı (derece)
+uniform float uGradeOn;
+uniform vec4 uGrade0;   // pozlama, kontrast, doygunluk, canlılık
+uniform vec4 uGrade1;   // sıcaklık, ton, parlak alanlar, gölgeler
+uniform vec4 uGrade2;   // soldurma, bölünmüş ton, gölge r, gölge g
+uniform vec4 uGrade3;   // gölge b, parlak r, parlak g, parlak b
+
+vec3 grade(vec3 c) {
+    c *= exp2(uGrade0.x);
+    c *= vec3(1.0 + 0.12 * uGrade1.x, 1.0 - 0.06 * uGrade1.y, 1.0 - 0.12 * uGrade1.x);
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float sh = 1.0 - smoothstep(0.0, 0.55, l);
+    float hi = smoothstep(0.45, 1.0, l);
+    c += 0.25 * uGrade1.w * sh + 0.25 * uGrade1.z * hi;
+    c = (c - 0.5) * (1.0 + uGrade0.y) + 0.5;
+    l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+    c = mix(vec3(l), c, (1.0 + uGrade0.z) * (1.0 + uGrade0.w * (1.0 - clamp(sat * 2.0, 0.0, 1.0))));
+    c += uGrade2.y * (vec3(uGrade2.z, uGrade2.w, uGrade3.x) * sh + uGrade3.yzw * hi);
+    c = mix(c, 0.08 + c * 0.84, uGrade2.x);
+    return clamp(c, 0.0, 1.0);
+}
 
 const float COS_LIMIT = -0.17365; // lens alanı ~100 derece
 
@@ -311,14 +342,15 @@ void main() {
     }
     vec3 c0 = uCamFromRig0 * (e0 - uTrans0 * uStitchInv);
     vec3 c1 = uCamFromRig1 * (e1 - uTrans1 * uStitchInv);
-    // Geniş, yumuşak geçiş (~±6 derece); hizalama sonrası çift görüntü oluşmaz.
-    float w0 = smoothstep(-0.21, 0.21, d.z * 2.0);
+    // Yumuşak geçiş (~±3,5 derece): dar tutulur ki kalan küçük hizasızlık çift görüntüye dönüşmesin.
+    float w0 = smoothstep(-0.12, 0.12, d.z * 2.0);
     if (c0.z < COS_LIMIT) w0 = 0.0;
     if (c1.z < COS_LIMIT) w0 = 1.0;
 
     vec3 col = vec3(0.0);
     if (w0 > 0.0) col += w0 * g0 * texture(uTex0, texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20))).rgb;
     if (w0 < 1.0) col += (1.0 - w0) * g1 * texture(uTex1, texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21))).rgb;
+    if (uGradeOn > 0.5) col = grade(col);
     outColor = vec4(col * uFade, 1.0);
 }
 """

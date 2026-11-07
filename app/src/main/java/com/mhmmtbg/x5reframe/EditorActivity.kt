@@ -284,6 +284,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.sceneProvider = { t -> c.sceneAt(t) }
             p.layoutProvider = { c.snapshotState.layout.rects }
             p.baseProvider = { t -> c.baseAt(t) }
+            p.colorProvider = { c.colorUniforms }
             p.layersProvider = { c.snapshotState.layers }
             p.setVolume(projectAudio.originalVolume)
             p.setStitchInv(c.state.stitchInv)

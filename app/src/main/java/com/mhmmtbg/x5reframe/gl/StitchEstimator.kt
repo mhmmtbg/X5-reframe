@@ -23,11 +23,11 @@ import kotlin.math.abs
 class StitchEstimator(private val rig: Rig, val bins: Int = 48, val bands: Int = 1) {
 
     companion object {
-        const val NDELTA = 33
-        const val DELTA_MIN = -2.0f
-        const val DELTA_MAX = 6.0f
+        const val NDELTA = 37
+        const val DELTA_MIN = -3.0f
+        const val DELTA_MAX = 9.0f
         /** Kuşak merkezlerinin dikişe uzaklığı (derece, ±) */
-        const val BAND_SPAN = 6.0f
+        const val BAND_SPAN = 8.0f
         private const val ROWS = NDELTA + 1
 
         private const val VS = """#version 300 es

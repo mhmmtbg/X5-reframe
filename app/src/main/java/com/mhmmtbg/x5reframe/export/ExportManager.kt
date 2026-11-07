@@ -139,6 +139,7 @@ object ExportManager {
                 { t -> stab?.base(t / 1e6, e.stabMode, e.stabStrength, e.inUs / 1e6) },
                 e.layout.rects, e.stitchInv, seg.speed,
                 layers = e.layers,
+                color = if (e.color.isIdentity) null else e.color.uniforms(),
                 fadeInUs = if (i > 0 && segs[i - 1].transitionOut == Transition.FADE) fade else 0,
                 fadeOutUs = if (i < segs.size - 1 && seg.transitionOut == Transition.FADE) fade else 0,
             )

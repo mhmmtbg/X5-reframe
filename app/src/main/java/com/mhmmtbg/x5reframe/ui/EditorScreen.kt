@@ -96,11 +96,11 @@ class EditorActions(
 
 /** Düzenleyici araç çubuğu (yatay kaydırılır). Paneli olmayanlar (Anlık görüntü) doğrudan çalışır. */
 private enum class Tool(val label: String) {
-    TRIM("Kes"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), MULTI("Çoklu açı"),
+    TRIM("Kes"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), COLOR("Renk"), MULTI("Çoklu açı"),
     STAB("Sabitleme"), AUDIO("Ses"), LAYER("Metin"), SNAPSHOT("Anlık görüntü"), STITCH("Dikiş");
 
     val icon: androidx.compose.ui.graphics.vector.ImageVector get() = when (this) {
-        TRIM -> Glyphs.Cut; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe
+        TRIM -> Glyphs.Cut; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe; COLOR -> Glyphs.Palette
         MULTI -> Glyphs.Album; STAB -> Glyphs.Horizon; AUDIO -> Glyphs.VolumeOn; LAYER -> Glyphs.Text
         SNAPSHOT -> Glyphs.Camera; STITCH -> Glyphs.Stitch
     }
@@ -190,6 +190,7 @@ fun EditorScreen(
                     Tool.AUDIO -> AudioPanel(c, actions, seq)
                     Tool.KEYFRAME -> KeyframePanel(c, actions)
                     Tool.STITCH -> StitchPanel(c, actions)
+                    Tool.COLOR -> ColorPanel(c)
                     Tool.SNAPSHOT -> {}
                 }
             }
@@ -385,6 +386,54 @@ private fun KeyframePanel(c: EditorController, a: EditorActions) {
         if (c.activeKeyframes.isNotEmpty()) {
             Text("Tüm anahtar kareleri temizle", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.clickable { c.clearKeyframes() }.padding(vertical = 6.dp))
+        }
+    }
+}
+
+@Composable
+private fun ColorPanel(c: EditorController) {
+    val g = c.state.color
+    var tab by remember { mutableStateOf(0) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Segmented(listOf(0, 1), tab, { if (it == 0) "Filtre" else "Ayar" }, { tab = it }, Modifier.fillMaxWidth())
+        if (tab == 0) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.mhmmtbg.x5reframe.model.ColorGrade.Filter.values().forEach { f ->
+                    val on = f == g.filter
+                    Text(f.label, color = if (on) Palette.OnAccent else Palette.Text, style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Palette.Accent else Palette.SurfaceHigh)
+                            .clickable { c.setColor(g.copy(filter = f, filterStrength = 1f)); c.say("Filtre: ${f.label}") }
+                            .padding(horizontal = 12.dp, vertical = 9.dp))
+                }
+            }
+            if (g.filter != com.mhmmtbg.x5reframe.model.ColorGrade.Filter.NONE) {
+                LabeledRow("Şiddet") {
+                    Slider(
+                        value = g.filterStrength, onValueChange = { v -> c.updateColorLive { it.copy(filterStrength = v) } },
+                        onValueChangeFinished = { c.endColorGesture() }, modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                    )
+                    Text("%${(g.filterStrength * 100).toInt()}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
+                }
+            }
+        } else {
+            com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.values().forEach { a ->
+                val v = a.get(g)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(a.label, color = Palette.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(96.dp))
+                    Slider(
+                        value = v, onValueChange = { nv -> c.updateColorLive { a.set(it, nv) } },
+                        onValueChangeFinished = { c.endColorGesture() }, valueRange = a.min..a.max, modifier = Modifier.weight(1f),
+                        colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                    )
+                    Text((if (a == com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.EXPOSURE) "%+.1f".format(v) else "%+d".format((v * 100).toInt())),
+                        style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp).clickable { c.setColor(a.set(g, 0f)) })
+                }
+            }
+        }
+        if (!g.isIdentity) {
+            Text("Rengi sıfırla", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.clickable { c.setColor(com.mhmmtbg.x5reframe.model.ColorGrade()); c.say("Renk sıfırlandı") }.padding(vertical = 4.dp))
         }
     }
 }

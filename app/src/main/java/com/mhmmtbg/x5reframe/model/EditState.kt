@@ -58,6 +58,7 @@ data class EditState(
     val bitrate: BitrateLevel = BitrateLevel.STANDARD,
     /** Derin takip uygulanan aralıklar (zaman çizelgesinde yeşil). */
     val tracks: List<LongRange> = emptyList(),
+    val color: ColorGrade = ColorGrade(),
 ) {
     fun pane(i: Int): Pane = if (i == 0) Pane(keyframes, baseView)
         else extraPanes.getOrNull(i - 1) ?: Pane(baseView = baseView.copy(yaw = ViewParams.wrap(baseView.yaw + defaultPaneYaw[i % 4])))

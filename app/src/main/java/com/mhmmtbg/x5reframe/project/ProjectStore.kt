@@ -167,6 +167,11 @@ class ProjectStore(context: Context) {
             put("stabMode", e.stabMode.name); put("stabStrength", e.stabStrength)
             put("stitchDistance", e.stitchDistance)
             put("bitrate", e.bitrate.name)
+            put("color", JSONObject().apply {
+                val g = e.color
+                put("filter", g.filter.name); put("strength", g.filterStrength.toDouble())
+                com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.values().forEach { a -> put(a.name, a.get(g).toDouble()) }
+            })
             put("tracks", JSONArray().apply { e.tracks.forEach { r -> put(JSONArray().put(r.first).put(r.last)) } })
             put("layout", e.layout.name)
             put("layers", JSONArray().apply {
@@ -202,6 +207,15 @@ class ProjectStore(context: Context) {
                 stitchDistance = o.optDouble("stitchDistance", 0.0),
                 bitrate = runCatching { com.mhmmtbg.x5reframe.model.BitrateLevel.valueOf(o.optString("bitrate")) }
                     .getOrDefault(com.mhmmtbg.x5reframe.model.BitrateLevel.STANDARD),
+                color = o.optJSONObject("color")?.let { co ->
+                    var g = com.mhmmtbg.x5reframe.model.ColorGrade(
+                        runCatching { com.mhmmtbg.x5reframe.model.ColorGrade.Filter.valueOf(co.optString("filter")) }
+                            .getOrDefault(com.mhmmtbg.x5reframe.model.ColorGrade.Filter.NONE),
+                        co.optDouble("strength", 1.0).toFloat(),
+                    )
+                    com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.values().forEach { a -> g = a.set(g, co.optDouble(a.name, 0.0).toFloat()) }
+                    g
+                } ?: com.mhmmtbg.x5reframe.model.ColorGrade(),
                 tracks = (o.optJSONArray("tracks") ?: JSONArray()).let { arr ->
                     (0 until arr.length()).mapNotNull { i -> arr.optJSONArray(i)?.let { r -> r.getLong(0)..r.getLong(1) } }
                 },

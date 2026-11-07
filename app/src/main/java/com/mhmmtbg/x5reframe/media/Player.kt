@@ -37,6 +37,9 @@ class Player(
     @Volatile var layersProvider: () -> List<com.mhmmtbg.x5reframe.model.Layer> = { emptyList() }
     private var overlay: com.mhmmtbg.x5reframe.gl.OverlayRenderer? = null
 
+    /** Renk düzenlemesi (null = yok). */
+    @Volatile var colorProvider: () -> FloatArray? = { null }
+
     /** Sabitleme temel dönüşü (yoksa null). */
     @Volatile var baseProvider: (Long) -> DoubleArray? = { null }
 
@@ -238,6 +241,7 @@ class Player(
             program.updateStitch(source, if (playing) 10 else 1, if (playing) 0.4f else 0.7f)
             stitchPts = t
         }
+        program.color = colorProvider()
         program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))
         val layers = layersProvider()
         overlay?.retain(layers)

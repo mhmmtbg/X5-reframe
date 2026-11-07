@@ -64,6 +64,7 @@ class Exporter(
         val fadeInUs: Long = 0,
         val fadeOutUs: Long = 0,
         val layers: List<com.mhmmtbg.x5reframe.model.Layer> = emptyList(),
+        val color: FloatArray? = null,
     ) {
         val outputDurationUs: Long get() = ((endUs - startUs) / speed).toLong()
     }
@@ -180,6 +181,7 @@ class Exporter(
                 pfds += pfd
                 val program = ReframeProgram(job.clip.rig, highQualityStitch = true).apply {
                     stitchInvDistance = job.stitchInv
+                    color = job.color
                     dynamicStitch = context.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("dynamic_stitch", true)
                 }
                 val source = DualFrameSource(pfd.fileDescriptor, job.clip, realtime = false)
