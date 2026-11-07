@@ -35,6 +35,10 @@ class ScreenshotTest {
                     shot("ui_${tag}_$name")
                 }
             }
+            ActivityScenario.launch(com.mhmmtbg.x5reframe.camera.CameraActivity::class.java).use {
+                Thread.sleep(2500)
+                shot("ui_${tag}_camera")
+            }
             val clip = File("/data/local/tmp/clip.insv")
             val lrv = File("/data/local/tmp/clip.lrv")
             if (!clip.exists()) continue

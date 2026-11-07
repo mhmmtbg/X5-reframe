@@ -178,7 +178,15 @@ class MainActivity : AppCompatActivity() {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.fillMaxSize()) {
                     when (tab) {
-                        0 -> { Header("Albüm") { HeaderAction(Glyphs.Folder, "Klasör") { folderPicker.launch(null) } }; ExportBanner(); MediaTab() }
+                        0 -> {
+                            Header("Albüm") {
+                                HeaderAction(Glyphs.Wifi, "Kameraya bağlan") {
+                                    startActivity(Intent(this@MainActivity, com.mhmmtbg.x5reframe.camera.CameraActivity::class.java))
+                                }
+                                HeaderAction(Glyphs.Folder, "Klasör") { folderPicker.launch(null) }
+                            }
+                            ExportBanner(); MediaTab()
+                        }
                         1 -> { Header("Projeler") { HeaderAction(Glyphs.Add, "Yeni proje") { picker.launch(arrayOf("video/*", "application/octet-stream", "*/*")) } }; ExportBanner(); ProjectsTab() }
                         else -> { Header("Ayarlar") {}; SettingsTab { about = true } }
                     }
