@@ -308,7 +308,7 @@ class MainActivity : AppCompatActivity() {
                 visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), colors = fieldColors,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Kaydet", color = Palette.OnAccent, style = MaterialTheme.typography.labelLarge,
+                Text("Kaydet", color = if (keyInput.isNotBlank()) Palette.OnAccent else Palette.Disabled, style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (keyInput.isNotBlank()) Palette.Accent else Palette.SurfaceHigh)
                         .clickable(enabled = keyInput.isNotBlank()) {
                             com.mhmmtbg.x5reframe.ai.AiSettings.setKey(ctx, provider, keyInput); keyInput = ""; hasKey = true

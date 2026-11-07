@@ -148,7 +148,7 @@ fun SelectionBar(count: Int, onCancel: () -> Unit, onEdit: () -> Unit, onAuto: (
                 .clickable(enabled = count > 0, onClick = onAuto).padding(horizontal = 14.dp, vertical = 10.dp),
         )
         Text(
-            if (count > 1) "Birleştir" else "Düzenle", color = Palette.OnAccent, style = MaterialTheme.typography.labelLarge,
+            if (count > 1) "Birleştir" else "Düzenle", color = if (count > 0) Palette.OnAccent else Palette.Disabled, style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(if (count > 0) Palette.Accent else Palette.SurfaceHigh)
                 .clickable(enabled = count > 0, onClick = onEdit).padding(horizontal = 16.dp, vertical = 10.dp),
         )
