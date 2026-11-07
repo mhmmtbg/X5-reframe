@@ -145,10 +145,8 @@ def main(clip, out_dir):
         # Görsel: mevcut uygulama (sonsuz, kazançsız, ±5°) ve en iyi ayar için dikiş şeritleri
         if ti == 1:
             best = min(agg, key=lambda k: np.mean(agg[k]))
-            for name, (sgn, dist, use_gain, width) in {
-                'current': (1, 0, False, 0.09),
-                'best': (int(best.split('_')[0][1:]), float(best.split('_d')[1]), True, 0.25),
-            }.items():
+            for name, (key, use_gain, width) in {'current': ('s1_d0', False, 0.09), 'best': (best, True, 0.25)}.items():
+                sgn = int(key.split('_')[0][1:]); dist = float(key.split('_d')[1])
                 inv = 0 if dist == 0 else 1.0 / dist
                 out = np.zeros((H, W, 3), np.float32)
                 cs = []; zz = []
@@ -157,7 +155,7 @@ def main(clip, out_dir):
                     c = p @ L['R']
                     u, v, z = project(L, c)
                     cs.append(sample(imgs[i], u, v)); zz.append(z)
-                g = fr[f"s{sgn}_d{dist if dist else 0}"]['gain'] if use_gain else [1, 1, 1]
+                g = fr[key]['gain'] if use_gain else [1, 1, 1]
                 cs[1] = cs[1] * np.array(g)
                 diff = zz[0] - zz[1]
                 w0 = np.clip((diff + width) / (2 * width), 0, 1)
