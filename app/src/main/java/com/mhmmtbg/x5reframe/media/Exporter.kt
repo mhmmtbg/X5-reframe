@@ -185,6 +185,7 @@ class Exporter(
                     val end = job.endUs.coerceAtMost(job.clip.durationUs)
                     val nFrames = (((end - job.startUs) / job.speed) / frameDur).toLong().coerceAtLeast(1)
                     if (source.seekAndShow(job.startUs, frameDur) < 0) continue
+                    var stitchPts = -1L
                     for (k in 0 until nFrames) {
                         if (cancelled) break
                         val tSrc = job.startUs + (k * frameDur * job.speed).toLong()
@@ -197,6 +198,7 @@ class Exporter(
                         val tOut = k * frameDur
                         program.fade = fadeFactor(job, tOut)
                         val pts = source.currentPts
+                        if (pts != stitchPts) { program.updateStitch(source, 3, 0.5f); stitchPts = pts }
                         program.drawScene(output.width, output.height, job.layoutRects, job.sceneAt(pts), source, job.baseAt(pts))
                         overlay.draw(output.width, output.height, job.layers, pts)
                         egl.setPresentationTime(win, (timeline + tOut) * 1000)

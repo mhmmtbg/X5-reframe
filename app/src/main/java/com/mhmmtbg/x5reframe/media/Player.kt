@@ -66,6 +66,7 @@ class Player(
 
     @Volatile private var pendingSeek = -1L
     @Volatile private var redrawQueued = false
+    private var stitchPts = -1L
     private var released = false
 
     init {
@@ -171,6 +172,7 @@ class Player(
         if (target < 0 || released || !::source.isInitialized) return@Runnable
         pendingSeek = -1
         try {
+            if (kotlin.math.abs(target - source.currentPts) > 1_000_000) program.resetStitch()
             val pts = source.seekAndShow(target, frameDurUs)
             drawNow()
             if (pts >= 0) postPosition(pts)
@@ -224,6 +226,11 @@ class Player(
         if (window == EGL14.EGL_NO_SURFACE || !::source.isInitialized || !source.hasFrame) return
         egl.makeCurrent(window)
         val t = source.currentPts
+        if (t != stitchPts) {
+            // Oynatırken birkaç karede bir, dururken her yeni karede ölç.
+            program.updateStitch(source, if (playing) 6 else 1, if (playing) 0.35f else 0.7f)
+            stitchPts = t
+        }
         program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))
         val layers = layersProvider()
         overlay?.retain(layers)

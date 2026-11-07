@@ -37,6 +37,14 @@ class ReframeProgram(private val rig: Rig) {
     /** 0..1 parlaklık çarpanı (siyaha geçiş). */
     var fade = 1f
     private val uFade: Int
+    private val uSeam: Int
+    private val uSeamOn: Int
+    private val uSeamRange: Int
+
+    /** Bölgesel (dinamik) dikiş; kapalıyken klasik tek mesafeli dikiş. */
+    var dynamicStitch = true
+    val stitch = StitchEstimator(rig)
+    private var framesSinceEstimate = Int.MAX_VALUE / 2
 
     init {
         program = link(VS, FS)
@@ -55,6 +63,9 @@ class ReframeProgram(private val rig: Rig) {
         uStitch = GLES30.glGetUniformLocation(program, "uStitchInv")
         uFade = GLES30.glGetUniformLocation(program, "uFade")
         for (i in 0..1) uTrans[i] = GLES30.glGetUniformLocation(program, "uTrans$i")
+        uSeam = GLES30.glGetUniformLocation(program, "uSeam")
+        uSeamOn = GLES30.glGetUniformLocation(program, "uSeamOn")
+        uSeamRange = GLES30.glGetUniformLocation(program, "uSeamRange")
 
         val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
@@ -65,6 +76,20 @@ class ReframeProgram(private val rig: Rig) {
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo)
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, quad.size * 4, buf, GLES30.GL_STATIC_DRAW)
     }
+
+    /**
+     * Yeni karede dikişi gerekirse yeniden tahmin et.
+     * @param every kaç karede bir ölçülür (önizleme 6, dışa aktarım 3)
+     */
+    fun updateStitch(src: com.mhmmtbg.x5reframe.media.FrameSource, every: Int, smoothing: Float) {
+        if (!dynamicStitch || !src.hasFrame) return
+        if (++framesSinceEstimate < every) return
+        framesSinceEstimate = 0
+        stitch.estimate(src, smoothing)
+    }
+
+    /** Arama / klip değişimi: sonraki ölçüm doğrudan uygulanır. */
+    fun resetStitch() { stitch.reset(); framesSinceEstimate = Int.MAX_VALUE / 2 }
 
     /** @param base sabitlemeden gelen rig_from_view temel dönüşü (yoksa kamera çerçevesi) */
     fun draw(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray? = null) =
@@ -130,6 +155,11 @@ class ReframeProgram(private val rig: Rig) {
         GLES30.glUniform1i(uMode, view.projection.ordinal)
         GLES30.glUniform1f(uStitch, stitchInvDistance)
         GLES30.glUniform1f(uFade, fade)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, stitch.seamTexture)
+        GLES30.glUniform1i(uSeam, 2)
+        GLES30.glUniform1f(uSeamOn, if (dynamicStitch) 1f else 0f)
+        GLES30.glUniform2f(uSeamRange, StitchEstimator.DELTA_MIN, StitchEstimator.DELTA_MAX)
         for (i in 0..1) {
             val t = rig.lenses[i].translationRig
             GLES30.glUniform3f(uTrans[i], t[0].toFloat(), t[1].toFloat(), t[2].toFloat())
@@ -142,6 +172,7 @@ class ReframeProgram(private val rig: Rig) {
     }
 
     fun release() {
+        stitch.release()
         GLES30.glDeleteProgram(program)
         GLES30.glDeleteBuffers(1, intArrayOf(vbo), 0)
     }
@@ -195,7 +226,7 @@ void main() {
 }
 """
 
-        private const val FS = """#version 300 es
+        private val FS = """#version 300 es
 #extension GL_OES_EGL_image_external_essl3 : require
 precision highp float;
 in vec2 vNdc;
@@ -222,26 +253,13 @@ uniform float uStitchInv; // 1 / dikiş mesafesi
 uniform float uFade;
 uniform vec3 uTrans0;  // lens merkezleri (rig, metre)
 uniform vec3 uTrans1;
+uniform sampler2D uSeam;  // bölgesel dikiş: R kayma, G lens1 kazancı
+uniform float uSeamOn;
+uniform vec2 uSeamRange; // kayma aralığı (derece)
 
 const float COS_LIMIT = -0.17365; // lens alanı ~100 derece
 
-vec2 project(vec3 c, vec4 intr, vec4 d1, vec2 d2) {
-    c = normalize(c);
-    vec2 m = c.xy / (c.z + d2.y);
-    float r2 = dot(m, m);
-    float rad = 1.0 + d1.x * r2 + d1.y * r2 * r2 + d1.z * r2 * r2 * r2;
-    float p1 = d1.w;
-    float p2 = d2.x;
-    vec2 md = m * rad + vec2(2.0 * p1 * m.x * m.y + p2 * (r2 + 2.0 * m.x * m.x),
-                             2.0 * p2 * m.x * m.y + p1 * (r2 + 2.0 * m.y * m.y));
-    return vec2(intr.x * md.x + intr.z, intr.y * md.y + intr.w);
-}
-
-vec2 texCoord(mat4 texMat, vec4 sub, vec2 uv) {
-    vec2 q = vec2(sub.x * uv.x + sub.y, sub.z * uv.y + sub.w);
-    return (texMat * vec4(q.x, 1.0 - q.y, 0.0, 1.0)).xy;
-}
-
+""" + GlslCommon.LENS + """
 void main() {
     vec2 p = vNdc * uScale;
     vec3 dv;
@@ -267,17 +285,33 @@ void main() {
     }
     vec3 d = uView * dv;
 
-    // Dikiş mesafesi: noktayı R uzaklığa koy ve her lensin kendi merkezinden bak.
-    vec3 c0 = uCamFromRig0 * (d - uTrans0 * uStitchInv);
-    vec3 c1 = uCamFromRig1 * (d - uTrans1 * uStitchInv);
-    // Dikiş: iki lensin optik eksen farkına göre yumuşak geçiş (~±5 derece).
-    float w0 = smoothstep(-0.09, 0.09, c0.z - c1.z);
+    // Bölgesel dikiş: dikiş çemberindeki açıya göre iki lens ters yönlerde kaydırılır
+    // (paralaks telafisi), etki dikişten uzaklaştıkça sönümlenir.
+    float near = 1.0 - smoothstep(0.25, 0.6, abs(d.z));
+    vec3 e0 = d, e1 = d;
+    float g0 = 1.0, g1 = 1.0;
+    if (uSeamOn > 0.5 && near > 0.0) {
+        float u = atan(d.y, d.x) * 0.15915494 + 0.5;
+        vec4 sm = texture(uSeam, vec2(u, 0.5));
+        float delta = radians(mix(uSeamRange.x, uSeamRange.y, sm.r));
+        float k = tan(delta * 0.5) * near;
+        e0 = normalize(d + vec3(0.0, 0.0, k));
+        e1 = normalize(d - vec3(0.0, 0.0, k));
+        float g = sm.g + 0.5;               // lens0 / lens1 parlaklık oranı
+        float sg = sqrt(g);
+        g0 = mix(1.0, 1.0 / sg, near);
+        g1 = mix(1.0, sg, near);
+    }
+    vec3 c0 = uCamFromRig0 * (e0 - uTrans0 * uStitchInv);
+    vec3 c1 = uCamFromRig1 * (e1 - uTrans1 * uStitchInv);
+    // Geniş, yumuşak geçiş (~±6 derece); hizalama sonrası çift görüntü oluşmaz.
+    float w0 = smoothstep(-0.21, 0.21, d.z * 2.0);
     if (c0.z < COS_LIMIT) w0 = 0.0;
     if (c1.z < COS_LIMIT) w0 = 1.0;
 
     vec3 col = vec3(0.0);
-    if (w0 > 0.0) col += w0 * texture(uTex0, texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20))).rgb;
-    if (w0 < 1.0) col += (1.0 - w0) * texture(uTex1, texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21))).rgb;
+    if (w0 > 0.0) col += w0 * g0 * texture(uTex0, texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20))).rgb;
+    if (w0 < 1.0) col += (1.0 - w0) * g1 * texture(uTex1, texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21))).rgb;
     outColor = vec4(col * uFade, 1.0);
 }
 """
