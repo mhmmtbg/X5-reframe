@@ -96,6 +96,65 @@ class CameraActivity : AppCompatActivity() {
     }
     private var pendingDownload: List<CamFile>? = null
 
+    // ---- Önizleme: yalnızca küçük LRV ve .insv'nin sonundaki kalibrasyon verisi geçici olarak alınır ----
+
+    /** Önizleme hazırlanıyor: (dosya adı, ilerleme 0..1) */
+    private var previewing by mutableStateOf<Pair<String, Float>?>(null)
+    @Volatile private var previewCancel = false
+    private var previewFile: CamFile? = null
+
+    private val previewResult = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { r ->
+        val f = previewFile
+        if (r.resultCode == RESULT_OK && f != null &&
+            r.data?.getBooleanExtra(com.mhmmtbg.x5reframe.EditorActivity.RESULT_DOWNLOAD, false) == true) startDownload(listOf(f))
+    }
+
+    private fun previewDir() = java.io.File(cacheDir, "camera-preview").apply { mkdirs() }
+
+    private fun preview(f: CamFile) {
+        if (previewing != null) return
+        if (f.isPhoto) { message = "Fotoğrafı görmek için telefona aktar (fotoğraflar küçüktür)"; return }
+        val lrv = lrvFor(f) ?: run { message = "Bu çekimin önizleme dosyası (LRV) kamerada yok; görmek için telefona aktar."; return }
+        previewCancel = false
+        previewing = f.name to 0f
+        Thread {
+            try {
+                val dir = previewDir()
+                // Yalnızca son önizleme saklanır
+                dir.listFiles()?.filter { !it.name.startsWith(f.shotKey) }?.forEach { it.delete() }
+                val c = CameraLink.client()
+                val meta = java.io.File(dir, f.shotKey + ".meta")
+                if (!meta.exists() || meta.length() == 0L) meta.writeBytes(c.fetchTrailer(f))
+                val out = java.io.File(dir, f.shotKey + ".lrv")
+                if (out.length() != lrv.size) {
+                    val part = java.io.File(dir, f.shotKey + ".lrv.part")
+                    c.download(lrv.url, part.length(), { append -> java.io.FileOutputStream(part, append) }, { previewCancel }) { b ->
+                        runOnUiThread { previewing = f.name to (if (lrv.size > 0) b.toFloat() / lrv.size else 0f) }
+                    }
+                    part.renameTo(out)
+                }
+                runOnUiThread {
+                    previewing = null
+                    previewFile = f
+                    previewResult.launch(Intent(this, com.mhmmtbg.x5reframe.EditorActivity::class.java)
+                        .setData(android.net.Uri.fromFile(out))
+                        .putExtra(com.mhmmtbg.x5reframe.EditorActivity.EXTRA_VIEWER, true)
+                        .putExtra(com.mhmmtbg.x5reframe.EditorActivity.EXTRA_PREVIEW_META, android.net.Uri.fromFile(meta).toString()))
+                }
+            } catch (e: InterruptedException) {
+                runOnUiThread { previewing = null }
+            } catch (e: Throwable) {
+                runOnUiThread { previewing = null; message = "Önizleme açılamadı: ${e.message ?: e.javaClass.simpleName}" }
+            }
+        }.start()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Geçici önizleme dosyalarını temizle (telefonda yer kaplamasın)
+        if (isFinishing) previewDir().deleteRecursively()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { X5Theme { Screen() } }
@@ -208,6 +267,10 @@ class CameraActivity : AppCompatActivity() {
                             columns = GridCells.Fixed(3), contentPadding = PaddingValues(2.dp, 2.dp, 2.dp, 120.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Text("Dokun: önizle (indirmeden) · Uzun bas: seç ve telefona aktar", color = Palette.Muted,
+                                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                            }
                             items(list, key = { it.url }) { f ->
                                 val sel = f.url in selected
                                 val dl = CameraDownloads.items.lastOrNull { it.file.url == f.url }
@@ -215,13 +278,25 @@ class CameraActivity : AppCompatActivity() {
                                 Tile(f, sel, selected.isNotEmpty(), have, dl, Modifier.combinedClickable(
                                     onClick = {
                                         val k = f.url
-                                        selected = if (selected.isNotEmpty()) { if (k in selected) selected - k else selected + k } else setOf(k)
+                                        if (selected.isNotEmpty()) selected = if (k in selected) selected - k else selected + k
+                                        else preview(f)
                                     },
                                     onLongClick = { selected = selected + f.url },
                                 ))
                             }
                         }
                     }
+                }
+            }
+            previewing?.let { (name, p) ->
+                Column(Modifier.fillMaxWidth().background(Palette.Surface).padding(horizontal = 16.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Önizleme hazırlanıyor · $name · %${(p * 100).toInt()}", style = MaterialTheme.typography.bodySmall,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text("Vazgeç", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
+                            modifier = Modifier.clickable { previewCancel = true }.padding(start = 8.dp))
+                    }
+                    LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().height(4.dp), color = Palette.Accent, trackColor = Palette.SurfaceHigh)
                 }
             }
             Transfers()
@@ -264,7 +339,7 @@ class CameraActivity : AppCompatActivity() {
             listOf(
                 "1. Kamerada ekranı aşağı kaydırıp Wi-Fi'yi aç (kamera kendi ağını kurar).",
                 "2. Aşağıdan \"Bağlan\"a dokun; açılan pencerede kameranın ağını (adı \"X5 …\" ile başlar) seç.",
-                "3. Bağlanınca çekimler listelenir. Seç ve \"Telefona aktar\": video ve hızlı önizleme dosyası albüm klasörüne iner.",
+                "3. Bağlanınca çekimler listelenir. Hiçbir şey kendiliğinden inmez: dokununca önizlenir (telefona kaydedilmez), uzun basıp seçtiklerini \"Telefona aktar\" ile indirirsin.",
             ).forEach { Text(it, color = Palette.Muted, style = MaterialTheme.typography.bodyMedium) }
             Text("Resmi uygulama kameraya bağlıysa önce onu kapat; kamera aynı anda tek bağlantı kabul eder. Parola, kamerada Ayarlar > Wi-Fi bölümünde yazar.",
                 color = Palette.Muted, style = MaterialTheme.typography.bodySmall)

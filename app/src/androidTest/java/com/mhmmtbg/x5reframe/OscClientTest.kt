@@ -140,6 +140,21 @@ class OscClientTest {
     }
 
     @Test
+    fun fetchesOnlyTrailerForPreview() {
+        // .insv'nin sonu: 1000 baytlık Insta360 verisi, son 72 bayt altbilgi (boyut + sihirli dize)
+        val data = ByteArray(300_000) { (it % 251).toByte() }
+        val bb = java.nio.ByteBuffer.wrap(data, data.size - 72, 72).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        bb.putInt(data.size - 72 + 32, 1000)
+        "8db42d694ccc418790edff439fe026bf".toByteArray().copyInto(data, data.size - 32)
+        files["VID_20260926_141617_00_142.insv"] = data
+        val c = client()
+        val vid = c.listFiles().first { it.isVideo }
+        val tail = c.fetchTrailer(vid)
+        assertEquals(1000, tail.size)
+        assertArrayEquals(data.copyOfRange(data.size - 1000, data.size), tail)
+    }
+
+    @Test
     fun deletesFiles() {
         val c = client()
         val list = c.listFiles()

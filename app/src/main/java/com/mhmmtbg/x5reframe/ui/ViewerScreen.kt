@@ -73,6 +73,9 @@ class ViewerActions(
     val toggleFavorite: () -> Unit,
     /** Kameradaki dosyayı sil (izin yoksa null). */
     val delete: (() -> Unit)?,
+    /** Kameradan kablosuz önizleme: düzenleme/kaydetme yok, yalnızca bakış ve aktarma. */
+    val previewOnly: Boolean = false,
+    val download: (() -> Unit)? = null,
 )
 
 /** Kaydırma yerine dokunma: sol kenar düğmesi. */
@@ -122,7 +125,7 @@ fun ViewerScreen(
                 }
 
                 // Sol araç çubuğu
-                val items = listOf(
+                val items = if (a.previewOnly) emptyList() else listOf(
                     SideItem("Kes", Glyphs.Cut) { a.openEditor("trim") },
                     SideItem("Anahtar kare", Glyphs.Keyframe, c.activeKeyframeNear(c.positionUs) != null) { c.addOrUpdateKeyframe() },
                     SideItem("Anlık görüntü", Glyphs.Camera) { a.snapshot() },
@@ -166,9 +169,15 @@ fun ViewerScreen(
                     }
                     Seek(c, a.editor, a.record)
                     Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        BottomButton("Oto Düzenle", Glyphs.Sparkle, Modifier.weight(1f)) { a.autoEdit() }
-                        BottomButton("Düzenleyici", Glyphs.Tune, Modifier.weight(1f)) { a.openEditor(null) }
-                        BottomButton("Kaydet", Glyphs.Save, Modifier.weight(1f), primary = true) { showExport = true }
+                        if (a.previewOnly) {
+                            Text("Kameradan önizleme · telefona indirilmedi", color = Color(0xCCFFFFFF), style = MaterialTheme.typography.labelMedium,
+                                modifier = Modifier.weight(1.4f).align(Alignment.CenterVertically))
+                            a.download?.let { BottomButton("Telefona aktar", Glyphs.Save, Modifier.weight(1f), primary = true, onClick = it) }
+                        } else {
+                            BottomButton("Oto Düzenle", Glyphs.Sparkle, Modifier.weight(1f)) { a.autoEdit() }
+                            BottomButton("Düzenleyici", Glyphs.Tune, Modifier.weight(1f)) { a.openEditor(null) }
+                            BottomButton("Kaydet", Glyphs.Save, Modifier.weight(1f), primary = true) { showExport = true }
+                        }
                     }
                 }
             }

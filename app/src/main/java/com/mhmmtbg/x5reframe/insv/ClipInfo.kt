@@ -53,6 +53,52 @@ class ClipInfo(
             }
         }.getOrNull()
 
+        /**
+         * Kablosuz önizleme: video indirilmeden, yalnızca LRV ve .insv'nin sonundaki Insta360 verisiyle.
+         * [trailerUri] .insv'nin son baytlarını içeren dosya. Kare çözümü LRV'den yapılır.
+         */
+        fun forPreview(context: Context, trailerUri: Uri, lrvUri: Uri): ClipInfo {
+            val lrv = probeLrv(context, lrvUri) ?: throw IllegalStateException("önizleme dosyası okunamadı")
+            var gyroRecord: ByteArray? = null
+            val meta = context.contentResolver.openFileDescriptor(trailerUri, "r")!!.use { pfd ->
+                FileInputStream(pfd.fileDescriptor).channel.use { ch ->
+                    val tr = Trailer.open(ch)
+                    val raw = tr.read(Trailer.ID_METADATA) ?: throw IllegalStateException("metadata kaydı yok")
+                    gyroRecord = tr.read(Trailer.ID_GYRO)
+                    Proto(raw).fields()
+                }
+            }
+            val imu = gyroRecord?.let { g -> runCatching { Imu.parse(g, meta) }.getOrNull() }?.takeIf { it.size > 100 }
+            val camera = meta.string(TAG_CAMERA_TYPE) ?: "?"
+            val offset = meta.string(TAG_OFFSET_V3) ?: throw IllegalStateException("Bu klipte lens kalibrasyonu yok")
+            val crop = meta.message(TAG_WINDOW_CROP)?.let { m ->
+                val sw = (m.long(1) ?: 0).toInt(); val sh = (m.long(2) ?: 0).toInt()
+                val dw = (m.long(3) ?: 0).toInt(); val dh = (m.long(4) ?: 0).toInt()
+                if (sw > 0 && sh > 0 && dw > 0 && dh > 0) WindowCrop(sw, sh, dw, dh, (m.long(5) ?: 0).toInt(), (m.long(6) ?: 0).toInt()) else null
+            }
+            val reversed = camera in TRACK_ORDER_BODIES && meta.long(TAG_MULTI_TRACK_ORDER) == TRACK0_STREAM10
+            var audio: Int? = null; var dur = 0L; var fps = 30f
+            context.contentResolver.openFileDescriptor(lrvUri, "r")!!.use { pfd ->
+                val ex = MediaExtractor()
+                try {
+                    ex.setDataSource(pfd.fileDescriptor)
+                    for (i in 0 until ex.trackCount) {
+                        val f = ex.getTrackFormat(i)
+                        val mime = f.getString(MediaFormat.KEY_MIME) ?: continue
+                        if (mime.startsWith("audio/") && audio == null) audio = i
+                        if (mime.startsWith("video/")) {
+                            if (f.containsKey(MediaFormat.KEY_DURATION)) dur = maxOf(dur, f.getLong(MediaFormat.KEY_DURATION))
+                            if (f.containsKey(MediaFormat.KEY_FRAME_RATE)) fps = runCatching { f.getInteger(MediaFormat.KEY_FRAME_RATE).toFloat() }
+                                .getOrElse { f.getFloat(MediaFormat.KEY_FRAME_RATE) }
+                        }
+                    }
+                } finally { ex.release() }
+            }
+            // videoTracks boş: tam çözünürlüklü izler yok, her şey LRV'den
+            return ClipInfo(lrvUri, camera, Rig.fromOffsetV3(offset, crop, reversed), emptyList(), audio,
+                lrv.width / 2, lrv.height, dur, fps, lrv, imu)
+        }
+
         fun load(context: Context, uri: Uri, lrvUri: Uri? = null): ClipInfo {
             val pfd = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: throw IllegalStateException("dosya açılamadı")

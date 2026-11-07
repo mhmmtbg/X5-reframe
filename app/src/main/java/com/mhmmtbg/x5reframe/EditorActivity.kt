@@ -55,6 +55,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     /** Oynatıcı sayfası (albümden açılınca) ya da düzenleyici. */
     private var viewer by mutableStateOf(false)
     private var cameFromViewer = false
+    /** Kameradan kablosuz önizleme (indirilmemiş çekim): yalnızca bakılır, kaydedilmez. */
+    private var previewOnly = false
     private var editorStartTool by mutableStateOf<String?>(null)
     private var cleanToggles by mutableStateOf(0)
     private var favorite by mutableStateOf(false)
@@ -460,6 +462,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val newUri: Uri? = if (existing == null) intent.data ?: run { finish(); return } else null
         viewer = intent.getBooleanExtra(EXTRA_VIEWER, false)
         cameFromViewer = viewer
+        previewOnly = intent.getStringExtra(EXTRA_PREVIEW_META) != null
+        // Kablosuz önizleme: proje kaydedilmez
+        if (previewOnly) store.readOnly = true
         setContent {
             X5Theme {
                 val c = controller
@@ -479,7 +484,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             }
         }
         lifecycleScope.launch {
-            val reuse = if (existing == null && viewer) withContext(Dispatchers.IO) {
+            val reuse = if (existing == null && viewer && !previewOnly) withContext(Dispatchers.IO) {
                 store.list().firstOrNull { it.segments.size == 1 && it.segments[0].clipUri == newUri }
             } else null
             val proj = existing ?: reuse ?: run {
@@ -489,7 +494,12 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                         this@EditorActivity, com.mhmmtbg.x5reframe.project.LrvFinder.savedFolder(this@EditorActivity), displayName(newUri!!),
                     )
                 }
-                val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, newUri!!, lrvUri) } }
+                val r = withContext(Dispatchers.IO) {
+                    runCatching {
+                        val meta = intent.getStringExtra(EXTRA_PREVIEW_META)?.let(Uri::parse)
+                        if (meta != null) ClipInfo.forPreview(this@EditorActivity, meta, newUri!!) else ClipInfo.load(this@EditorActivity, newUri!!, lrvUri)
+                    }
+                }
                 val clip = r.getOrElse { loadError = it.message ?: it.javaClass.simpleName; return@launch }
                 clipCache[newUri.toString()] = clip
                 withContext(Dispatchers.IO) {
@@ -827,7 +837,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             prefs.edit().putStringSet("favorites", set).apply()
             c.say(if (favorite) "Favorilere eklendi" else "Favorilerden çıkarıldı")
         },
-        delete = if (android.provider.DocumentsContract.isDocumentUri(this, c.clip.uri)) ({ deleteClip(c) }) else null,
+        delete = if (!previewOnly && android.provider.DocumentsContract.isDocumentUri(this, c.clip.uri)) ({ deleteClip(c) }) else null,
+        previewOnly = previewOnly,
+        download = if (previewOnly) ({ setResult(RESULT_OK, Intent().putExtra(RESULT_DOWNLOAD, true)); finish() }) else null,
     )
 
     /** Kameradaki çekimi ve LRV kopyasını sil; projesini de kaldır. */
@@ -1215,6 +1227,10 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         const val EXTRA_MORE = "more"
         const val EXTRA_VIEWER = "viewer"
         const val EXTRA_AUTO = "auto"
+        /** Kablosuz önizleme: .insv'nin son baytları (Insta360 verisi); data = önbellekteki LRV */
+        const val EXTRA_PREVIEW_META = "preview_meta"
+        /** Önizlemeden "Telefona aktar" denince sonuçta döner */
+        const val RESULT_DOWNLOAD = "download"
         /** Oto düzenlemede yön takibinin yumuşaklığı (FlowState'e yakın, ~0,6 sn). */
         const val AUTO_STAB_STRENGTH = 0.6
     }

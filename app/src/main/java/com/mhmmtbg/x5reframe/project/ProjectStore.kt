@@ -82,7 +82,11 @@ class ProjectStore(context: Context) {
         Segment(UUID.randomUUID().toString(), clipUri, clipName, durationUs, edit ?: EditState(outUs = durationUs), lrvUri)
 
     @Synchronized
+    /** Kablosuz önizlemede hiçbir şey diske yazılmaz (projeler listesine düşmez). */
+    @Volatile var readOnly = false
+
     fun save(p: Project) {
+        if (readOnly) return
         val tmp = File(dir, "${p.id}.json.tmp")
         tmp.writeText(toJson(p).toString())
         tmp.renameTo(File(dir, "${p.id}.json"))
@@ -100,6 +104,7 @@ class ProjectStore(context: Context) {
     }
 
     fun delete(id: String) {
+        if (readOnly) return
         File(dir, "$id.json").delete()
         thumbnail(id).delete()
     }
@@ -107,6 +112,7 @@ class ProjectStore(context: Context) {
     fun thumbnail(id: String) = File(dir, "$id.jpg")
 
     fun saveThumbnail(id: String, bmp: Bitmap) {
+        if (readOnly) return
         thumbnail(id).outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 82, it) }
     }
 

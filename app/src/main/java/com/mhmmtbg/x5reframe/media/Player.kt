@@ -49,7 +49,7 @@ class Player(
     private val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(clip.uri, "r")!!
     /** Varsa hafif LRV önizleme dosyası; yoksa asıl .insv kullanılır. */
     private val prefs = context.getSharedPreferences("prefs", Context.MODE_PRIVATE)
-    private val lrvPfd: ParcelFileDescriptor? = clip.lrv?.takeIf { prefs.getBoolean("prefer_lrv", true) }?.let { runCatching { context.contentResolver.openFileDescriptor(it.uri, "r") }.getOrNull() }
+    private val lrvPfd: ParcelFileDescriptor? = clip.lrv?.takeIf { prefs.getBoolean("prefer_lrv", true) || clip.videoTracks.size < 2 }?.let { runCatching { context.contentResolver.openFileDescriptor(it.uri, "r") }.getOrNull() }
     val usingLrv get() = lrvPfd != null
 
     private lateinit var egl: EglCore

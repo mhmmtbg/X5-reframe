@@ -135,6 +135,34 @@ class OscClient(private val base: String = "http://192.168.42.1", private val ne
         execute("camera.delete", JSONObject().put("fileUrls", arr), 60_000)
     }
 
+    /** Bayt aralığı (Range) iste; kamera desteklemezse hata. */
+    private fun range(url: String, from: Long, to: Long): ByteArray {
+        val c = open(url)
+        try {
+            c.connectTimeout = 8_000
+            c.readTimeout = 30_000
+            c.setRequestProperty("Range", "bytes=$from-$to")
+            if (c.responseCode != 206) throw OscException("Kamera kısmi okumayı desteklemiyor (HTTP ${c.responseCode})")
+            return c.inputStream.use { it.readBytes() }
+        } finally {
+            c.disconnect()
+        }
+    }
+
+    /**
+     * .insv dosyasının sonundaki Insta360 verisini (lens kalibrasyonu + hareket sensörü) indir.
+     * Video indirilmeden önizleme için yeterlidir; dönen baytlar dosyanın son kısmıdır.
+     */
+    fun fetchTrailer(f: CamFile): ByteArray {
+        require(f.size > 72) { "dosya boyutu bilinmiyor" }
+        val footer = range(f.url, f.size - 72, f.size - 1)
+        val magic = String(footer, 40, 32, Charsets.ISO_8859_1)
+        if (magic != "8db42d694ccc418790edff439fe026bf") throw OscException("Insta360 verisi bulunamadı")
+        val size = java.nio.ByteBuffer.wrap(footer).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt(32).toLong() and 0xffffffffL
+        if (size < 72 || size > minOf(f.size, 64L * 1024 * 1024)) throw OscException("Insta360 verisi geçersiz")
+        return range(f.url, f.size - size, f.size - 1)
+    }
+
     /**
      * Dosyayı indir; [offset] > 0 ise kaldığı yerden (Range). Kamera Range desteklemezse baştan yazılır
      * ve dönüş değeri false olur (çağıran hedefi sıfırlamalı).
