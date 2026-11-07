@@ -45,7 +45,8 @@ class Player(
     private val main = Handler(Looper.getMainLooper())
     private val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(clip.uri, "r")!!
     /** Varsa hafif LRV önizleme dosyası; yoksa asıl .insv kullanılır. */
-    private val lrvPfd: ParcelFileDescriptor? = clip.lrv?.let { runCatching { context.contentResolver.openFileDescriptor(it.uri, "r") }.getOrNull() }
+    private val prefs = context.getSharedPreferences("prefs", Context.MODE_PRIVATE)
+    private val lrvPfd: ParcelFileDescriptor? = clip.lrv?.takeIf { prefs.getBoolean("prefer_lrv", true) }?.let { runCatching { context.contentResolver.openFileDescriptor(it.uri, "r") }.getOrNull() }
     val usingLrv get() = lrvPfd != null
 
     private lateinit var egl: EglCore
@@ -73,7 +74,7 @@ class Player(
         handler.post {
             try {
                 egl = EglCore()
-                program = ReframeProgram(clip.rig)
+                program = ReframeProgram(clip.rig).apply { dynamicStitch = prefs.getBoolean("dynamic_stitch", true) }
                 overlay = com.mhmmtbg.x5reframe.gl.OverlayRenderer()
                 val lrv = clip.lrv
                 source = if (lrvPfd != null && lrv != null) {

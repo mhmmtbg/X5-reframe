@@ -25,6 +25,80 @@ class StitchEstimator(private val rig: Rig) {
         const val DELTA_MIN = -2.0f
         const val DELTA_MAX = 6.0f
         private const val ROWS = NDELTA + 1
+
+        private val VS = """#version 300 es
+layout(location = 0) in vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
+"""
+
+        private val FS = """#version 300 es
+#extension GL_OES_EGL_image_external_essl3 : require
+precision highp float;
+out vec4 outColor;
+uniform samplerExternalOES uTex0;
+uniform samplerExternalOES uTex1;
+uniform mat4 uTexMat0;
+uniform mat4 uTexMat1;
+uniform mat3 uCamFromRig0;
+uniform mat3 uCamFromRig1;
+uniform vec4 uIntr0;
+uniform vec4 uIntr1;
+uniform vec4 uDist0;
+uniform vec4 uDist1;
+uniform vec2 uDist20;
+uniform vec2 uDist21;
+uniform vec4 uSub0;
+uniform vec4 uSub1;
+
+const int BINS = $BINS;
+const int NDELTA = $NDELTA;
+const float DMIN = $DELTA_MIN;
+const float DMAX = $DELTA_MAX;
+
+${GlslCommon.LENS}
+
+float luma0(vec3 d) {
+    vec2 uv = project(uCamFromRig0 * d, uIntr0, uDist0, uDist20);
+    return dot(texture(uTex0, texCoord(uTexMat0, uSub0, uv)).rgb, vec3(0.299, 0.587, 0.114));
+}
+float luma1(vec3 d) {
+    vec2 uv = project(uCamFromRig1 * d, uIntr1, uDist1, uDist21);
+    return dot(texture(uTex1, texCoord(uTexMat1, uSub1, uv)).rgb, vec3(0.299, 0.587, 0.114));
+}
+
+void main() {
+    int bin = int(gl_FragCoord.x);
+    int row = int(gl_FragCoord.y);
+    float phi = (float(bin) + 0.5) / float(BINS) * 6.2831853 - 3.1415927;
+    float delta = radians(DMIN + (DMAX - DMIN) * float(min(row, NDELTA - 1)) / float(NDELTA - 1));
+    float k = row < NDELTA ? tan(delta * 0.5) : 0.0;
+    float sa = 0.0, sb = 0.0, saa = 0.0, sbb = 0.0, sd = 0.0, sdd = 0.0;
+    float n = 0.0;
+    for (int i = 0; i < 8; i++) {
+        float along = radians(-3.5 + float(i));
+        float cp = cos(phi + along), sp = sin(phi + along);
+        for (int j = 0; j < 9; j++) {
+            float off = radians(-4.0 + float(j));
+            vec3 d = vec3(cos(off) * cp, cos(off) * sp, sin(off));
+            float a = luma0(normalize(d + vec3(0.0, 0.0, k)));
+            float b = luma1(normalize(d - vec3(0.0, 0.0, k)));
+            sa += a; sb += b; saa += a * a; sbb += b * b;
+            float df = a - b; sd += df; sdd += df * df;
+            n += 1.0;
+        }
+    }
+    float ma = sa / n, mb = sb / n;
+    float va = max(saa / n - ma * ma, 0.0), vb = max(sbb / n - mb * mb, 0.0);
+    if (row < NDELTA) {
+        float vd = max(sdd / n - (sd / n) * (sd / n), 0.0);
+        float c = clamp(vd / (va + vb + 1e-4), 0.0, 1.999) * 0.5;   // 0..1
+        float hi = floor(c * 255.0) / 255.0;
+        outColor = vec4(hi, fract(c * 255.0), 0.0, 1.0);
+    } else {
+        outColor = vec4(sqrt(va), 0.0, ma, mb);
+    }
+}
+"""
     }
 
     /** BINS x 1 RGBA8: R = kayma (DELTA_MIN..DELTA_MAX), G = lens1 kazancı (0.5..1.5). */
@@ -212,78 +286,4 @@ class StitchEstimator(private val rig: Rig) {
         GLES30.glDeleteProgram(program)
         GLES30.glDeleteBuffers(1, intArrayOf(vbo), 0)
     }
-
-    private val VS = """#version 300 es
-layout(location = 0) in vec2 aPos;
-void main() { gl_Position = vec4(aPos, 0.0, 1.0); }
-"""
-
-    private val FS = """#version 300 es
-#extension GL_OES_EGL_image_external_essl3 : require
-precision highp float;
-out vec4 outColor;
-uniform samplerExternalOES uTex0;
-uniform samplerExternalOES uTex1;
-uniform mat4 uTexMat0;
-uniform mat4 uTexMat1;
-uniform mat3 uCamFromRig0;
-uniform mat3 uCamFromRig1;
-uniform vec4 uIntr0;
-uniform vec4 uIntr1;
-uniform vec4 uDist0;
-uniform vec4 uDist1;
-uniform vec2 uDist20;
-uniform vec2 uDist21;
-uniform vec4 uSub0;
-uniform vec4 uSub1;
-
-const int BINS = $BINS;
-const int NDELTA = $NDELTA;
-const float DMIN = $DELTA_MIN;
-const float DMAX = $DELTA_MAX;
-
-${GlslCommon.LENS}
-
-float luma0(vec3 d) {
-    vec2 uv = project(uCamFromRig0 * d, uIntr0, uDist0, uDist20);
-    return dot(texture(uTex0, texCoord(uTexMat0, uSub0, uv)).rgb, vec3(0.299, 0.587, 0.114));
-}
-float luma1(vec3 d) {
-    vec2 uv = project(uCamFromRig1 * d, uIntr1, uDist1, uDist21);
-    return dot(texture(uTex1, texCoord(uTexMat1, uSub1, uv)).rgb, vec3(0.299, 0.587, 0.114));
-}
-
-void main() {
-    int bin = int(gl_FragCoord.x);
-    int row = int(gl_FragCoord.y);
-    float phi = (float(bin) + 0.5) / float(BINS) * 6.2831853 - 3.1415927;
-    float delta = radians(DMIN + (DMAX - DMIN) * float(min(row, NDELTA - 1)) / float(NDELTA - 1));
-    float k = row < NDELTA ? tan(delta * 0.5) : 0.0;
-    float sa = 0.0, sb = 0.0, saa = 0.0, sbb = 0.0, sd = 0.0, sdd = 0.0;
-    float n = 0.0;
-    for (int i = 0; i < 8; i++) {
-        float along = radians(-3.5 + float(i));
-        float cp = cos(phi + along), sp = sin(phi + along);
-        for (int j = 0; j < 9; j++) {
-            float off = radians(-4.0 + float(j));
-            vec3 d = vec3(cos(off) * cp, cos(off) * sp, sin(off));
-            float a = luma0(normalize(d + vec3(0.0, 0.0, k)));
-            float b = luma1(normalize(d - vec3(0.0, 0.0, k)));
-            sa += a; sb += b; saa += a * a; sbb += b * b;
-            float df = a - b; sd += df; sdd += df * df;
-            n += 1.0;
-        }
-    }
-    float ma = sa / n, mb = sb / n;
-    float va = max(saa / n - ma * ma, 0.0), vb = max(sbb / n - mb * mb, 0.0);
-    if (row < NDELTA) {
-        float vd = max(sdd / n - (sd / n) * (sd / n), 0.0);
-        float c = clamp(vd / (va + vb + 1e-4), 0.0, 1.999) * 0.5;   // 0..1
-        float hi = floor(c * 255.0) / 255.0;
-        outColor = vec4(hi, fract(c * 255.0), 0.0, 1.0);
-    } else {
-        outColor = vec4(sqrt(va), 0.0, ma, mb);
-    }
-}
-"""
 }

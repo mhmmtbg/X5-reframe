@@ -178,7 +178,10 @@ class Exporter(
                 if (cancelled) break
                 val pfd = context.contentResolver.openFileDescriptor(job.clip.uri, "r")!!
                 pfds += pfd
-                val program = ReframeProgram(job.clip.rig).apply { stitchInvDistance = job.stitchInv }
+                val program = ReframeProgram(job.clip.rig).apply {
+                    stitchInvDistance = job.stitchInv
+                    dynamicStitch = context.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("dynamic_stitch", true)
+                }
                 val source = DualFrameSource(pfd.fileDescriptor, job.clip, realtime = false)
                 try {
                     val audio = if (output.mix == null && output.includeAudio && job.speed == 1.0) openAudio(pfd, job) else null
