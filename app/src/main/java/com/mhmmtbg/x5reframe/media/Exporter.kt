@@ -178,7 +178,7 @@ class Exporter(
                 if (cancelled) break
                 val pfd = context.contentResolver.openFileDescriptor(job.clip.uri, "r")!!
                 pfds += pfd
-                val program = ReframeProgram(job.clip.rig).apply {
+                val program = ReframeProgram(job.clip.rig, highQualityStitch = true).apply {
                     stitchInvDistance = job.stitchInv
                     dynamicStitch = context.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("dynamic_stitch", true)
                 }

@@ -14,7 +14,7 @@ import kotlin.math.tan
  * İki fisheye izi doğrudan düz kadraja çizer: çıktı pikseli → ışın → lens → doku.
  * Ara 360 (equirect) görüntü üretilmez; dışa aktarımı hızlı yapan budur.
  */
-class ReframeProgram(private val rig: Rig) {
+class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
 
     private val program: Int
     private val vbo: Int
@@ -40,10 +40,12 @@ class ReframeProgram(private val rig: Rig) {
     private val uSeam: Int
     private val uSeamOn: Int
     private val uSeamRange: Int
+    private val uSeamBands: Int
 
     /** Bölgesel (dinamik) dikiş; kapalıyken klasik tek mesafeli dikiş. */
     var dynamicStitch = true
-    val stitch = StitchEstimator(rig)
+    /** Önizleme: 48 bölge; dışa aktarım: 192 bölge x 3 kuşak (ince taneli). */
+    val stitch = if (highQualityStitch) StitchEstimator(rig, 192, 3) else StitchEstimator(rig, 48, 1)
     private var framesSinceEstimate = Int.MAX_VALUE / 2
 
     init {
@@ -66,6 +68,7 @@ class ReframeProgram(private val rig: Rig) {
         uSeam = GLES30.glGetUniformLocation(program, "uSeam")
         uSeamOn = GLES30.glGetUniformLocation(program, "uSeamOn")
         uSeamRange = GLES30.glGetUniformLocation(program, "uSeamRange")
+        uSeamBands = GLES30.glGetUniformLocation(program, "uSeamBands")
 
         val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
@@ -160,6 +163,7 @@ class ReframeProgram(private val rig: Rig) {
         GLES30.glUniform1i(uSeam, 2)
         GLES30.glUniform1f(uSeamOn, if (dynamicStitch) 1f else 0f)
         GLES30.glUniform2f(uSeamRange, StitchEstimator.DELTA_MIN, StitchEstimator.DELTA_MAX)
+        GLES30.glUniform2f(uSeamBands, stitch.bands.toFloat(), StitchEstimator.BAND_SPAN)
         for (i in 0..1) {
             val t = rig.lenses[i].translationRig
             GLES30.glUniform3f(uTrans[i], t[0].toFloat(), t[1].toFloat(), t[2].toFloat())
@@ -256,6 +260,7 @@ uniform vec3 uTrans1;
 uniform sampler2D uSeam;  // bölgesel dikiş: R kayma, G lens1 kazancı
 uniform float uSeamOn;
 uniform vec2 uSeamRange; // kayma aralığı (derece)
+uniform vec2 uSeamBands; // kuşak sayısı, kuşak merkezlerinin dikişe uzaklığı (derece)
 
 const float COS_LIMIT = -0.17365; // lens alanı ~100 derece
 
@@ -292,7 +297,9 @@ void main() {
     float g0 = 1.0, g1 = 1.0;
     if (uSeamOn > 0.5 && near > 0.0) {
         float u = atan(d.y, d.x) * 0.15915494 + 0.5;
-        vec4 sm = texture(uSeam, vec2(u, 0.5));
+        float t = clamp((degrees(asin(clamp(d.z, -1.0, 1.0))) + uSeamBands.y) / (2.0 * uSeamBands.y), 0.0, 1.0);
+        float v = (0.5 + t * (uSeamBands.x - 1.0)) / uSeamBands.x;
+        vec4 sm = texture(uSeam, vec2(u, v));
         float delta = radians(mix(uSeamRange.x, uSeamRange.y, sm.r));
         float k = tan(delta * 0.5) * near;
         e0 = normalize(d + vec3(0.0, 0.0, k));

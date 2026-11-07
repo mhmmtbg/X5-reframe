@@ -37,7 +37,7 @@ class StitchTest {
         val w = 2048; val h = 1024
         val pb = egl.createPbuffer(w, h)
         egl.makeCurrent(pb)
-        val program = ReframeProgram(clip.rig)
+        val program = ReframeProgram(clip.rig, highQualityStitch = true)
         val source = DualFrameSource(pfd.fileDescriptor, clip, realtime = false)
         val out = ctx.getExternalFilesDir(null)!!
         val view = ViewParams(projection = Projection.EQUIRECT, fov = 360.0)
@@ -65,8 +65,11 @@ class StitchTest {
             val on = read(w, h)
             val rep = program.stitch.lastReport
             log.append("t=${t / 1000} ms $rep\n")
-            log.append("delta=" + program.stitch.delta.joinToString(",") { "%.1f".format(it) } + "\n")
-            log.append("gain=" + program.stitch.gain.joinToString(",") { "%.2f".format(it) } + "\n")
+            val st = program.stitch
+            // Orta kuşak, 4 hücrede bir
+            val mid = (st.bands / 2) * st.bins
+            log.append("delta=" + (0 until st.bins step 4).joinToString(",") { "%.1f".format(st.delta[mid + it]) } + "\n")
+            log.append("gain=" + (0 until st.bins step 4).joinToString(",") { "%.2f".format(st.gain[mid + it]) } + "\n")
             Regex("maliyet ([0-9.]+) -> ([0-9.]+)").find(rep)?.let {
                 measured++
                 if (it.groupValues[2].toFloat() < it.groupValues[1].toFloat()) improved++
