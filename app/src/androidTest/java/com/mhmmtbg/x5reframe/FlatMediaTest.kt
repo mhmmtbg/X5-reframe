@@ -44,7 +44,7 @@ class FlatMediaTest {
     private val ctx = inst.targetContext
 
     /** 320x240 kare, sol üst çeyrek kırmızı, gerisi gri; 90° döndürme ipucu, [seconds] sn, 30 fps. */
-    private fun makeVideo(file: File, seconds: Int = 2, rotation: Int = 90) {
+    private fun makeVideo(file: File, seconds: Int = 2, rotation: Int = 90, ramp: Boolean = false) {
         val w = 320; val h = 240; val fps = 30
         val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -79,7 +79,8 @@ class FlatMediaTest {
         for (k in 0 until seconds * fps) {
             GLES30.glViewport(0, 0, w, h)
             GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
-            GLES30.glClearColor(0.5f, 0.5f, 0.5f, 1f)
+            val g = if (ramp) 0.1f + 0.8f * k / (seconds * fps) else 0.5f
+            GLES30.glClearColor(g, g, g, 1f)
             GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
             GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
             GLES30.glScissor(0, h / 2, w / 2, h / 2) // GL'de y aşağıdan: üst sol çeyrek
@@ -106,12 +107,12 @@ class FlatMediaTest {
     }
 
     /** Klibi [w]x[h] pbuffer'a çiz ve pikselleri (üst satır başta) döndür. */
-    private fun render(clip: ClipInfo, w: Int, h: Int, fit: FrameFit, view: ViewParams = ViewParams()): IntArray {
+    private fun render(clip: ClipInfo, w: Int, h: Int, fit: FrameFit, view: ViewParams = ViewParams(), look: com.mhmmtbg.x5reframe.model.FlatLook? = null): IntArray {
         val egl = EglCore()
         val pb = egl.createPbuffer(w, h)
         egl.makeCurrent(pb)
         val pfd = ctx.contentResolver.openFileDescriptor(clip.uri, "r")!!
-        val program = Sources.program(clip).apply { this.fit = fit }
+        val program = Sources.program(clip).apply { this.look = look ?: com.mhmmtbg.x5reframe.model.FlatLook(fit) }
         val src = Sources.open(ctx, clip, pfd.fileDescriptor, realtime = false)
         try {
             assertTrue(src.seekAndShow(500_000, 33_333) >= 0)
@@ -153,6 +154,12 @@ class FlatMediaTest {
         assertTrue("sol üst gri olmalı", isGray(tl))
         assertTrue("sağ alt gri olmalı", isGray(br))
 
+        // Yatay aynalama: kırmızı çeyrek sol üste geçer; sağ yarıyı kırpınca (yalnızca gri) kırmızı kalmaz.
+        val flip = render(clip, w, h, FrameFit.FIT, look = com.mhmmtbg.x5reframe.model.FlatLook(flipH = true))
+        assertTrue("aynalamada sol üst kırmızı olmalı", isRed(flip[(h / 4) * w + w / 4]))
+        val crop = render(clip, w, h, FrameFit.FILL, look = com.mhmmtbg.x5reframe.model.FlatLook(FrameFit.FILL, com.mhmmtbg.x5reframe.model.CropRect(0f, 0.55f, 1f, 1f)))
+        assertTrue("kırpılan alt kısımda kırmızı olmamalı", !isRed(crop[(h / 4) * w + 3 * w / 4]) && !isRed(crop[(3 * h / 4) * w + 3 * w / 4]))
+
         // Yatay 16:9 çıktıda sığdır → yanlar siyah; doldur → kenarlar görüntü.
         val W = 320; val H = 180
         val fitPx = render(clip, W, H, FrameFit.FIT)
@@ -185,7 +192,7 @@ class FlatMediaTest {
         val flat = ClipInfo.load(ctx, Uri.fromFile(vid))
         val photo = ClipInfo.load(ctx, Uri.fromFile(img))
         val jobs = mutableListOf(
-            Exporter.Job(flat, 0, 1_500_000, { listOf(ViewParams()) }, fit = FrameFit.BLUR),
+            Exporter.Job(flat, 0, 1_500_000, { listOf(ViewParams()) }, look = com.mhmmtbg.x5reframe.model.FlatLook(FrameFit.BLUR)),
             Exporter.Job(photo, 0, 1_000_000, { t -> listOf(ViewParams(fov = 90.0 / (1.0 + t / 2e6))) }, fadeInUs = 300_000),
         )
         val insv = File("/data/local/tmp/clip.insv")
@@ -212,6 +219,37 @@ class FlatMediaTest {
         val expected = jobs.sumOf { it.endUs - it.startUs }
         android.util.Log.i("FlatMediaTest", "mixed export dur=$durUs expected=$expected frames=${ex.videoWritten} audio=${ex.audioWritten}")
         assertTrue("süre beklenenden farklı: $durUs / $expected", kotlin.math.abs(durUs - expected) < 200_000)
+    }
+
+    /** Ters oynatma: parlaklığı zamanla artan videonun tersinde ilk kare son kareden parlak olmalı. Hız eğrisiyle süre değişir. */
+    @Test
+    fun exportsReversedAndCurved() {
+        val vid = File(ctx.cacheDir, "ramp.mp4").also { makeVideo(it, 3, 0, ramp = true) }
+        val clip = ClipInfo.load(ctx, Uri.fromFile(vid))
+        val jobs = listOf(
+            Exporter.Job(clip, 0, 2_000_000, { listOf(ViewParams()) }, reverse = true),
+            Exporter.Job(clip, 0, 2_000_000, { listOf(ViewParams()) }, curve = com.mhmmtbg.x5reframe.model.SpeedCurve.MONTAGE),
+        )
+        val done = CountDownLatch(1)
+        var outUri: Uri? = null; var error: String? = null
+        val ex = Exporter(ctx, Exporter.Output(320, 240, false, 2_000_000), jobs, object : Exporter.Listener {
+            override fun onProgress(fraction: Float, speed: Float) {}
+            override fun onDone(uri: Uri, seconds: Float) { outUri = uri; done.countDown() }
+            override fun onFailed(message: String) { error = message; done.countDown() }
+        })
+        Thread { ex.run() }.start()
+        assertTrue("zaman aşımı", done.await(10, TimeUnit.MINUTES))
+        assertTrue("dışa aktarım hatası: $error", error == null && outUri != null)
+        val r = android.media.MediaMetadataRetriever()
+        ctx.contentResolver.openFileDescriptor(outUri!!, "r")!!.use { r.setDataSource(it.fileDescriptor) }
+        fun lum(us: Long): Int = r.getFrameAtTime(us, android.media.MediaMetadataRetriever.OPTION_CLOSEST)!!.let { b -> Color.red(b.getPixel(b.width / 2, b.height / 2)) }
+        val first = lum(50_000); val last = lum(1_900_000)
+        val dur = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)!!.toLong() * 1000
+        r.release()
+        val expected = 2_000_000 + com.mhmmtbg.x5reframe.model.SpeedMap(2_000_000, 1.0, com.mhmmtbg.x5reframe.model.SpeedCurve.MONTAGE).outputUs
+        android.util.Log.i("FlatMediaTest", "reverse first=$first last=$last dur=$dur expected=$expected")
+        assertTrue("ters oynatmada ilk kare daha parlak olmalı: $first / $last", first > last + 40)
+        assertTrue("eğrili süre beklenenden farklı: $dur / $expected", kotlin.math.abs(dur - expected) < 250_000)
     }
 
     @Test

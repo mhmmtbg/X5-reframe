@@ -134,7 +134,8 @@ data class MusicSpec(val uri: Uri, val volume: Float, val loop: Boolean, val fad
 
 /**
  * Zaman çizelgesi boyunca orijinal sesleri ve müziği karıştırır; sırayla PCM üretir.
- * Hızı 1× olmayan parçalarda orijinal ses sessizdir.
+ * Hızı değişen parçalarda ses perdesi korunarak hızlandırılır / yavaşlatılır ([TimeStretch]);
+ * 0,25×'ten yavaş ya da 4×'ten hızlı parçalar sessizdir.
  */
 class AudioMixer(
     private val context: Context,
@@ -148,8 +149,14 @@ class AudioMixer(
     private var producedFrames = 0L
     private var segIdx = -1
     private var segReader: PcmReader? = null
+    private var stretch: TimeStretch? = null
     private var musicReader: PcmReader? = null
     private val tmp = ShortArray(2048 * 2)
+
+    companion object {
+        /** Bu hızda orijinal ses duyulur mu (perde korunarak). */
+        fun hasAudioAt(speed: Double) = speed in 0.25..4.0
+    }
 
     val producedUs: Long get() = producedFrames * 1_000_000 / MIX_RATE
 
@@ -164,16 +171,19 @@ class AudioMixer(
             val seg = segments.getOrNull(s)
             val segEndFrame = if (seg != null) (seg.offsetUs + seg.durationUs) * MIX_RATE / 1_000_000 else Long.MAX_VALUE
             val chunk = minOf(n - i, (segEndFrame - (producedFrames + i)).coerceAtLeast(1).toInt())
-            if (seg != null && seg.speed == 1.0 && seg.audioTrack != null && originalVolume > 0f) {
+            if (seg != null && seg.audioTrack != null && originalVolume > 0f && hasAudioAt(seg.speed)) {
                 if (segIdx != s) {
                     segReader?.close()
-                    segReader = PcmReader(context, seg.uri, seg.audioTrack, seg.startUs + (tUs - seg.offsetUs))
+                    val r = PcmReader(context, seg.uri, seg.audioTrack, seg.startUs + ((tUs - seg.offsetUs) * seg.speed).toLong())
+                    segReader = r
+                    stretch = if (seg.speed == 1.0) null else TimeStretch(seg.speed) { n, buf -> r.read(n, buf, 1f, false) }
                     segIdx = s
                 }
-                segReader!!.read(chunk, tmp, originalVolume, false)
+                val st = stretch
+                if (st != null) st.read(chunk, tmp, originalVolume) else segReader!!.read(chunk, tmp, originalVolume, false)
                 System.arraycopy(tmp, 0, out, i * 2, chunk * 2)
             } else if (segIdx != s) {
-                segReader?.close(); segReader = null; segIdx = s
+                segReader?.close(); segReader = null; stretch = null; segIdx = s
             }
             i += chunk
         }

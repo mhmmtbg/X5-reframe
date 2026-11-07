@@ -106,18 +106,18 @@ class EditorActions(
 
 /** Düzenleyici araç çubuğu (yatay kaydırılır). Paneli olmayanlar (Anlık görüntü) doğrudan çalışır. */
 private enum class Tool(val label: String) {
-    AI("Yapay zekâ"), TRIM("Kes"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), COLOR("Renk"), MULTI("Çoklu açı"),
+    AI("Yapay zekâ"), TRIM("Kes"), SPEED("Hız"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), COLOR("Renk"), MULTI("Çoklu açı"),
     STAB("Sabitleme"), AUDIO("Ses"), LAYER("Metin"), SNAPSHOT("Anlık görüntü"), STITCH("Dikiş");
 
     val icon: androidx.compose.ui.graphics.vector.ImageVector get() = when (this) {
-        AI -> Glyphs.Chat; TRIM -> Glyphs.Cut; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe; COLOR -> Glyphs.Palette
+        AI -> Glyphs.Chat; TRIM -> Glyphs.Cut; SPEED -> Glyphs.Speed; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe; COLOR -> Glyphs.Palette
         MULTI -> Glyphs.Album; STAB -> Glyphs.Horizon; AUDIO -> Glyphs.VolumeOn; LAYER -> Glyphs.Text
         SNAPSHOT -> Glyphs.Camera; STITCH -> Glyphs.Stitch
     }
 }
 
 /** Düz video / fotoğrafta yalnızca 360°'ye özgü olmayan araçlar. */
-private val FLAT_TOOLS = listOf(Tool.TRIM, Tool.FRAME, Tool.KEYFRAME, Tool.COLOR, Tool.AUDIO, Tool.LAYER, Tool.SNAPSHOT)
+private val FLAT_TOOLS = listOf(Tool.TRIM, Tool.SPEED, Tool.FRAME, Tool.KEYFRAME, Tool.COLOR, Tool.AUDIO, Tool.LAYER, Tool.SNAPSHOT)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -211,6 +211,7 @@ fun EditorScreen(
                 when (open) {
                     Tool.FRAME -> if (c.clip.is360) FramePanel(c) else FlatFramePanel(c)
                     Tool.TRIM -> TrimPanel(c)
+                    Tool.SPEED -> SpeedPanel(c, seq)
                     Tool.STAB -> StabPanel(c)
                     Tool.MULTI -> MultiPanel(c)
                     Tool.LAYER -> LayerPanel(c, actions)
@@ -370,7 +371,7 @@ private fun ToolBar(selected: Tool?, tools: List<Tool>, onSelect: (Tool) -> Unit
 @Composable
 private fun QuickBar(c: EditorController, seq: SequenceUi, openTool: (Tool) -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
     ) {
         QuickChip(Glyphs.Cut, "Böl") { seq.split(seq.current) }
@@ -387,7 +388,7 @@ private fun QuickChip(icon: androidx.compose.ui.graphics.vector.ImageVector, lab
     ) {
         Icon(icon, null, Modifier.size(14.dp), tint = Palette.Text)
         Spacer(Modifier.width(6.dp))
-        Text(label, color = Palette.Text, style = MaterialTheme.typography.labelLarge)
+        Text(label, color = Palette.Text, style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
     }
 }
 
@@ -404,7 +405,7 @@ private fun KeyframeButton(c: EditorController) {
             Icon(Glyphs.Keyframe, null, Modifier.size(14.dp), tint = if (near) Palette.OnAccent else Palette.Keyframe)
             Spacer(Modifier.width(6.dp))
             Text(if (near) "Anahtar kareyi sil" else "Anahtar kare ekle", color = if (near) Palette.OnAccent else Palette.Text,
-                style = MaterialTheme.typography.labelLarge)
+                style = MaterialTheme.typography.labelLarge, maxLines = 1, softWrap = false)
         }
     }
 }
@@ -732,13 +733,87 @@ private fun FlatFramePanel(c: EditorController) {
                 colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
             )
         }
+        LabeledRow("Kırp") {
+            val a0 = c.clip.displayAspect
+            val presets = listOf("Yok" to 0f, "1:1" to 1f, "16:9" to 16f / 9f, "9:16" to 9f / 16f, "4:5" to 0.8f)
+            val cur = presets.firstOrNull { (_, r) -> if (r == 0f) s.crop.isFull else kotlin.math.abs(a0 * s.crop.w / s.crop.h - r) < 0.02f }?.first
+            Segmented(presets.map { it.first }, cur ?: "", { it }, { name ->
+                val r = presets.first { it.first == name }.second
+                val crop = if (r == 0f) com.mhmmtbg.x5reframe.model.CropRect() else if (r < a0) {
+                    val w = r / a0; com.mhmmtbg.x5reframe.model.CropRect((1 - w) / 2, 0f, (1 + w) / 2, 1f)
+                } else {
+                    val h = a0 / r; com.mhmmtbg.x5reframe.model.CropRect(0f, (1 - h) / 2, 1f, (1 + h) / 2)
+                }
+                c.commit(s.copy(crop = crop)); c.say(if (r == 0f) "Kırpma kaldırıldı" else "Kırpıldı $name")
+            }, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("Ayna ↔", Modifier.weight(1f)) { c.commit(s.copy(flipH = !s.flipH)); c.say("Yatay aynalama") }
+            ActionButton("Ayna ↕", Modifier.weight(1f)) { c.commit(s.copy(flipV = !s.flipV)); c.say("Dikey aynalama") }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ActionButton("Döndür 90°", Modifier.weight(1f)) { c.changeView { it.copy(roll = ViewParams.wrap(it.roll + 90.0)) }; c.say("Döndürüldü") }
             ActionButton("Ortala", Modifier.weight(1f)) { c.changeView { it.copy(yaw = 0.0, pitch = 0.0) }; c.say("Ortalandı") }
             ActionButton("Sıfırla", Modifier.weight(1f)) { c.changeView { ViewParams() }; c.say("Kadraj sıfırlandı") }
         }
-        Text("Kaydırmak için önizlemeyi sürükleyin, yakınlaştırmak için iki parmakla açın.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        Text("Kaydırmak için önizlemeyi sürükle; iki parmakla yakınlaştır ve döndür. Anahtar kare eklersen kadraj kareler arasında yumuşakça değişir.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
     }
+}
+
+/** Parça hızı (0,1×–10×), hız eğrisi, ters oynatma, kare dondurma. */
+@Composable
+private fun SpeedPanel(c: EditorController, seq: SequenceUi) {
+    val i = seq.current
+    val seg = seq.segments.getOrNull(i) ?: return
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Logaritmik kaydırıcı: 0,1× … 10×
+        var draft by remember(seg.speed) { mutableStateOf(kotlin.math.log10(seg.speed).toFloat()) }
+        val shown = Math.pow(10.0, draft.toDouble())
+        LabeledRow("Hız ${fmtSpeed(roundSpeed(shown))}×") {
+            Slider(
+                value = draft, onValueChange = { draft = it },
+                onValueChangeFinished = { val sp = roundSpeed(Math.pow(10.0, draft.toDouble())); seq.updateSegment(i) { it.copy(speed = sp) }; c.say("Hız ${fmtSpeed(sp)}×") },
+                valueRange = -1f..1f, modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+            )
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0.1, 0.25, 0.5, 1.0, 2.0, 4.0, 10.0).forEach { sp ->
+                Chip("${fmtSpeed(sp)}×", seg.speed == sp) { seq.updateSegment(i) { it.copy(speed = sp) }; c.say("Hız ${fmtSpeed(sp)}×") }
+            }
+        }
+        Text("Hız eğrisi", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            com.mhmmtbg.x5reframe.model.SpeedCurve.values().forEach { cv ->
+                Chip(cv.label, seg.curve == cv) { seq.updateSegment(i) { it.copy(curve = cv) }; c.say("Hız eğrisi: ${cv.label}") }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton(if (seg.reverse) "Ters: açık" else "Ters oynat", Modifier.weight(1f), primary = seg.reverse) {
+                seq.updateSegment(i) { it.copy(reverse = !it.reverse) }; c.say(if (seg.reverse) "Ters oynatma kapandı" else "Parça tersten oynar")
+            }
+            ActionButton("Kareyi dondur", Modifier.weight(1f)) { seq.freeze(c.positionUs) }
+        }
+        Text(
+            "Çıktı süresi ${"%.1f".format(seg.outputDurationUs / 1e6)} sn. Ses 0,25×–4× arasında perdesi korunarak hızlanır; ters ve eğrili parçalarda orijinal ses kapanır. " +
+                "Hız, eğri ve ters oynatma dışa aktarımda uygulanır; önizleme 1× oynar.",
+            color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
+        )
+    }
+}
+
+private fun roundSpeed(s: Double): Double = when {
+    s < 1 -> Math.round(s * 20) / 20.0
+    s < 3 -> Math.round(s * 4) / 4.0
+    else -> Math.round(s * 2) / 2.0
+}.coerceIn(0.1, 10.0)
+
+@Composable
+private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
+    Box(
+        Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Palette.SurfaceHigh).clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 7.dp),
+    ) { Text(label, color = if (on) Palette.OnAccent else Palette.Text, style = MaterialTheme.typography.labelLarge) }
 }
 
 @Composable
@@ -884,7 +959,7 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
             ActionButton("+ Görsel", Modifier.weight(1f), primary = true) { a.pickImage() }
         }
         if (s.layers.isEmpty()) {
-            Text("Başlık, alt yazı ya da logo ekle. Seçili katmanı önizlemede sürükleyerek taşıyabilirsin.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            Text("Başlık, alt yazı, logo ya da resim içinde resim ekle. Seçili katmanı önizlemede tek parmakla taşı, iki parmakla büyüt ve döndür; zamanını çizelgedeki çubuktan ayarla.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
             if (editing) TextDialog("", com.mhmmtbg.x5reframe.model.Layer.TextStyle.WHITE, { editing = false }) { t, _ -> c.addLayer(com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, t); editing = false }
             return
         }
@@ -924,6 +999,21 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
                     colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
                 )
             }
+            LabeledRow("Döndür ${l.rotation.toInt()}°") {
+                Slider(
+                    value = l.rotation, onValueChange = { v -> c.updateLayerLive { it.copy(rotation = if (kotlin.math.abs(v) < 3f) 0f else v) } }, onValueChangeFinished = { c.endLayerGesture() },
+                    valueRange = -180f..180f, modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                )
+            }
+            LabeledRow("Karışım") {
+                Segmented(com.mhmmtbg.x5reframe.model.Layer.Blend.values().toList(), l.blend, { it.label }, { b -> c.updateLayer { it.copy(blend = b) } }, Modifier.weight(1f))
+            }
+            if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.IMAGE) {
+                LabeledRow("Biçim") {
+                    Segmented(com.mhmmtbg.x5reframe.model.Layer.Mask.values().toList(), l.mask, { it.label }, { m -> c.updateLayer { it.copy(mask = m) } }, Modifier.weight(1f))
+                }
+            }
             if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) {
                 LabeledRow("Stil") {
                     Segmented(com.mhmmtbg.x5reframe.model.Layer.TextStyle.values().toList(), l.style, { it.label }, { st -> c.updateLayer { it.copy(style = st) } }, Modifier.weight(1f))
@@ -940,6 +1030,7 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
                 if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) ActionButton("Düzenle", Modifier.weight(1f)) { editing = true }
                 ActionButton("Öne", Modifier.weight(0.8f)) { c.moveLayer(1) }
                 ActionButton("Arkaya", Modifier.weight(0.8f)) { c.moveLayer(-1) }
+                if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.IMAGE) ActionButton("Ayna", Modifier.weight(0.8f)) { c.updateLayer { it.copy(flipH = !it.flipH) } }
                 ActionButton(if (l.visible) "Gizle" else "Göster", Modifier.weight(0.8f)) { c.updateLayer { it.copy(visible = !it.visible) } }
                 ActionButton("Sil", Modifier.weight(0.7f)) { c.deleteLayer() }
             }
@@ -1052,7 +1143,8 @@ private fun AudioPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
         }
         SwitchRow("Önizlemede sesi kapat", c.previewMuted) { c.previewMuted = it; a.setMuted(it) }
         if (au.needsMix) Text("Ses karıştırılacağı için dışa aktarımda AAC olarak yeniden kodlanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
-        if (seq.segments.any { it.speed != 1.0 }) Text("Hızı 1× olmayan parçalarda orijinal ses kapanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        if (seq.segments.any { it.reverse || it.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE || !com.mhmmtbg.x5reframe.media.AudioMixer.hasAudioAt(it.speed) })
+            Text("Ters, hız eğrili ya da 0,25×–4× dışındaki parçalarda orijinal ses kapanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 

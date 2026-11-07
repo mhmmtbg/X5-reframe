@@ -61,7 +61,12 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
 
     /** Düz klip: görüntünün en/boy oranı (döndürme uygulanmış) ve çerçeveye yerleşimi. */
     var flatAspect = 1f
-    var fit: com.mhmmtbg.x5reframe.model.FrameFit = com.mhmmtbg.x5reframe.model.FrameFit.FIT
+    var look = com.mhmmtbg.x5reframe.model.FlatLook()
+    var fit: com.mhmmtbg.x5reframe.model.FrameFit
+        get() = look.fit
+        set(v) { look = look.copy(fit = v) }
+    private val uCrop: Int
+    private val uFlip: Int
     private val uFlat: Int
     private val uFlatHalf: Int
     private val uFillHalf: Int
@@ -98,6 +103,8 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         uFlatXf = GLES30.glGetUniformLocation(program, "uFlatXf")
         uFlatBlur = GLES30.glGetUniformLocation(program, "uFlatBlur")
         uHdr = GLES30.glGetUniformLocation(program, "uHdr")
+        uCrop = GLES30.glGetUniformLocation(program, "uCrop")
+        uFlip = GLES30.glGetUniformLocation(program, "uFlip")
 
         val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
@@ -223,7 +230,10 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         val sx: Float; val sy: Float
         if (width >= height) { sx = 1f; sy = height.toFloat() / width } else { sx = width.toFloat() / height; sy = 1f }
         GLES30.glUniform2f(uScale, sx, sy)
-        val a = flatAspect.coerceAtLeast(0.01f)
+        val cr = look.crop
+        val a = (flatAspect * cr.w / cr.h).coerceAtLeast(0.01f)
+        GLES30.glUniform4f(uCrop, cr.l, cr.t, cr.w, cr.h)
+        GLES30.glUniform2f(uFlip, if (look.flipH) 1f else 0f, if (look.flipV) 1f else 0f)
         val fitHy = minOf(sy, sx / a)
         val fillHy = maxOf(sy, sx / a)
         val hy = if (fit == com.mhmmtbg.x5reframe.model.FrameFit.FILL) fillHy else fitHy
@@ -346,6 +356,8 @@ uniform vec2 uFillHalf; // doldurma yerleşiminde yarı boy (bulanık arka plan 
 uniform vec4 uFlatXf;   // yakınlaştırma, merkez x, merkez y, döndürme (radyan)
 uniform float uFlatBlur;
 uniform int uHdr;       // 6 = PQ (HDR10), 7 = HLG; 0 = SDR
+uniform vec4 uCrop;     // kırpma: sol, üst, genişlik, yükseklik (kaynakta normalize)
+uniform vec2 uFlip;     // yatay / dikey aynalama
 
 vec3 grade(vec3 c) {
     c *= exp2(uGrade0.x);
@@ -383,6 +395,8 @@ vec3 hdrToSdr(vec3 e) {
 }
 
 vec3 flatSample(vec2 uv) {
+    uv = mix(uv, 1.0 - uv, uFlip);
+    uv = uCrop.xy + uv * uCrop.zw;
     vec3 c = texture(uTex0, texCoord(uTexMat0, uSub0, uv)).rgb;
     return uHdr != 0 ? hdrToSdr(c) : c;
 }

@@ -27,8 +27,11 @@ data class Segment(
     val speed: Double = 1.0,
     /** Bu parçadan sonrakine geçiş. */
     val transitionOut: Transition = Transition.CUT,
+    /** Geriye oynat. */
+    val reverse: Boolean = false,
+    val curve: com.mhmmtbg.x5reframe.model.SpeedCurve = com.mhmmtbg.x5reframe.model.SpeedCurve.NONE,
 ) {
-    val outputDurationUs: Long get() = ((edit.outUs - edit.inUs) / speed).toLong()
+    val outputDurationUs: Long get() = com.mhmmtbg.x5reframe.model.SpeedMap(edit.outUs - edit.inUs, speed, curve).outputUs
 }
 
 /** Projenin ses ayarları: orijinal ses seviyesi ve arka plan müziği. */
@@ -137,6 +140,8 @@ class ProjectStore(context: Context) {
             put("edit", editToJson(s.edit))
             s.lrvUri?.let { put("lrvUri", it.toString()) }
             put("speed", s.speed); put("transitionOut", s.transitionOut.name)
+            if (s.reverse) put("reverse", true)
+            if (s.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) put("curve", s.curve.name)
         }
 
         private fun segmentFromJson(o: JSONObject) = Segment(
@@ -146,6 +151,8 @@ class ProjectStore(context: Context) {
             o.optString("lrvUri").takeIf { it.isNotEmpty() }?.let(Uri::parse),
             o.optDouble("speed", 1.0),
             runCatching { Transition.valueOf(o.optString("transitionOut")) }.getOrDefault(Transition.CUT),
+            o.optBoolean("reverse", false),
+            runCatching { com.mhmmtbg.x5reframe.model.SpeedCurve.valueOf(o.optString("curve", "NONE")) }.getOrDefault(com.mhmmtbg.x5reframe.model.SpeedCurve.NONE),
         )
 
         fun fromJson(o: JSONObject): Project {
@@ -175,6 +182,9 @@ class ProjectStore(context: Context) {
             put("bitrate", e.bitrate.name)
             put("fps", e.fps)
             put("fit", e.fit.name)
+            if (!e.crop.isFull) put("crop", JSONArray(listOf(e.crop.l, e.crop.t, e.crop.r, e.crop.b).map { it.toDouble() }))
+            if (e.flipH) put("flipH", true)
+            if (e.flipV) put("flipV", true)
             put("color", JSONObject().apply {
                 val g = e.color
                 put("filter", g.filter.name); put("strength", g.filterStrength.toDouble())
@@ -186,7 +196,8 @@ class ProjectStore(context: Context) {
                 e.layers.forEach { l ->
                     put(JSONObject().put("id", l.id).put("kind", l.kind.name).put("content", l.content)
                         .put("x", l.x.toDouble()).put("y", l.y.toDouble()).put("scale", l.scale.toDouble()).put("opacity", l.opacity.toDouble())
-                        .put("startUs", l.startUs).put("endUs", l.endUs).put("visible", l.visible).put("style", l.style.name))
+                        .put("startUs", l.startUs).put("endUs", l.endUs).put("visible", l.visible).put("style", l.style.name)
+                        .put("rotation", l.rotation.toDouble()).put("blend", l.blend.name).put("mask", l.mask.name).put("flipH", l.flipH))
                 }
             })
             put("extraPanes", JSONArray().apply {
@@ -225,6 +236,11 @@ class ProjectStore(context: Context) {
                     g
                 } ?: com.mhmmtbg.x5reframe.model.ColorGrade(),
                 fps = o.optInt("fps", 0),
+                crop = o.optJSONArray("crop")?.takeIf { it.length() == 4 }?.let { a ->
+                    com.mhmmtbg.x5reframe.model.CropRect(a.getDouble(0).toFloat(), a.getDouble(1).toFloat(), a.getDouble(2).toFloat(), a.getDouble(3).toFloat())
+                } ?: com.mhmmtbg.x5reframe.model.CropRect(),
+                flipH = o.optBoolean("flipH", false),
+                flipV = o.optBoolean("flipV", false),
                 fit = runCatching { com.mhmmtbg.x5reframe.model.FrameFit.valueOf(o.optString("fit", "FIT")) }.getOrDefault(com.mhmmtbg.x5reframe.model.FrameFit.FIT),
                 tracks = (o.optJSONArray("tracks") ?: JSONArray()).let { arr ->
                     (0 until arr.length()).mapNotNull { i -> arr.optJSONArray(i)?.let { r -> r.getLong(0)..r.getLong(1) } }
@@ -239,6 +255,10 @@ class ProjectStore(context: Context) {
                                 l.optDouble("opacity", 1.0).toFloat(), l.optLong("startUs"), l.optLong("endUs", -1), l.optBoolean("visible", true),
                                 runCatching { com.mhmmtbg.x5reframe.model.Layer.TextStyle.valueOf(l.optString("style")) }
                                     .getOrDefault(com.mhmmtbg.x5reframe.model.Layer.TextStyle.WHITE),
+                                rotation = l.optDouble("rotation", 0.0).toFloat(),
+                                blend = runCatching { com.mhmmtbg.x5reframe.model.Layer.Blend.valueOf(l.optString("blend", "NORMAL")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Blend.NORMAL),
+                                mask = runCatching { com.mhmmtbg.x5reframe.model.Layer.Mask.valueOf(l.optString("mask", "NONE")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Mask.NONE),
+                                flipH = l.optBoolean("flipH", false),
                             )
                         }.getOrNull()
                     }

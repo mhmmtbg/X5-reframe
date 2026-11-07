@@ -20,8 +20,19 @@ data class Layer(
     val endUs: Long = -1,
     val visible: Boolean = true,
     val style: TextStyle = TextStyle.WHITE,
+    /** Saat yönünde döndürme (derece). */
+    val rotation: Float = 0f,
+    val blend: Blend = Blend.NORMAL,
+    val mask: Mask = Mask.NONE,
+    val flipH: Boolean = false,
 ) {
     enum class Kind { TEXT, IMAGE }
+
+    /** Katmanın alttaki görüntüyle karışımı. */
+    enum class Blend(val label: String) { NORMAL("Normal"), SCREEN("Aydınlat"), MULTIPLY("Çarp"), ADD("Ekle") }
+
+    /** Görselin biçimi (resim içinde resim için). */
+    enum class Mask(val label: String) { NONE("Yok"), ROUNDED("Yuvarlak köşe"), CIRCLE("Daire") }
 
     enum class TextStyle(val label: String, val fg: Int, val bg: Int) {
         WHITE("Beyaz", 0xFFFFFFFF.toInt(), 0x00000000),

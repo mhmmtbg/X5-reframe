@@ -35,6 +35,16 @@ private val defaultPaneYaw = doubleArrayOf(0.0, 180.0, 90.0, -90.0)
 /** Düz video / fotoğraf çerçeveye nasıl yerleşir. */
 enum class FrameFit(val label: String) { FIT("Sığdır"), FILL("Doldur"), BLUR("Bulanık arka plan") }
 
+/** Kaynak görüntüden kırpma (normalize, sol üst başlangıçlı). */
+data class CropRect(val l: Float = 0f, val t: Float = 0f, val r: Float = 1f, val b: Float = 1f) {
+    val isFull get() = l <= 0f && t <= 0f && r >= 1f && b >= 1f
+    val w get() = (r - l).coerceAtLeast(0.05f)
+    val h get() = (b - t).coerceAtLeast(0.05f)
+}
+
+/** Düz klibin görünümü: yerleşim, kırpma, aynalama. */
+data class FlatLook(val fit: FrameFit = FrameFit.FIT, val crop: CropRect = CropRect(), val flipH: Boolean = false, val flipV: Boolean = false)
+
 enum class BitrateLevel(val label: String, val factor: Float) { STANDARD("Standart", 1f), HIGH("Yüksek", 1.6f), MAX("En yüksek", 2.5f) }
 
 /** Geri alınabilir düzenleme durumu (değişmez). */
@@ -67,7 +77,12 @@ data class EditState(
     val fps: Int = 0,
     /** Düz klip yerleşimi (360° kliplerde etkisiz). */
     val fit: FrameFit = FrameFit.FIT,
+    val crop: CropRect = CropRect(),
+    val flipH: Boolean = false,
+    val flipV: Boolean = false,
 ) {
+    val flatLook: FlatLook get() = FlatLook(fit, crop, flipH, flipV)
+
     fun pane(i: Int): Pane = if (i == 0) Pane(keyframes, baseView)
         else extraPanes.getOrNull(i - 1) ?: Pane(baseView = baseView.copy(yaw = ViewParams.wrap(baseView.yaw + defaultPaneYaw[i % 4])))
 

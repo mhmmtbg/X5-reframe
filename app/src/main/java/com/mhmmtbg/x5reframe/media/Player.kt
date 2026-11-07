@@ -41,7 +41,7 @@ class Player(
     @Volatile var colorProvider: () -> FloatArray? = { null }
 
     /** Düz klip yerleşimi. */
-    @Volatile var fitProvider: () -> com.mhmmtbg.x5reframe.model.FrameFit = { com.mhmmtbg.x5reframe.model.FrameFit.FIT }
+    @Volatile var lookProvider: () -> com.mhmmtbg.x5reframe.model.FlatLook = { com.mhmmtbg.x5reframe.model.FlatLook() }
     private val appContext = context.applicationContext
 
     /** Sabitleme temel dönüşü (yoksa null). */
@@ -241,7 +241,7 @@ class Player(
             stitchPts = t
         }
         program.color = colorProvider()
-        program.fit = fitProvider()
+        program.look = lookProvider()
         program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))
         val layers = layersProvider()
         overlay?.retain(layers)

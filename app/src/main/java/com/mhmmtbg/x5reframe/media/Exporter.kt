@@ -9,6 +9,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
+import android.opengl.GLES30
 import android.os.Build
 import android.os.Environment
 import android.os.ParcelFileDescriptor
@@ -60,16 +61,25 @@ class Exporter(
         val baseAt: (Long) -> DoubleArray? = { null },
         val layoutRects: List<FloatArray> = listOf(floatArrayOf(0f, 0f, 1f, 1f)),
         val stitchInv: Float = 0f,
-        /** 0,25..4: kaynak zamanın akış hızı. */
+        /** 0,1..10: kaynak zamanın akış hızı. */
         val speed: Double = 1.0,
         /** Siyahtan açılma / siyaha kararma süreleri. */
         val fadeInUs: Long = 0,
         val fadeOutUs: Long = 0,
         val layers: List<com.mhmmtbg.x5reframe.model.Layer> = emptyList(),
         val color: FloatArray? = null,
-        val fit: com.mhmmtbg.x5reframe.model.FrameFit = com.mhmmtbg.x5reframe.model.FrameFit.FIT,
+        val look: com.mhmmtbg.x5reframe.model.FlatLook = com.mhmmtbg.x5reframe.model.FlatLook(),
+        /** Geriye oynat (kare blokları ileri çözülüp ters sırayla yazılır). */
+        val reverse: Boolean = false,
+        val curve: com.mhmmtbg.x5reframe.model.SpeedCurve = com.mhmmtbg.x5reframe.model.SpeedCurve.NONE,
     ) {
-        val outputDurationUs: Long get() = ((endUs - startUs) / speed).toLong()
+        val effEndUs: Long get() = endUs.coerceAtMost(clip.durationUs)
+        val map: com.mhmmtbg.x5reframe.model.SpeedMap by lazy { com.mhmmtbg.x5reframe.model.SpeedMap(effEndUs - startUs, speed, curve) }
+        val outputDurationUs: Long get() = map.outputUs
+        /** Orijinal ses perde korunarak verilebilir mi. */
+        val audible: Boolean get() = !reverse && curve == com.mhmmtbg.x5reframe.model.SpeedCurve.NONE && AudioMixer.hasAudioAt(speed)
+        /** Çıktı zamanı → kaynak zamanı. */
+        fun sourceAt(outUs: Long): Long = if (reverse) effEndUs - 1 - map.sourceAt(outUs) else startUs + map.sourceAt(outUs)
     }
 
     /** Eski tek klip arayüzü (testler ve basit kullanım). */
@@ -103,6 +113,11 @@ class Exporter(
 
     @Volatile var cancelled = false
 
+    companion object {
+        /** Geriye oynatmada bir blokta tutulan kare sayısı (çıktı çözünürlüğünde doku). */
+        const val BLOCK = 8
+    }
+
     /**
      * Karışım yolu: istenmişse ya da sesler olduğu gibi kopyalanamıyorsa (farklı biçim, AAC olmayan ses,
      * sessiz klip / fotoğraf, hız değişimi) ses çözülüp tek AAC ize karıştırılır.
@@ -111,7 +126,7 @@ class Exporter(
 
     private fun audioCopyable(): Boolean {
         val fmts = jobs.map { j ->
-            if (j.speed != 1.0) return false
+            if (j.speed != 1.0 || j.reverse || j.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) return false
             val a = j.clip.audioTrack ?: return jobs.none { it.clip.audioTrack != null }
             runCatching {
                 context.contentResolver.openFileDescriptor(j.clip.uri, "r")!!.use { pfd ->
@@ -162,13 +177,13 @@ class Exporter(
 
             val fpsHint = output.fps ?: jobs.first().clip.frameRate
             val frameDurHint = (1_000_000 / fpsHint).toLong()
-            val totalOutUs = jobs.sumOf { (((it.endUs.coerceAtMost(it.clip.durationUs) - it.startUs) / it.speed) / frameDurHint).toLong().coerceAtLeast(1) * frameDurHint }
+            val totalOutUs = jobs.sumOf { (it.outputDurationUs / frameDurHint).coerceAtLeast(1) * frameDurHint }
             if (mixSpec != null) {
                 // Karışım yolu: AAC kodlayıcının biçimini almak için ilk sesi önceden üret.
                 var off = 0L
                 val segs = jobs.map { j ->
-                    val d = (((j.endUs.coerceAtMost(j.clip.durationUs) - j.startUs) / j.speed) / frameDurHint).toLong().coerceAtLeast(1) * frameDurHint
-                    AudioMixer.Seg(j.clip.uri, if (output.includeAudio) j.clip.audioTrack else null, j.startUs, off, d, j.speed).also { off += d }
+                    val d = (j.outputDurationUs / frameDurHint).coerceAtLeast(1) * frameDurHint
+                    AudioMixer.Seg(j.clip.uri, if (output.includeAudio && j.audible) j.clip.audioTrack else null, j.startUs, off, d, j.speed).also { off += d }
                 }
                 val ms = mixSpec!!
                 mixer = AudioMixer(context, segs, ms.music, if (output.includeAudio) ms.originalVolume else 0f, totalOutUs)
@@ -210,19 +225,25 @@ class Exporter(
                 val program = Sources.program(job.clip, highQuality = true).apply {
                     stitchInvDistance = job.stitchInv
                     color = job.color
-                    fit = job.fit
+                    look = job.look
                     dynamicStitch = context.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("dynamic_stitch", true)
                 }
                 val source = Sources.open(context, job.clip, pfd.fileDescriptor, realtime = false)
                 try {
-                    val audio = if (mixSpec == null && output.includeAudio && job.speed == 1.0) openAudio(pfd, job) else null
-                    val end = job.endUs.coerceAtMost(job.clip.durationUs)
-                    val nFrames = (((end - job.startUs) / job.speed) / frameDur).toLong().coerceAtLeast(1)
+                    val audio = if (mixSpec == null && output.includeAudio && job.speed == 1.0 && !job.reverse && job.curve == com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) openAudio(pfd, job) else null
+                    val end = job.effEndUs
+                    val nFrames = (job.outputDurationUs / frameDur).coerceAtLeast(1)
+                    if (job.reverse) {
+                        val p = Progress(t0, totalOut) { timeline }
+                        renderReverse(job, source, program, overlay, win, egl, frameDur, nFrames, timeline, p)
+                        timeline += nFrames * frameDur
+                        continue
+                    }
                     if (source.seekAndShow(job.startUs, frameDur) < 0) continue
                     var stitchPts = -1L
                     for (k in 0 until nFrames) {
                         if (cancelled) break
-                        val tSrc = job.startUs + (k * frameDur * job.speed).toLong()
+                        val tSrc = job.sourceAt(k * frameDur)
                         // Hedef kaynak zamanına kadar ilerle (hızlandırmada kare atlanır, yavaşlatmada aynı kare tekrar çizilir).
                         var eos = false
                         while (source.currentPts + frameDur <= tSrc) {
@@ -295,6 +316,80 @@ class Exporter(
             runCatching { if (::encoder.isInitialized) { encoder.stop(); encoder.release() } }
             runCatching { egl?.release() }
             pfds.forEach { runCatching { it.close() } }
+        }
+    }
+
+    private inner class Progress(val t0: Long, val totalOut: Long, val base: () -> Long) {
+        var last = 0L
+        fun report(tOut: Long) {
+            val now = SystemClock.elapsedRealtime()
+            if (now - last < 250) return
+            last = now
+            val done = (base() + tOut).toFloat() / totalOut
+            val elapsed = (now - t0) / 1000f
+            listener.onProgress(done.coerceIn(0f, 1f), if (elapsed > 0) ((base() + tOut) / 1e6f) / elapsed else 0f)
+        }
+    }
+
+    /**
+     * Geriye oynatma: çıktı kareleri [BLOCK]'luk bloklar halinde, her blok kaynağın ilgili aralığı
+     * ileri çözülerek çerçeve tamponlarına çizilir, sonra ters sırayla kodlayıcıya yazılır.
+     */
+    private fun renderReverse(
+        job: Job, source: FrameSource, program: ReframeProgram, overlay: com.mhmmtbg.x5reframe.gl.OverlayRenderer,
+        win: android.opengl.EGLSurface, egl: EglCore, frameDur: Long, nFrames: Long, timeline: Long, progress: Progress,
+    ) {
+        val block = BLOCK
+        val w = output.width; val h = output.height
+        val fbos = IntArray(block); val texs = IntArray(block)
+        GLES30.glGenFramebuffers(block, fbos, 0)
+        GLES30.glGenTextures(block, texs, 0)
+        for (i in 0 until block) {
+            GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, texs[i])
+            GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA8, w, h, 0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+            GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbos[i])
+            GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, texs[i], 0)
+        }
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        val blit = com.mhmmtbg.x5reframe.gl.Blit()
+        val pts = LongArray(block)
+        try {
+            var k0 = 0L
+            while (k0 < nFrames && !cancelled) {
+                val k1 = minOf(nFrames, k0 + block)
+                // Bu bloktaki çıktı karelerinin kaynak zamanları azalan sıradadır; artan sırayla çöz.
+                val times = (k0 until k1).map { job.sourceAt(it * frameDur) }
+                val order = times.indices.sortedBy { times[it] }
+                if (source.seekAndShow(times[order.first()], frameDur) < 0) break
+                for (idx in order) {
+                    val t = times[idx]
+                    while (source.currentPts + frameDur <= t) { if (source.next { it + frameDur > t } < 0) break }
+                    GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbos[idx])
+                    program.fade = 1f
+                    program.drawScene(w, h, job.layoutRects, job.sceneAt(source.currentPts), source, job.baseAt(source.currentPts))
+                    pts[idx] = source.currentPts
+                }
+                GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+                for (idx in times.indices) {
+                    val k = k0 + idx
+                    val tOut = k * frameDur
+                    blit.draw(texs[idx], w, h, fadeFactor(job, tOut))
+                    overlay.draw(w, h, job.layers, pts[idx])
+                    egl.setPresentationTime(win, (timeline + tOut) * 1000)
+                    egl.swap(win)
+                    drain(false)
+                    if (mixer != null) produceAudio(timeline + tOut)
+                    progress.report(tOut)
+                }
+                k0 = k1
+            }
+        } finally {
+            GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+            blit.release()
+            GLES30.glDeleteFramebuffers(block, fbos, 0)
+            GLES30.glDeleteTextures(block, texs, 0)
         }
     }
 

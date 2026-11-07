@@ -572,7 +572,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.layoutProvider = { c.snapshotState.layout.rects }
             p.baseProvider = { t -> c.baseAt(t) }
             p.colorProvider = { c.colorUniforms }
-            p.fitProvider = { c.snapshotState.fit }
+            p.lookProvider = { c.snapshotState.flatLook }
             p.layersProvider = { c.snapshotState.layers }
             p.setVolume(projectAudio.originalVolume)
             p.setStitchInv(c.state.stitchInv)
@@ -717,8 +717,14 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             storeCurrentEdit()
             val list = segments.toMutableList().apply { set(i, get(i).copy(speed = sp)) }
             updateSegments(list, segIndex, reopen = false)
-            controller?.say("Hız ${sp}×" + if (sp != 1.0) " (bu parçada ses kapanır)" else "")
+            controller?.say("Hız ${sp}×")
         },
+        updateSegment = { i, f ->
+            storeCurrentEdit()
+            val list = segments.toMutableList().apply { set(i, f(get(i))) }
+            updateSegments(list, segIndex, reopen = false)
+        },
+        freeze = { t -> freezeFrame(t) },
         audio = projectAudio,
         pickMusic = { musicPicker.launch(arrayOf("audio/*")) },
         updateAudio = { a -> setAudio(a) },
@@ -898,6 +904,48 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         finish()
     }
 
+    /**
+     * Kare dondurma: oynatma çizgisindeki kare, düzenlemeleriyle birlikte çıktı oranında bir fotoğrafa çizilir
+     * ve parça o noktadan bölünerek araya 2 sn'lik fotoğraf parçası olarak eklenir.
+     */
+    private fun freezeFrame(t: Long) {
+        val c = controller ?: return
+        player?.pause()
+        storeCurrentEdit()
+        val st = c.state
+        if (t <= st.inUs + 100_000 || t >= st.outUs - 100_000) { c.say("Dondurmak için oynatma çizgisini parçanın içine getir", false); return }
+        val (w, h) = st.outputSize()
+        val views = c.sceneAt(t); val base = c.baseAt(t); val color = c.colorUniforms
+        val dyn = getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("dynamic_stitch", true)
+        c.say("Kare donduruluyor…")
+        Thread({
+            val file = runCatching {
+                contentResolver.openFileDescriptor(c.clip.uri, "r")!!.use { pfd ->
+                    val bmp = com.mhmmtbg.x5reframe.photo.StillRenderer.render(c.clip.rig, w, h, st.layout.rects, views, base, color, dyn, c.clip.displayAspect, st.flatLook) {
+                        com.mhmmtbg.x5reframe.media.Sources.open(this, c.clip, pfd.fileDescriptor, realtime = false).also { it.seekAndShow(t, (1_000_000 / c.clip.frameRate).toLong()) }
+                    }
+                    val dir = java.io.File(filesDir, "freeze").apply { mkdirs() }
+                    java.io.File(dir, "freeze_${System.currentTimeMillis()}.jpg").also { f -> f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 95, it) }; bmp.recycle() }
+                }
+            }.getOrNull()
+            runOnUiThread {
+                if (file == null) { c.say("Kare dondurulamadı", false); return@runOnUiThread }
+                val i = segIndex
+                val seg = segments[i]
+                val uri = Uri.fromFile(file)
+                val a = seg.copy(edit = seg.edit.copy(outUs = t), transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT)
+                val still = store.newSegment(uri, "Dondurulmuş kare", ClipInfo.IMAGE_MAX_US, null,
+                    com.mhmmtbg.x5reframe.model.EditState(outUs = 2_000_000, aspect = st.aspect, quality = st.quality, hevc = st.hevc, bitrate = st.bitrate,
+                        stabMode = com.mhmmtbg.x5reframe.stab.StabMode.OFF, fit = com.mhmmtbg.x5reframe.model.FrameFit.FILL))
+                val b = store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, seg.edit.copy(inUs = t))
+                    .copy(speed = seg.speed, transitionOut = seg.transitionOut, reverse = seg.reverse, curve = seg.curve)
+                val list = segments.toMutableList().apply { set(i, a); add(i + 1, still); add(i + 2, b) }
+                updateSegments(list, i + 1, reopen = true)
+                controller?.say("Kare donduruldu · 2 sn")
+            }
+        }, "freeze").start()
+    }
+
     /** O anki kareyi tam çözünürlüklü izlerden (dışa aktarım kalitesinde) fotoğraf olarak kaydet. */
     private fun snapshot(c: EditorController) {
         player?.pause()
@@ -917,7 +965,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             val ok = runCatching {
                 val pfd = contentResolver.openFileDescriptor(c.clip.uri, "r")!!
                 pfd.use {
-                    val bmp = com.mhmmtbg.x5reframe.photo.StillRenderer.render(c.clip.rig, w, h, st.layout.rects, views, base, color, dyn, c.clip.displayAspect, st.fit) {
+                    val bmp = com.mhmmtbg.x5reframe.photo.StillRenderer.render(c.clip.rig, w, h, st.layout.rects, views, base, color, dyn, c.clip.displayAspect, st.flatLook) {
                         com.mhmmtbg.x5reframe.media.Sources.open(this, c.clip, pfd.fileDescriptor, realtime = false).also {
                             it.seekAndShow(t, (1_000_000 / c.clip.frameRate).toLong())
                         }
@@ -1051,20 +1099,60 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val taps = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
             override fun onDoubleTap(e: MotionEvent): Boolean { if (viewer) cleanToggles++; return true }
         })
+        // İki parmak: açı ve uzaklık (döndürme / büyütme için)
+        var prevAngle = Float.NaN
+        var prevDist = Float.NaN
+        var rotAccum = 0f
+        var rotActive = false
+        fun twoFinger(e: MotionEvent): Pair<Float, Float>? {
+            if (e.pointerCount < 2) return null
+            val dx = e.getX(1) - e.getX(0); val dy = e.getY(1) - e.getY(0)
+            return Math.toDegrees(kotlin.math.atan2(dy, dx).toDouble()).toFloat() to kotlin.math.hypot(dx, dy)
+        }
+        fun angleDelta(a: Float, b: Float): Float { var d = a - b; while (d > 180) d -= 360; while (d < -180) d += 360; return d }
         sv.setOnTouchListener { v, e ->
             val c = controller ?: return@setOnTouchListener false
             taps.onTouchEvent(e)
             if (c.layerTool && c.currentLayer != null) {
-                // Katman sekmesi: seçili katmanı parmakla taşı.
+                // Katman sekmesi: tek parmak taşır, iki parmak büyütür ve döndürür.
                 when (e.actionMasked) {
-                    MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    MotionEvent.ACTION_DOWN -> {
                         if (player?.playing == true) player?.pause()
+                        prevAngle = Float.NaN; prevDist = Float.NaN
                         val nx = (e.x / v.width).coerceIn(0f, 1f); val ny = (e.y / v.height).coerceIn(0f, 1f)
                         c.updateLayerLive { it.copy(x = nx, y = ny) }
                     }
+                    MotionEvent.ACTION_POINTER_DOWN -> { twoFinger(e)?.let { prevAngle = it.first; prevDist = it.second } }
+                    MotionEvent.ACTION_MOVE -> {
+                        val tf = twoFinger(e)
+                        if (tf != null && !prevAngle.isNaN()) {
+                            val da = angleDelta(tf.first, prevAngle); val k = tf.second / prevDist.coerceAtLeast(1f)
+                            c.updateLayerLive { it.copy(scale = (it.scale * k).coerceIn(0.03f, 1.5f), rotation = (it.rotation + da).let { r -> ((r + 540f) % 360f) - 180f }) }
+                            prevAngle = tf.first; prevDist = tf.second
+                        } else if (e.pointerCount == 1) {
+                            val nx = (e.x / v.width).coerceIn(0f, 1f); val ny = (e.y / v.height).coerceIn(0f, 1f)
+                            c.updateLayerLive { it.copy(x = nx, y = ny) }
+                        }
+                    }
+                    MotionEvent.ACTION_POINTER_UP -> { prevAngle = Float.NaN; prevDist = Float.NaN }
                     MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> c.endLayerGesture()
                 }
                 return@setOnTouchListener true
+            }
+            // İki parmakla döndürme (kadrajın eğimi)
+            when (e.actionMasked) {
+                MotionEvent.ACTION_POINTER_DOWN -> twoFinger(e)?.let { prevAngle = it.first; rotAccum = 0f; rotActive = false }
+                MotionEvent.ACTION_MOVE -> twoFinger(e)?.let { (ang, _) ->
+                    if (!prevAngle.isNaN()) {
+                        val da = angleDelta(ang, prevAngle).takeIf { kotlin.math.abs(it) < 30 } ?: 0f
+                        rotAccum += da
+                        // Yakınlaştırırken istemeden dönmesin: ancak ~8° çevrilince başlar
+                        if (!rotActive && kotlin.math.abs(rotAccum) > 8f) { rotActive = true; c.updateView { it.copy(roll = it.roll - rotAccum) } }
+                        else if (rotActive && da != 0f) c.updateView { it.copy(roll = it.roll - da) }
+                    }
+                    prevAngle = ang
+                }
+                MotionEvent.ACTION_POINTER_UP, MotionEvent.ACTION_UP -> prevAngle = Float.NaN
             }
             scale.onTouchEvent(e)
             when (e.actionMasked) {

@@ -19,6 +19,10 @@ class OverlayRenderer {
     private val uRect: Int
     private val uAlpha: Int
     private val uTex: Int
+    private val uRot: Int
+    private val uAspect: Int
+    private val uMask: Int
+    private val uFlip: Int
 
     private class Tex(val id: Int, val aspect: Float)
     private val cache = HashMap<String, Tex>()
@@ -28,6 +32,10 @@ class OverlayRenderer {
         uRect = GLES30.glGetUniformLocation(program, "uRect")
         uAlpha = GLES30.glGetUniformLocation(program, "uAlpha")
         uTex = GLES30.glGetUniformLocation(program, "uTex")
+        uRot = GLES30.glGetUniformLocation(program, "uRot")
+        uAspect = GLES30.glGetUniformLocation(program, "uAspect")
+        uMask = GLES30.glGetUniformLocation(program, "uMask")
+        uFlip = GLES30.glGetUniformLocation(program, "uFlip")
         val quad = floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
         buf.position(0)
@@ -45,7 +53,7 @@ class OverlayRenderer {
         GLES30.glViewport(0, 0, width, height)
         GLES30.glUseProgram(program)
         GLES30.glEnable(GLES30.GL_BLEND)
-        GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+        GLES30.glUniform1f(uAspect, width.toFloat() / height)
         GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo)
         GLES30.glEnableVertexAttribArray(0)
         GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 8, 0)
@@ -55,10 +63,18 @@ class OverlayRenderer {
             val tex = texture(l) ?: continue
             val w = l.scale
             val h = w * width / height / tex.aspect
-            val x0 = l.x - w / 2; val y0 = l.y - h / 2
-            // NDC: x sağa, y yukarı
-            GLES30.glUniform4f(uRect, x0 * 2 - 1, 1 - (y0 + h) * 2, w * 2, h * 2)
+            // NDC: x sağa, y yukarı; merkez ve yarı boyutlar
+            GLES30.glUniform4f(uRect, l.x * 2 - 1, 1 - l.y * 2, w, h)
+            GLES30.glUniform1f(uRot, Math.toRadians(l.rotation.toDouble()).toFloat())
+            GLES30.glUniform1i(uMask, l.mask.ordinal)
+            GLES30.glUniform1f(uFlip, if (l.flipH) 1f else 0f)
             GLES30.glUniform1f(uAlpha, l.opacity)
+            when (l.blend) {
+                Layer.Blend.NORMAL -> GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+                Layer.Blend.SCREEN -> GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_COLOR)
+                Layer.Blend.MULTIPLY -> GLES30.glBlendFunc(GLES30.GL_DST_COLOR, GLES30.GL_ONE_MINUS_SRC_ALPHA)
+                Layer.Blend.ADD -> GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE)
+            }
             GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, tex.id)
             GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
         }
@@ -125,11 +141,19 @@ class OverlayRenderer {
 
         private const val VS = """#version 300 es
 layout(location = 0) in vec2 aPos;
-uniform vec4 uRect; // x0, y0 (NDC sol alt), w, h
+uniform vec4 uRect;    // merkez x, y (NDC), yarı genişlik, yarı yükseklik (NDC)
+uniform float uRot;    // saat yönünde (radyan)
+uniform float uAspect; // çıktı genişlik / yükseklik
+uniform float uFlip;
 out vec2 vUv;
 void main() {
-    vUv = vec2(aPos.x, 1.0 - aPos.y);
-    gl_Position = vec4(uRect.x + aPos.x * uRect.z, uRect.y + aPos.y * uRect.w, 0.0, 1.0);
+    vUv = vec2(mix(aPos.x, 1.0 - aPos.x, uFlip), 1.0 - aPos.y);
+    vec2 p = (aPos * 2.0 - 1.0) * uRect.zw;
+    p.x *= uAspect;                       // kare piksel uzayında döndür
+    float c = cos(uRot), s = sin(uRot);
+    p = vec2(c * p.x + s * p.y, -s * p.x + c * p.y);
+    p.x /= uAspect;
+    gl_Position = vec4(uRect.xy + p, 0.0, 1.0);
 }
 """
 
@@ -138,9 +162,19 @@ precision mediump float;
 in vec2 vUv;
 uniform sampler2D uTex;
 uniform float uAlpha;
+uniform int uMask;   // 0 yok, 1 yuvarlak köşe, 2 daire
 out vec4 outColor;
 void main() {
-    outColor = texture(uTex, vUv) * uAlpha; // önceden çarpılmış alfa
+    float m = 1.0;
+    vec2 d = abs(vUv - 0.5) * 2.0;
+    if (uMask == 2) {
+        float r = length(vUv - 0.5) * 2.0;
+        m = 1.0 - smoothstep(0.98, 1.0, r);
+    } else if (uMask == 1) {
+        vec2 q = max(d - (1.0 - 0.24), 0.0) / 0.24;
+        m = 1.0 - smoothstep(0.92, 1.0, length(q));
+    }
+    outColor = texture(uTex, vUv) * uAlpha * m; // önceden çarpılmış alfa
 }
 """
     }

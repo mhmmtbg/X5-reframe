@@ -138,9 +138,10 @@ object ExportManager {
                 clip, e.inUs, e.outUs, { t -> e.sceneAt(t) },
                 { t -> stab?.base(t / 1e6, e.stabMode, e.stabStrength, e.inUs / 1e6) },
                 e.layout.rects, e.stitchInv, seg.speed,
+                reverse = seg.reverse, curve = seg.curve,
                 layers = e.layers,
                 color = if (e.color.isIdentity) null else e.color.uniforms(),
-                fit = e.fit,
+                look = e.flatLook,
                 fadeInUs = if (i > 0 && segs[i - 1].transitionOut == Transition.FADE) fade else 0,
                 fadeOutUs = if (i < segs.size - 1 && seg.transitionOut == Transition.FADE) fade else 0,
             )

@@ -25,13 +25,13 @@ object StillRenderer {
 
     fun render(
         rig: Rig?, w: Int, h: Int, rects: List<FloatArray>, views: List<ViewParams>, base: DoubleArray?, color: FloatArray?,
-        dynamicStitch: Boolean, flatAspect: Float = 1f, fit: com.mhmmtbg.x5reframe.model.FrameFit = com.mhmmtbg.x5reframe.model.FrameFit.FIT,
+        dynamicStitch: Boolean, flatAspect: Float = 1f, look: com.mhmmtbg.x5reframe.model.FlatLook = com.mhmmtbg.x5reframe.model.FlatLook(),
         openSource: () -> FrameSource,
     ): Bitmap {
         val egl = EglCore()
         val pb = egl.createPbuffer(w, h)
         egl.makeCurrent(pb)
-        val program = ReframeProgram(rig, highQualityStitch = true).apply { this.flatAspect = flatAspect; this.fit = fit }
+        val program = ReframeProgram(rig, highQualityStitch = true).apply { this.flatAspect = flatAspect; this.look = look }
         val src = openSource()
         try {
             program.dynamicStitch = dynamicStitch

@@ -45,6 +45,10 @@ class SequenceUi(
     val delete: (Int) -> Unit,
     val setSpeed: (Int, Double) -> Unit,
     val setTransition: (Int, Transition) -> Unit,
+    /** Parçanın hız / ters / eğri alanlarını değiştir. */
+    val updateSegment: (Int, (Segment) -> Segment) -> Unit = { _, _ -> },
+    /** Oynatma çizgisindeki kareyi dondur (fotoğraf parçası olarak araya ekle). */
+    val freeze: (Long) -> Unit = {},
     /** Proje sesi */
     val audio: com.mhmmtbg.x5reframe.project.ProjectAudio = com.mhmmtbg.x5reframe.project.ProjectAudio(),
     val pickMusic: () -> Unit = {},
@@ -76,6 +80,8 @@ fun SequenceStrip(seq: SequenceUi) {
                         color = if (selected) Palette.Text else Palette.Muted)
                     val tags = buildList {
                         if (seg.speed != 1.0) add("${fmtSpeed(seg.speed)}×")
+                        if (seg.reverse) add("◀◀")
+                        if (seg.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) add(seg.curve.label)
                         if (seg.edit.layout.count > 1) add(seg.edit.layout.label)
                         if (seg.transitionOut == Transition.FADE) add("◐")
                     }
@@ -88,7 +94,7 @@ fun SequenceStrip(seq: SequenceUi) {
                     if (i > 0) DropdownMenuItem(text = { Text("◀ Sola taşı") }, onClick = { menu = false; seq.move(i, -1) })
                     if (i < seq.segments.size - 1) DropdownMenuItem(text = { Text("Sağa taşı ▶") }, onClick = { menu = false; seq.move(i, 1) })
                     HorizontalDivider(color = Palette.Outline)
-                    listOf(0.5, 1.0, 2.0, 4.0).forEach { sp ->
+                    listOf(0.25, 0.5, 1.0, 2.0, 4.0, 10.0).forEach { sp ->
                         DropdownMenuItem(
                             text = { Text("Hız ${fmtSpeed(sp)}×" + if (sp == seg.speed) "  ✓" else "") },
                             onClick = { menu = false; seq.setSpeed(i, sp) },
@@ -118,4 +124,4 @@ fun SequenceStrip(seq: SequenceUi) {
     }
 }
 
-private fun fmtSpeed(s: Double) = if (s % 1.0 == 0.0) s.toInt().toString() else s.toString().replace('.', ',')
+internal fun fmtSpeed(s: Double) = if (s % 1.0 == 0.0) s.toInt().toString() else s.toString().replace('.', ',')
