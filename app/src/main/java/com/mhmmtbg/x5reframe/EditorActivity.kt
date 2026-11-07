@@ -60,6 +60,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     /** Kameradan kablosuz önizleme (indirilmemiş çekim): yalnızca bakılır, kaydedilmez. */
     private var previewOnly = false
     private var editorStartTool by mutableStateOf<String?>(null)
+    private var exportSheetOnStart = false
     private var cleanToggles by mutableStateOf(0)
     private var favorite by mutableStateOf(false)
 
@@ -608,6 +609,30 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     @Volatile private var flatAutoCancelled = false
 
+    /** Önizleme kopyası hazırlanan klipler (aynı anda bir tane). */
+    private val proxyBusy = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    private fun buildProxy(clip: ClipInfo) {
+        val key = clip.uri.toString()
+        if (!proxyBusy.add(key)) return
+        Thread({
+            val f = runCatching {
+                com.mhmmtbg.x5reframe.media.Proxies.build(this, clip, { isDestroyed }) { p ->
+                    runOnUiThread { controller?.takeIf { it.clip.uri == clip.uri }?.proxyNote = "önizleme kopyası hazırlanıyor %${(p * 100).toInt()}" }
+                }
+            }.getOrNull()
+            proxyBusy.remove(key)
+            runOnUiThread {
+                val c = controller ?: return@runOnUiThread
+                if (c.clip.uri != clip.uri) return@runOnUiThread
+                if (f == null) { c.proxyNote = null; return@runOnUiThread }
+                // Hazır: aynı parçayı önizleme kopyasıyla yeniden aç
+                if (player?.playing != true) { controller = null; openSegmentNoStore(segIndex) }
+                else c.proxyNote = "önizleme kopyası hazır (durdurunca geçer)"
+            }
+        }, "proxy").start()
+    }
+
     /**
      * Akıllı kadraj: çıktıyı [aspect] yapar, parçadaki yüzleri izleyerek konuyu ortada tutan
      * kaydırma anahtar kareleri ekler (normal videolar).
@@ -711,6 +736,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        intent.getStringExtra(EXTRA_TOOL)?.let { editorStartTool = it }
         store = com.mhmmtbg.x5reframe.project.ProjectStore(this)
         val existing = intent.getStringExtra(EXTRA_PROJECT)?.let { store.get(it) }
         val newUri: Uri? = if (existing == null) intent.data ?: run { finish(); return } else null
@@ -796,7 +822,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             while (true) {
                 kotlinx.coroutines.delay(500)
                 val c = controller ?: continue
-                if (c.showStats) c.statsText = player?.stats?.snapshot()?.toString() + (if (c.clip.lrv != null) " · LRV" else " · tam çözünürlük")
+                if (c.showStats) c.statsText = player?.stats?.snapshot()?.toString() + (if (c.clip.lrv != null) " · LRV" else if (player?.usingProxy == true) " · önizleme kopyası" else " · tam çözünürlük")
             }
         }
     }
@@ -822,7 +848,12 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             }
             clipCache[seg.clipUri.toString()] = clip
             val c = EditorController(clip, proj.name, seg.edit)
-            val p = Player(this@EditorActivity, clip, this@EditorActivity)
+            // Ağır normal videolar: hazırsa önizleme kopyasıyla oynat, değilse arka planda hazırla
+            val wantProxy = com.mhmmtbg.x5reframe.media.Proxies.enabled(this@EditorActivity) && com.mhmmtbg.x5reframe.media.Proxies.needed(clip)
+            val preview = if (wantProxy) withContext(Dispatchers.IO) { com.mhmmtbg.x5reframe.media.Proxies.ready(this@EditorActivity, clip) } else null
+            if (wantProxy && preview == null) buildProxy(clip)
+            c.proxyNote = if (preview != null) "önizleme kopyası" else null
+            val p = Player(this@EditorActivity, clip, this@EditorActivity, preview)
             p.sceneProvider = { t -> c.sceneAt(t) }
             p.layoutProvider = { c.snapshotState.layout.rects }
             p.baseProvider = { t -> c.baseAt(t) }
@@ -1731,6 +1762,16 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         controller?.let { refreshAiState(it) }
     }
 
+    /** Bellek azalınca yeniden üretilebilen önbellekleri bırak. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+            filmstrip = emptyList(); timelineView?.filmstrip = emptyList()
+            controller?.histogram = null
+            com.mhmmtbg.x5reframe.media.Waveform.trim(keep = controller?.clip?.uri)
+        }
+    }
+
     override fun onPause() {
         super.onPause()
         player?.pause()
@@ -1751,6 +1792,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     companion object {
         const val CANCELLED = "İptal edildi"
         const val EXTRA_PROJECT = "project"
+        /** Açılışta açık olacak araç (ör. "COLOR", "SPEED"; ekran görüntüsü testleri için de). */
+        const val EXTRA_TOOL = "tool"
         const val EXTRA_LRV = "lrv"
         const val EXTRA_MORE = "more"
         const val EXTRA_VIEWER = "viewer"

@@ -49,6 +49,8 @@ class Exporter(
         /** Çıktı kare hızı; null = ilk klibin kare hızı. */
         val fps: Float? = null,
         val format: Format = Format.MP4,
+        /** Galeri yerine bu dosyaya yaz (önizleme kopyaları için). */
+        val target: java.io.File? = null,
     )
 
     /** Çıktı biçimi: video, hareketli GIF ya da yalnızca ses (M4A). */
@@ -123,6 +125,8 @@ class Exporter(
         fun onProgress(fraction: Float, speed: Float)
         fun onDone(uri: Uri, seconds: Float)
         fun onFailed(message: String)
+        /** Bilgi notu (ör. telefon ısındığı için yavaşlatıldı). */
+        fun onNote(text: String) {}
     }
 
     @Volatile var cancelled = false
@@ -189,7 +193,8 @@ class Exporter(
             if (!gif && !audioOnly) checkSupported(mime, output.width, output.height)
 
             outUri = createOutput()
-            val outPfd = context.contentResolver.openFileDescriptor(outUri, "rw")!!
+            val outPfd = output.target?.let { ParcelFileDescriptor.open(it, ParcelFileDescriptor.MODE_CREATE or ParcelFileDescriptor.MODE_TRUNCATE or ParcelFileDescriptor.MODE_READ_WRITE) }
+                ?: context.contentResolver.openFileDescriptor(outUri, "rw")!!
             // 360° çıktıda önce geçici dosyaya yazılır (moov kutusu düzenlenebilsin diye).
             val tmp = if (output.spherical && !gif && !audioOnly) java.io.File(context.cacheDir, "export360.mp4").also { it.delete() } else null
             if (!gif) muxer = if (tmp != null) MediaMuxer(tmp.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
@@ -267,8 +272,18 @@ class Exporter(
             val gifPix = if (gif) java.nio.ByteBuffer.allocateDirect(output.width * output.height * 4).order(java.nio.ByteOrder.nativeOrder()) else null
             val gifRow = ByteArray(if (gif) output.width * output.height * 4 else 0)
             var nextGifUs = 0L
+            val power = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+            var frameNo = 0
+            var hot = false
             /** Çizilen kareyi çıktıya ver (video kodlayıcıya ya da GIF'e). */
             emitFrame = { tOutUs ->
+                // Isınma: telefon çok ısınırsa kapanmasın diye kareler arasında kısa mola
+                if (++frameNo % 30 == 0) {
+                    val wasHot = hot
+                    hot = power.currentThermalStatus >= android.os.PowerManager.THERMAL_STATUS_SEVERE
+                    if (hot && !wasHot) listener.onNote("Telefon ısındı; dışa aktarım yavaşlatıldı")
+                }
+                if (hot) Thread.sleep(25)
                 if (gifEnc != null) {
                     if (tOutUs >= nextGifUs) {
                         nextGifUs += gifStepUs
@@ -382,7 +397,8 @@ class Exporter(
             listener.onDone(outUri, (SystemClock.elapsedRealtime() - t0) / 1000f)
         } catch (t: Throwable) {
             runCatching { if (::muxer.isInitialized) muxer.release() }
-            outUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
+            if (output.target != null) runCatching { output.target.delete() }
+            else outUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             listener.onFailed(if (t is InterruptedException) "İptal edildi" else (t.message ?: t.javaClass.simpleName))
         } finally {
             runCatching { mixer?.close() }
@@ -676,6 +692,7 @@ class Exporter(
     }
 
     private fun createOutput(): Uri {
+        output.target?.let { return Uri.fromFile(it) }
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val (name, mimeType, dir, collection) = when (output.format) {
             Format.MP4 -> listOf("X5_$stamp.mp4", "video/mp4", Environment.DIRECTORY_MOVIES, MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY))
@@ -692,6 +709,7 @@ class Exporter(
     }
 
     private fun publish(uri: Uri) {
+        if (output.target != null) return
         context.contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
     }
 }

@@ -321,7 +321,20 @@ class MainActivity : AppCompatActivity() {
                     lrv = it; prefs.edit().putBoolean(KEY_PREFER_LRV, it).apply()
                 }
             }
+            item {
+                var px by remember { mutableStateOf(prefs.getBoolean("proxies", true)) }
+                SwitchRow("Önizleme kopyaları", "4K, HDR ve yüksek kare hızlı normal videolar için hafif kopya hazırlanır; düzenleme akıcı olur, dışa aktarım asıl dosyadan yapılır.", px) {
+                    px = it; prefs.edit().putBoolean("proxies", it).apply()
+                }
+            }
             item { SectionTitle("Depolama") }
+            item {
+                var psize by remember { mutableStateOf(-1L) }
+                LaunchedEffect(Unit) { psize = withContext(Dispatchers.IO) { dirSize(java.io.File(filesDir, "proxy")) } }
+                SettingRow("Önizleme kopyalarını sil", if (psize < 0) "Hesaplanıyor…" else "${"%.1f".format(psize / 1048576.0)} MB · gerekince yeniden hazırlanır") {
+                    Thread { val n = com.mhmmtbg.x5reframe.media.Proxies.clear(this@MainActivity); runOnUiThread { psize = 0; android.widget.Toast.makeText(this@MainActivity, "${"%.1f".format(n / 1048576.0)} MB boşaltıldı", android.widget.Toast.LENGTH_SHORT).show() } }.start()
+                }
+            }
             item {
                 var size by remember { mutableStateOf(-1L) }
                 LaunchedEffect(Unit) { size = withContext(Dispatchers.IO) { cleanableBytes() } }

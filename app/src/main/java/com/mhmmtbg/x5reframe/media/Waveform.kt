@@ -18,6 +18,9 @@ object Waveform {
 
     @Synchronized fun cached(uri: Uri): FloatArray? = cache[uri.toString()]
 
+    /** Bellek azalınca: yalnızca [keep] klibinin dalga biçimi kalsın. */
+    @Synchronized fun trim(keep: Uri?) { cache.keys.retainAll { it == keep?.toString() } }
+
     fun compute(context: Context, uri: Uri, track: Int, cancelled: () -> Boolean = { false }): FloatArray? {
         cached(uri)?.let { return it }
         val pfd = runCatching { context.contentResolver.openFileDescriptor(uri, "r") }.getOrNull() ?: return null

@@ -121,6 +121,9 @@ object ExportManager {
                 _state.value = Status.Done(req, uri, seconds, queue.size)
                 ExportService.finished(context, req.title, uri, true, "${"%.1f".format(req.durationUs / 1e6)} sn video ${"%.0f".format(seconds)} sn'de hazır")
             }
+            override fun onNote(text: String) {
+                ExportService.update(context, req.title + " · " + text, (_state.value as? Status.Running)?.fraction ?: 0f, queue.size)
+            }
             override fun onFailed(message: String) {
                 _state.value = if (message == CANCELLED) Status.Idle else Status.Failed(req, message, queue.size)
                 if (message != CANCELLED) ExportService.finished(context, req.title, null, false, message)

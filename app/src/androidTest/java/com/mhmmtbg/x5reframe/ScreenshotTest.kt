@@ -60,6 +60,28 @@ class ScreenshotTest {
         assumeTrue(true)
     }
 
+    /** v4.0: normal klipte araç panelleri (koyu tema). */
+    @Test
+    fun toolPanels() {
+        inst.runOnMainSync { com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(ctx, com.mhmmtbg.x5reframe.ui.theme.ThemeMode.DARK) }
+        val img = File(ctx.cacheDir, "shot_photo.png")
+        val b = Bitmap.createBitmap(960, 540, Bitmap.Config.ARGB_8888)
+        val cv = android.graphics.Canvas(b)
+        cv.drawColor(android.graphics.Color.rgb(40, 70, 110))
+        val p = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        p.color = android.graphics.Color.rgb(240, 180, 60); cv.drawCircle(700f, 180f, 90f, p)
+        p.color = android.graphics.Color.rgb(30, 120, 70); cv.drawRect(0f, 380f, 960f, 540f, p)
+        img.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        for (tool in listOf("COLOR", "SPEED", "SMART", "LAYER", "AUDIO", "FRAME", "EXPORT")) {
+            val i = Intent(ctx, EditorActivity::class.java).setData(Uri.fromFile(img)).putExtra(EditorActivity.EXTRA_TOOL, tool)
+            ActivityScenario.launch<EditorActivity>(i).use {
+                Thread.sleep(3500)
+                shot("ui_tool_" + tool.lowercase())
+            }
+        }
+        inst.runOnMainSync { com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(ctx, com.mhmmtbg.x5reframe.ui.theme.ThemeMode.SYSTEM) }
+    }
+
     private fun shot(name: String): Bitmap {
         val bmp = inst.uiAutomation.takeScreenshot()
         val v = ContentValues().apply {

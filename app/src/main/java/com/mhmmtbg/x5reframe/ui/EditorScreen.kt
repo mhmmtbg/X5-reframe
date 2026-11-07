@@ -38,6 +38,11 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.draw.clip
 import kotlin.math.roundToInt
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.role
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material3.IconButton
@@ -146,13 +151,16 @@ fun EditorScreen(
     seq: SequenceUi,
     startTool: String? = null,
 ) {
-    var tool by rememberSaveable(startTool) { mutableStateOf<Tool?>(if (startTool == "trim") Tool.TRIM else null) }
+    var tool by rememberSaveable(startTool) {
+        mutableStateOf<Tool?>(if (startTool == "trim") Tool.TRIM else startTool?.let { n -> Tool.values().firstOrNull { it.name == n } })
+    }
+    var showExportInit = startTool == "EXPORT"
     LaunchedEffect(tool) { c.layerTool = tool == Tool.LAYER }
     LaunchedEffect(c.openToolRequest) {
         when (c.openToolRequest) { "layer" -> tool = Tool.LAYER; "trim" -> tool = Tool.TRIM }
         c.openToolRequest = null
     }
-    var showExport by remember { mutableStateOf(false) }
+    var showExport by remember { mutableStateOf(showExportInit) }
     val s = c.state
 
     com.mhmmtbg.x5reframe.ui.theme.ThemedSystemBars()
@@ -176,7 +184,9 @@ fun EditorScreen(
             val boxRatio = maxWidth.value / maxHeight.value
             val w = if (ratio > boxRatio) maxWidth else maxHeight * ratio
             val h = if (ratio > boxRatio) maxWidth / ratio else maxHeight
-            AndroidView(factory = surfaceFactory, modifier = Modifier.size(w, h))
+            AndroidView(factory = surfaceFactory, modifier = Modifier.size(w, h).semantics {
+                contentDescription = "Önizleme. Kadrajı değiştirmek için sürükle, yakınlaştırmak için iki parmakla aç."
+            })
             if (s.layout.count > 1) {
                 val r = s.layout.rects[c.activePane.coerceIn(0, s.layout.count - 1)]
                 Box(Modifier.size(w, h)) {
@@ -274,7 +284,8 @@ private fun TopBar(c: EditorController, a: EditorActions, onExport: () -> Unit) 
             Text(
                 when {
                     c.clip.isImage -> "Fotoğraf · ${c.clip.displayWidth}×${c.clip.displayHeight}"
-                    !c.clip.is360 -> "Video · ${c.clip.displayWidth}×${c.clip.displayHeight} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn" + if (c.clip.hdrTransfer != 0) " · HDR" else ""
+                    !c.clip.is360 -> "Video · ${c.clip.displayWidth}×${c.clip.displayHeight} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn" +
+                        (if (c.clip.hdrTransfer != 0) " · HDR" else "") + (c.proxyNote?.let { " · $it" } ?: "")
                     else -> "${c.clip.cameraType} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn" + if (c.clip.lrv != null) " · hızlı önizleme" else ""
                 },
                 style = MaterialTheme.typography.bodySmall, color = Palette.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
@@ -402,7 +413,7 @@ private fun QuickBar(c: EditorController, seq: SequenceUi, openTool: (Tool) -> U
 @Composable
 private fun QuickChip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(18.dp)).background(Palette.SurfaceHigh).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+        Modifier.minimumInteractiveComponentSize().clip(RoundedCornerShape(18.dp)).background(Palette.SurfaceHigh).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, null, Modifier.size(14.dp), tint = Palette.Text)
@@ -605,7 +616,8 @@ private fun ColorPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
                 Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                     bandColors.forEachIndexed { i, col ->
                         Box(
-                            Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).background(col)
+                            Modifier.minimumInteractiveComponentSize().semantics { contentDescription = com.mhmmtbg.x5reframe.model.ColorGrade.HSL_BANDS[i]; selected = i == band }
+                                .size(30.dp).clip(RoundedCornerShape(15.dp)).background(col)
                                 .border(if (i == band) 3.dp else 0.dp, Palette.Text, RoundedCornerShape(15.dp)).clickable { band = i },
                         )
                     }
@@ -967,7 +979,7 @@ private fun roundSpeed(s: Double): Double = when {
 @Composable
 private fun Chip(label: String, on: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Palette.SurfaceHigh).clickable(onClick = onClick)
+        Modifier.minimumInteractiveComponentSize().semantics { selected = on; role = androidx.compose.ui.semantics.Role.Tab }.clip(RoundedCornerShape(16.dp)).background(if (on) Palette.Accent else Palette.SurfaceHigh).clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 7.dp),
     ) { Text(label, color = if (on) Palette.OnAccent else Palette.Text, style = MaterialTheme.typography.labelLarge) }
 }
@@ -1223,7 +1235,8 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
                     Text("Renk", color = Palette.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
                     swatches.forEach { col ->
                         Box(
-                            Modifier.size(26.dp).clip(RoundedCornerShape(13.dp))
+                            Modifier.minimumInteractiveComponentSize().semantics { contentDescription = if (col == 0) "Stilin rengi" else "Renk #%06X".format(col and 0xFFFFFF); selected = l.color == col }
+                                .size(26.dp).clip(RoundedCornerShape(13.dp))
                                 .background(if (col == 0) Palette.SurfaceHigh else Color(col))
                                 .border(if (l.color == col) 2.dp else 1.dp, if (l.color == col) Palette.Accent else Palette.Outline, RoundedCornerShape(13.dp))
                                 .clickable { c.updateLayer { it.copy(color = col) } },

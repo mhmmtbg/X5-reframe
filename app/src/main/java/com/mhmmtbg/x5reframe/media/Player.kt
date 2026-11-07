@@ -22,7 +22,12 @@ class Player(
     context: Context,
     private val clip: ClipInfo,
     private val listener: Listener,
+    /** Normal videoda hafif önizleme kopyası (varsa kareler ve ses buradan okunur). */
+    private val preview: ClipInfo? = null,
 ) {
+    /** Karelerin okunduğu klip: önizleme kopyası ya da asıl dosya. */
+    private val readClip = preview ?: clip
+    val usingProxy get() = preview != null
     interface Listener {
         fun onPosition(us: Long)
         fun onPlayingChanged(playing: Boolean)
@@ -53,7 +58,7 @@ class Player(
     private val thread = HandlerThread("player").apply { start() }
     private val handler = Handler(thread.looper)
     private val main = Handler(Looper.getMainLooper())
-    private val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(clip.uri, "r")!!
+    private val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(readClip.uri, "r")!!
     /** Varsa hafif LRV önizleme dosyası; yoksa asıl .insv kullanılır. */
     private val prefs = context.getSharedPreferences("prefs", Context.MODE_PRIVATE)
     private val lrvPfd: ParcelFileDescriptor? = clip.lrv?.takeIf { clip.is360 }?.takeIf { prefs.getBoolean("prefer_lrv", true) || clip.videoTracks.size < 2 }?.let { runCatching { context.contentResolver.openFileDescriptor(it.uri, "r") }.getOrNull() }
@@ -73,7 +78,7 @@ class Player(
     val stats = FrameStats()
     private val frameDurUs = (1_000_000 / clip.frameRate).toLong()
 
-    private val audio: AudioPreview? = clip.audioTrack?.let { AudioPreview(pfd.fileDescriptor, it) }
+    private val audio: AudioPreview? = readClip.audioTrack?.let { AudioPreview(pfd.fileDescriptor, it) }
 
     @Volatile private var pendingSeek = -1L
     @Volatile private var redrawQueued = false
@@ -86,7 +91,7 @@ class Player(
                 egl = EglCore()
                 program = Sources.program(clip).apply { dynamicStitch = prefs.getBoolean("dynamic_stitch", true) }
                 overlay = com.mhmmtbg.x5reframe.gl.OverlayRenderer()
-                source = Sources.open(appContext, clip, pfd.fileDescriptor, realtime = true, lrvFd = lrvPfd?.fileDescriptor)
+                source = Sources.open(appContext, readClip, pfd.fileDescriptor, realtime = true, lrvFd = lrvPfd?.fileDescriptor)
                 android.util.Log.i("X5Player", "kaynak açıldı: ${source.javaClass.simpleName} ${clip.kind}")
                 source.seekAndShow(0, frameDurUs)
                 android.util.Log.i("X5Player", "ilk kare: ${source.currentPts}")
@@ -242,7 +247,9 @@ class Player(
             // Oynatırken birkaç karede bir, dururken her yeni karede ölç.
             // Oynarken GPU'yu bekletmeyen eşzamansız okuma; dururken bu karenin sonucu hemen gerekir.
             program.stitch?.async = playing
-            program.updateStitch(source, if (playing) 10 else 1, if (playing) 0.4f else 0.7f)
+            // Telefon ısınınca dikiş ölçümü seyrekleşir
+            val hot = (thermalTick++ % 60 == 0).let { if (it) { thermalHot = power.currentThermalStatus >= android.os.PowerManager.THERMAL_STATUS_SEVERE }; thermalHot }
+            program.updateStitch(source, if (playing) (if (hot) 30 else 10) else 1, if (playing) 0.4f else 0.7f)
             stitchPts = t
         }
         program.color = colorProvider()
@@ -256,6 +263,10 @@ class Player(
         egl.swap(window)
     }
 
+    private val power = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
+    private var thermalTick = 0
+    private var thermalHot = false
+
     private var personMask: com.mhmmtbg.x5reframe.person.PersonMask? = null
     private var personPts = -1L
     private var personTick = 0
@@ -266,7 +277,7 @@ class Player(
         if (lk.person == null || clip.is360) { program.personMask = 0; return }
         val pm = personMask ?: runCatching { com.mhmmtbg.x5reframe.person.PersonMask(clip.displayAspect, stream = true) }
             .onFailure { error(it) }.getOrNull()?.also { personMask = it } ?: return
-        if (t != personPts && (!playing || personTick++ % 3 == 0)) {
+        if (t != personPts && (!playing || personTick++ % (if (thermalHot) 6 else 3) == 0)) {
             runCatching { pm.update(program, source) }
             personPts = t
         }

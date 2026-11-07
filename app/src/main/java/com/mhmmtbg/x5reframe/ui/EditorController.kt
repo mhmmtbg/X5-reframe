@@ -259,6 +259,9 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         if (before != after) { history.replace(before); history.push(after); sync() }
     }
 
+    /** Önizleme kopyası durumu (üst çubukta). */
+    var proxyNote by mutableStateOf<String?>(null)
+
     /** Normal video hareket analizi ilerlemesi (null = çalışmıyor). */
     var stabProgress by mutableStateOf<Float?>(null)
 

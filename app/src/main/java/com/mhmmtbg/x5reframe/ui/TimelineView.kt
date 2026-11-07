@@ -491,6 +491,36 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
     private var rawEnd = 0L
     private val LAYER_DRAGS = setOf(Drag.LAYER_MOVE, Drag.LAYER_START, Drag.LAYER_END)
 
+    // ---- Erişilebilirlik: ekran okuyucu konumu okur, kaydırma eylemleriyle 1 sn ileri / geri ----
+    init {
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        isFocusable = true
+    }
+
+    private fun spoken(us: Long) = "%d dakika %d saniye".format(us / 60_000_000, (us / 1_000_000) % 60)
+
+    override fun onInitializeAccessibilityNodeInfo(info: android.view.accessibility.AccessibilityNodeInfo) {
+        super.onInitializeAccessibilityNodeInfo(info)
+        info.className = "android.widget.SeekBar"
+        info.contentDescription = "Zaman çizelgesi. Konum ${spoken(positionUs)}, süre ${spoken(durationUs)}. Kesme ${spoken(inUs)} ile ${spoken(outUs)} arası."
+        info.rangeInfo = android.view.accessibility.AccessibilityNodeInfo.RangeInfo.obtain(
+            android.view.accessibility.AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT, 0f, durationUs / 1e6f, positionUs / 1e6f)
+        info.addAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_FORWARD)
+        info.addAction(android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_BACKWARD)
+    }
+
+    override fun performAccessibilityAction(action: Int, arguments: android.os.Bundle?): Boolean {
+        val step = when (action) {
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> 1_000_000L
+            android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> -1_000_000L
+            else -> return super.performAccessibilityAction(action, arguments)
+        }
+        positionUs = (positionUs + step).coerceIn(0, durationUs)
+        listener?.onScrubStart(); listener?.onScrub(positionUs, true); listener?.onScrubEnd()
+        announceForAccessibility(spoken(positionUs))
+        return true
+    }
+
     private fun label(us: Long): String {
         val s = us / 1_000_000.0
         return if (s % 1.0 == 0.0) "%d:%02d".format((s / 60).toInt(), (s % 60).toInt()) else "%.1f".format(s % 60)
