@@ -175,10 +175,68 @@ def main(clip, out_dir):
                     canvas = np.concatenate([np.pad(s, ((0, hmax - s.shape[0]), (0, 8), (0, 0))) for s in strips], 1)
                     Image.fromarray(canvas.clip(0, 255).astype(np.uint8)).save(os.path.join(out_dir, f'seam_{name}.jpg'), quality=85)
 
+    # ---- Kayma ölçümü: dikiş üzerinde iki lensin görüntüsünü yerel olarak karşılaştır ----
+    # Dikiş boyunca (enlem -60..60) küçük pencerelerde, lens1 örneğini lens0'a göre kaydırarak
+    # en iyi eşleşen kaymayı (derece) bul. Sabit kayma = kalibrasyon/eksen hatası;
+    # enleme göre değişen kayma = bozulma modeli hatası; sıfıra yakın = sorun renk/bulanıklıkta.
+    sec = dur * 0.5
+    t0 = frame(clip, 0, sec, size); t1 = frame(clip, 1, sec, size)
+    imgs = {0: t1, 1: t0} if reversed_tracks else {0: t0, 1: t1}
+    step = np.radians(0.1)
+    shifts = []
+    for side in (1, -1):  # iki dikiş: boylam +90 ve -90 civarı
+        for latd in range(-60, 61, 10):
+            la = np.radians(latd)
+            # Bu enlemde dikişin boylamını bul (c0.z == c1.z)
+            lons = np.radians(np.linspace(side * 60, side * 120, 601))
+            dd = np.stack([np.cos(la) * np.sin(lons), np.full_like(lons, np.sin(la)), np.cos(la) * np.cos(lons)], -1)
+            z0 = (dd @ Ls[0]['R'])[:, 2]; z1 = (dd @ Ls[1]['R'])[:, 2]
+            lo = lons[np.argmin(np.abs(z0 - z1))]
+            # 4°x4° pencere, 0,1° adım
+            g = np.radians(np.linspace(-2, 2, 41))
+            GL, GA = np.meshgrid(lo + g, la + g)
+            def patch(i, dlon=0.0, dlat=0.0):
+                L_, A_ = GL + dlon, GA + dlat
+                d = np.stack([np.cos(A_) * np.sin(L_), np.sin(A_), np.cos(A_) * np.cos(L_)], -1)
+                u, v, _ = project(Ls[i], d @ Ls[i]['R'])
+                p = sample(imgs[i], u, v).mean(-1)
+                return (p - p.mean()) / (p.std() + 1e-6), float(p.std())
+            a, sa = patch(0)
+            if sa < 6:  # dokusuz bölge (gökyüzü vb.), ölçüm güvenilmez
+                continue
+            best = (1e9, 0, 0)
+            for dl in np.arange(-1.5, 1.51, 0.1):
+                for da in np.arange(-1.5, 1.51, 0.1):
+                    b, _ = patch(1, np.radians(dl), np.radians(da))
+                    e = float(np.mean((a - b) ** 2))
+                    if e < best[0]:
+                        best = (e, dl, da)
+            b0, _ = patch(1)
+            shifts.append(dict(side=side, lat=latd, lon=round(float(np.degrees(lo)), 2), dlon=round(best[1], 2), dlat=round(best[2], 2),
+                               err0=round(float(np.mean((a - b0) ** 2)), 3), err=round(best[0], 3)))
+    results['shifts'] = shifts
+
+    # Görsel: dikiş üzerinde iki lensin %50 karışımı (kayma varsa çift görüntü), dar şeritler
+    for side, name in ((1, 'right'), (-1, 'left')):
+        lo = np.radians(side * 90)
+        lonv = lo + np.radians(np.linspace(-8, 8, 160))
+        latv = np.radians(np.linspace(-60, 60, 600))
+        LL, AA = np.meshgrid(lonv, latv)
+        d = np.stack([np.cos(AA) * np.sin(LL), np.sin(AA), np.cos(AA) * np.cos(LL)], -1)
+        cs = []
+        for i in (0, 1):
+            u, v, _ = project(Ls[i], d @ Ls[i]['R'])
+            cs.append(sample(imgs[i], u, v))
+        ghost = 0.5 * cs[0] + 0.5 * cs[1]
+        canvas = np.concatenate([cs[0], np.zeros((600, 4, 3)), cs[1], np.zeros((600, 4, 3)), ghost], 1)
+        Image.fromarray(canvas.clip(0, 255).astype(np.uint8)).save(os.path.join(out_dir, f'ghost_{name}.jpg'), quality=88)
+
     results['summary'] = sorted(((float(np.mean(v)), k) for k, v in agg.items()))[:8]
     results['current_err'] = float(np.mean([f['s1_d0']['err_raw'] for f in results['frames']]))
     json.dump(results, open(os.path.join(out_dir, 'seam.json'), 'w'), indent=1)
     print(json.dumps({k: results[k] for k in ('camera', 'tracks', 'crop', 'summary', 'current_err')}, indent=1))
+    for sh in results['shifts']:
+        print(sh)
 
 
 if __name__ == '__main__':
