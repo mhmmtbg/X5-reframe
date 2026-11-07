@@ -57,5 +57,8 @@ private val typography = Typography(
 
 @Composable
 fun X5Theme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = scheme, typography = typography, content = content)
+    // Renk verilmemiş metinler koyu zeminde açık renkte görünsün
+    MaterialTheme(colorScheme = scheme, typography = typography) {
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.material3.LocalContentColor provides Palette.Text, content = content)
+    }
 }

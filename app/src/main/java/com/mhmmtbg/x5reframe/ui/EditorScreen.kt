@@ -225,7 +225,7 @@ private fun TopBar(c: EditorController, a: EditorActions, onExport: () -> Unit) 
             Text(c.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 "${c.clip.cameraType} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn" + if (c.clip.lrv != null) " · hızlı önizleme" else "",
-                style = MaterialTheme.typography.bodySmall, color = Palette.Muted,
+                style = MaterialTheme.typography.bodySmall, color = Palette.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
         IconButton(onClick = c::undo, enabled = c.canUndo) {
@@ -287,8 +287,8 @@ private fun Transport(c: EditorController, a: EditorActions) {
     ) {
         Text(
             "${fmt(c.positionUs)} / ${fmt(c.clip.durationUs)}",
-            fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = Palette.Muted,
-            modifier = Modifier.weight(1f),
+            fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, color = Palette.Muted,
+            modifier = Modifier.weight(1f), maxLines = 1, softWrap = false,
         )
         IconButton(onClick = { c.previousKeyframeTime()?.let(a.seek) }, enabled = c.previousKeyframeTime() != null) {
             Icon(Glyphs.PrevKey, "Önceki anahtar kare", tint = if (c.previousKeyframeTime() != null) Palette.Text else Palette.Outline)

@@ -272,13 +272,14 @@ private fun RoundIcon(icon: ImageVector, label: String, onClick: () -> Unit) {
 
 @Composable
 private fun BottomButton(label: String, icon: ImageVector, modifier: Modifier, primary: Boolean = false, onClick: () -> Unit) {
-    Row(
+    Column(
         modifier.clip(RoundedCornerShape(12.dp)).background(if (primary) Palette.Accent else Color(0x33FFFFFF)).clickable(onClick = onClick)
-            .padding(vertical = 11.dp),
-        horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+            .padding(vertical = 8.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Icon(icon, null, Modifier.size(18.dp), tint = if (primary) Palette.OnAccent else Color.White)
-        Spacer(Modifier.width(6.dp))
-        Text(label, color = if (primary) Palette.OnAccent else Color.White, style = MaterialTheme.typography.labelLarge, maxLines = 1)
+        Icon(icon, null, Modifier.size(20.dp), tint = if (primary) Palette.OnAccent else Color.White)
+        Spacer(Modifier.height(2.dp))
+        Text(label, color = if (primary) Palette.OnAccent else Color.White, style = MaterialTheme.typography.labelMedium,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
