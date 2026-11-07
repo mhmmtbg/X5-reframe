@@ -596,6 +596,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.baseProvider = { t -> c.baseAt(t) }
             p.colorProvider = { if (c.compareHold) null else c.colorUniforms }
             p.lookProvider = { c.snapshotState.flatLook }
+            p.outProvider = { c.snapshotState.outUs }
             p.layersProvider = { c.snapshotState.layers }
             p.setVolume(projectAudio.originalVolume)
             p.setStitchInv(c.state.stitchInv)
@@ -932,6 +933,29 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         finish()
     }
 
+    /** Otomatik altyazı: parçanın sesini tanıyıp alt yazı katmanları ekler. */
+    private fun autoCaptions(c: EditorController, mode: String) {
+        val track = c.clip.audioTrack ?: return
+        if (c.captionProgress != null) return
+        player?.pause()
+        c.captionProgress = 0f
+        val st = c.state
+        Thread({
+            val r = runCatching {
+                val pcm = com.mhmmtbg.x5reframe.captions.Captions.pcm16k(this, c.clip.uri, track, st.inUs, st.outUs) { controller !== c }
+                runOnUiThread { c.captionProgress = 0.15f }
+                if (mode == "device") com.mhmmtbg.x5reframe.captions.Captions.recognizeOnDevice(this, pcm, st.inUs, "tr-TR", { controller !== c }) { p ->
+                    runOnUiThread { c.captionProgress = 0.15f + 0.85f * p }
+                } else com.mhmmtbg.x5reframe.captions.Captions.recognizeOpenAi(this, pcm, st.inUs, "tr")
+            }
+            runOnUiThread {
+                c.captionProgress = null
+                r.onSuccess { caps -> if (caps.isEmpty()) c.say("Konuşma bulunamadı", false) else c.addCaptions(caps) }
+                    .onFailure { c.say("Altyazı oluşturulamadı: ${it.message}", false) }
+            }
+        }, "captions").start()
+    }
+
     /**
      * Kare dondurma: oynatma çizgisindeki kare, düzenlemeleriyle birlikte çıktı oranında bir fotoğrafa çizilir
      * ve parça o noktadan bölünerek araya 2 sn'lik fotoğraf parçası olarak eklenir.
@@ -1095,6 +1119,15 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         deepTrack = { c.trackTarget?.let { startDeepTrack(c, c.positionUs, c.currentView, it) } },
         resumeTrack = { c.trackResume?.let { (t, box) -> c.positionUs = t; player?.seekTo(t); startDeepTrack(c, t, c.activeViewAt(t), box) } },
         requestHistogram = { player?.requestHistogram { h -> controller?.histogram = h } },
+        captionModes = {
+            if (c.clip.audioTrack == null) emptyList() else buildList {
+                if (com.mhmmtbg.x5reframe.captions.Captions.onDeviceAvailable(this@EditorActivity))
+                    add("device" to "Cihazda (internetsiz, Android konuşma tanıma)")
+                add("openai" to "OpenAI Whisper (API anahtarınla; ses OpenAI'ye gönderilir)" +
+                    if (!com.mhmmtbg.x5reframe.ai.AiSettings.hasKey(this@EditorActivity, com.mhmmtbg.x5reframe.ai.AiProvider.CHATGPT)) " — anahtar gerekli" else "")
+            }
+        },
+        autoCaptions = { mode -> autoCaptions(c, mode) },
         analyzeFlatStab = {
             if (c.stabProgress == null) {
                 player?.pause()

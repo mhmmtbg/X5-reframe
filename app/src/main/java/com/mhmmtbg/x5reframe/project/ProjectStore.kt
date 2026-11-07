@@ -227,7 +227,8 @@ class ProjectStore(context: Context) {
                         .put("x", l.x.toDouble()).put("y", l.y.toDouble()).put("scale", l.scale.toDouble()).put("opacity", l.opacity.toDouble())
                         .put("startUs", l.startUs).put("endUs", l.endUs).put("visible", l.visible).put("style", l.style.name)
                         .put("rotation", l.rotation.toDouble()).put("blend", l.blend.name).put("mask", l.mask.name).put("flipH", l.flipH)
-                        .apply { if (l.chroma.on) put("chroma", chromaToJson(l.chroma)) })
+                        .apply { if (l.chroma.on) put("chroma", chromaToJson(l.chroma)) }
+                        .put("font", l.font.name).put("color", l.color).put("align", l.align.name).put("animIn", l.animIn.name).put("animOut", l.animOut.name))
                 }
             })
             put("extraPanes", JSONArray().apply {
@@ -303,6 +304,11 @@ class ProjectStore(context: Context) {
                                 mask = runCatching { com.mhmmtbg.x5reframe.model.Layer.Mask.valueOf(l.optString("mask", "NONE")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Mask.NONE),
                                 flipH = l.optBoolean("flipH", false),
                                 chroma = l.optJSONObject("chroma")?.let(::chromaFromJson) ?: com.mhmmtbg.x5reframe.model.ChromaKey(),
+                                font = runCatching { com.mhmmtbg.x5reframe.model.Layer.Font.valueOf(l.optString("font", "SANS_BOLD")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Font.SANS_BOLD),
+                                color = l.optInt("color", 0),
+                                align = runCatching { com.mhmmtbg.x5reframe.model.Layer.Align.valueOf(l.optString("align", "CENTER")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Align.CENTER),
+                                animIn = runCatching { com.mhmmtbg.x5reframe.model.Layer.Anim.valueOf(l.optString("animIn", "NONE")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Anim.NONE),
+                                animOut = runCatching { com.mhmmtbg.x5reframe.model.Layer.Anim.valueOf(l.optString("animOut", "NONE")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Anim.NONE),
                             )
                         }.getOrNull()
                     }

@@ -40,6 +40,9 @@ class Player(
     /** Renk düzenlemesi (null = yok). */
     @Volatile var colorProvider: () -> FloatArray? = { null }
 
+    /** Parçanın çıkış noktası (sona kadar süren katmanların çıkış animasyonu için). */
+    @Volatile var outProvider: () -> Long = { Long.MAX_VALUE }
+
     /** Düz klip yerleşimi. */
     @Volatile var lookProvider: () -> com.mhmmtbg.x5reframe.model.FlatLook = { com.mhmmtbg.x5reframe.model.FlatLook() }
     private val appContext = context.applicationContext
@@ -247,7 +250,7 @@ class Player(
         program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))
         val layers = layersProvider()
         overlay?.retain(layers)
-        overlay?.draw(winW, winH, layers, t)
+        overlay?.draw(winW, winH, layers, t, outProvider())
         egl.swap(window)
     }
 
@@ -305,7 +308,7 @@ class Player(
             val pb = egl.createPbuffer(w, h)
             egl.makeCurrent(pb)
             program.drawScene(w, h, layoutProvider(), sceneProvider(source.currentPts), source, baseProvider(source.currentPts))
-            overlay?.draw(w, h, layersProvider(), source.currentPts)
+            overlay?.draw(w, h, layersProvider(), source.currentPts, outProvider())
             val buf = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder())
             GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
             if (window != EGL14.EGL_NO_SURFACE) egl.makeCurrent(window) else egl.makeNothingCurrent()

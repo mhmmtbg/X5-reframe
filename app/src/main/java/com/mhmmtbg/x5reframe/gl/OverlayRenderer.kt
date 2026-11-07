@@ -24,6 +24,7 @@ class OverlayRenderer {
     private val uMask: Int
     private val uFlip: Int
     private val uKey: Int
+    private val uReveal: Int
     private val uKeyP: Int
 
     private class Tex(val id: Int, val aspect: Float)
@@ -39,6 +40,7 @@ class OverlayRenderer {
         uMask = GLES30.glGetUniformLocation(program, "uMask")
         uFlip = GLES30.glGetUniformLocation(program, "uFlip")
         uKey = GLES30.glGetUniformLocation(program, "uKey")
+        uReveal = GLES30.glGetUniformLocation(program, "uReveal")
         uKeyP = GLES30.glGetUniformLocation(program, "uKeyP")
         val quad = floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
@@ -50,8 +52,8 @@ class OverlayRenderer {
         GLES30.glBufferData(GLES30.GL_ARRAY_BUFFER, quad.size * 4, buf, GLES30.GL_STATIC_DRAW)
     }
 
-    /** @param t parçanın kaynak zamanı (µs) */
-    fun draw(width: Int, height: Int, layers: List<Layer>, t: Long) {
+    /** @param t parçanın kaynak zamanı (µs); [segEndUs] "sona kadar" katmanların bitişi (çıkış animasyonu için) */
+    fun draw(width: Int, height: Int, layers: List<Layer>, t: Long, segEndUs: Long = Long.MAX_VALUE) {
         val active = layers.filter { it.activeAt(t) }
         if (active.isEmpty()) return
         GLES30.glViewport(0, 0, width, height)
@@ -65,17 +67,20 @@ class OverlayRenderer {
         GLES30.glUniform1i(uTex, 0)
         for (l in active) {
             val tex = texture(l) ?: continue
-            val w = l.scale
+            val an = l.animAt(t, segEndUs)
+            if (an[0] <= 0.001f) continue
+            val w = l.scale * an[3]
             val h = w * width / height / tex.aspect
             // NDC: x sağa, y yukarı; merkez ve yarı boyutlar
-            GLES30.glUniform4f(uRect, l.x * 2 - 1, 1 - l.y * 2, w, h)
+            GLES30.glUniform4f(uRect, (l.x + an[1]) * 2 - 1, 1 - (l.y + an[2]) * 2, w, h)
+            GLES30.glUniform1f(uReveal, an[4])
             GLES30.glUniform1f(uRot, Math.toRadians(l.rotation.toDouble()).toFloat())
             GLES30.glUniform1i(uMask, l.mask.ordinal)
             GLES30.glUniform1f(uFlip, if (l.flipH) 1f else 0f)
             val k = l.chroma
             GLES30.glUniform4f(uKey, ((k.color shr 16) and 255) / 255f, ((k.color shr 8) and 255) / 255f, (k.color and 255) / 255f, if (k.on && l.kind == Layer.Kind.IMAGE) 1f else 0f)
             GLES30.glUniform4f(uKeyP, k.similarity, k.smooth.coerceAtLeast(0.001f), k.spill, 0f)
-            GLES30.glUniform1f(uAlpha, l.opacity)
+            GLES30.glUniform1f(uAlpha, l.opacity * an[0])
             when (l.blend) {
                 Layer.Blend.NORMAL -> GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
                 Layer.Blend.SCREEN -> GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_COLOR)
@@ -91,7 +96,7 @@ class OverlayRenderer {
     private fun texture(l: Layer): Tex? {
         cache[l.textureKey]?.let { return it }
         val bmp = when (l.kind) {
-            Layer.Kind.TEXT -> renderText(l.content, l.style)
+            Layer.Kind.TEXT -> renderText(l.content, l.style, l.font, l.color, l.align)
             Layer.Kind.IMAGE -> runCatching { BitmapFactory.decodeFile(l.content) }.getOrNull()
         } ?: return null
         val id = IntArray(1)
@@ -124,25 +129,31 @@ class OverlayRenderer {
 
     companion object {
         /** Metni önceden çarpılmış alfa ile bir bitmap'e çizer (çok satır destekli). */
-        fun renderText(text: String, style: Layer.TextStyle): Bitmap {
+        fun renderText(text: String, style: Layer.TextStyle, font: Layer.Font = Layer.Font.SANS_BOLD, color: Int = 0, align: Layer.Align = Layer.Align.CENTER): Bitmap {
             val lines = text.ifEmpty { " " }.split('\n')
             val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = style.fg; textSize = 96f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                this.color = if (color != 0) color else style.fg; textSize = 96f
+                typeface = Typeface.create(Typeface.create(font.family, Typeface.NORMAL), if (font.bold) Typeface.BOLD else Typeface.NORMAL)
             }
             val lineH = p.fontSpacing
             val pad = if (style.bg ushr 24 != 0) 36f else 8f
             val w = (lines.maxOf { p.measureText(it) } + 2 * pad).toInt().coerceAtLeast(8)
+            fun xOf(s: String) = when (align) {
+                Layer.Align.LEFT -> pad
+                Layer.Align.CENTER -> (w - p.measureText(s)) / 2
+                Layer.Align.RIGHT -> w - pad - p.measureText(s)
+            }
             val h = (lines.size * lineH + 2 * pad).toInt().coerceAtLeast(8)
             val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             val c = Canvas(bmp)
             if (style.bg ushr 24 != 0) {
                 c.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), 24f, 24f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = style.bg })
-            } else {
+            } else if (style != Layer.TextStyle.PLAIN) {
                 // Saydam zeminde okunabilirlik için ince kontur
                 val stroke = Paint(p).apply { this.style = Paint.Style.STROKE; strokeWidth = 8f; color = 0x99000000.toInt() }
-                lines.forEachIndexed { i, s -> c.drawText(s, pad, pad - p.ascent() + i * lineH, stroke) }
+                lines.forEachIndexed { i, s -> c.drawText(s, xOf(s), pad - p.ascent() + i * lineH, stroke) }
             }
-            lines.forEachIndexed { i, s -> c.drawText(s, pad, pad - p.ascent() + i * lineH, p) }
+            lines.forEachIndexed { i, s -> c.drawText(s, xOf(s), pad - p.ascent() + i * lineH, p) }
             return bmp
         }
 
@@ -171,6 +182,7 @@ uniform sampler2D uTex;
 uniform float uAlpha;
 uniform int uMask;   // 0 yok, 1 yuvarlak köşe, 2 daire
 uniform vec4 uKey;   // renk anahtarı rgb, açık mı
+uniform float uReveal; // daktilo: soldan görünen oran
 uniform vec4 uKeyP;  // benzerlik, yumuşaklık, taşma
 out vec4 outColor;
 vec2 cbcr(vec3 c) { return vec2(-0.1687 * c.r - 0.3313 * c.g + 0.5 * c.b, 0.5 * c.r - 0.4187 * c.g - 0.0813 * c.b); }
@@ -193,6 +205,7 @@ void main() {
         else if (uKey.b >= uKey.r) c.b = mix(c.b, min(c.b, (c.r + c.g) * 0.5 + 0.02), uKeyP.z);
         t = vec4(c * t.a * a, t.a * a);
     }
+    if (uReveal < 1.0) m *= 1.0 - smoothstep(uReveal - 0.02, uReveal, vUv.x);
     outColor = t * uAlpha * m; // önceden çarpılmış alfa
 }
 """

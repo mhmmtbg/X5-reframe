@@ -369,7 +369,7 @@ class Exporter(
                 stitchPts = pts
             }
             program.drawScene(output.width, output.height, job.layoutRects, job.sceneAt(pts), source, job.baseAt(pts))
-            overlay.draw(output.width, output.height, job.layers, pts)
+            overlay.draw(output.width, output.height, job.layers, pts, job.effEndUs)
             return pts
         }
 
@@ -438,7 +438,7 @@ class Exporter(
                     val k = k0 + idx
                     val tOut = k * frameDur
                     blit.draw(texs[idx], w, h, fadeFactor(job, tOut))
-                    overlay.draw(w, h, job.layers, pts[idx])
+                    overlay.draw(w, h, job.layers, pts[idx], job.effEndUs)
                     egl.setPresentationTime(win, (timeline + tOut) * 1000)
                     egl.swap(win)
                     drain(false)

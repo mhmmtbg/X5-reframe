@@ -420,6 +420,46 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     val currentLayer: com.mhmmtbg.x5reframe.model.Layer? get() = state.layers.firstOrNull { it.id == selectedLayer }
 
+    /** Şablondan metin katmanı. */
+    fun addTemplate(t: com.mhmmtbg.x5reframe.model.Layer.Template, text: String = t.sample) {
+        val l = t.apply(com.mhmmtbg.x5reframe.model.Layer(java.util.UUID.randomUUID().toString(), com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, text,
+            startUs = positionUs.coerceIn(state.inUs, state.outUs), endUs = (positionUs + 3_000_000).coerceAtMost(state.outUs)))
+        commit(state.copy(layers = state.layers + l))
+        selectedLayer = l.id
+        say("Şablon: ${t.label}")
+    }
+
+    /** Çıkartma (emoji) katmanı. */
+    fun addSticker(emoji: String) {
+        val l = com.mhmmtbg.x5reframe.model.Layer(java.util.UUID.randomUUID().toString(), com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, emoji,
+            x = 0.5f, y = 0.5f, scale = 0.22f, style = com.mhmmtbg.x5reframe.model.Layer.TextStyle.PLAIN, font = com.mhmmtbg.x5reframe.model.Layer.Font.SANS,
+            startUs = positionUs.coerceIn(state.inUs, state.outUs), endUs = -1, animIn = com.mhmmtbg.x5reframe.model.Layer.Anim.POP)
+        commit(state.copy(layers = state.layers + l))
+        selectedLayer = l.id
+        say("Çıkartma eklendi")
+    }
+
+    /** Otomatik altyazı satırlarını alt yazı biçiminde ekle (öncekileri değiştirir). */
+    fun addCaptions(caps: List<com.mhmmtbg.x5reframe.captions.Caption>) {
+        val keep = state.layers.filterNot { it.id.startsWith("cap-") }
+        val news = caps.mapIndexed { i, cp ->
+            com.mhmmtbg.x5reframe.model.Layer.Template.SUBTITLE.apply(com.mhmmtbg.x5reframe.model.Layer(
+                "cap-$i-" + java.util.UUID.randomUUID().toString().take(8), com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT,
+                com.mhmmtbg.x5reframe.captions.Captions.wrap(cp.text), startUs = cp.startUs, endUs = cp.endUs,
+            )).let { l ->
+                // Yazı boyu her satırda aynı kalsın: genişlik en uzun satırın karakter sayısıyla orantılı
+                val longest = l.content.split('\n').maxOf { it.length }
+                l.copy(animIn = com.mhmmtbg.x5reframe.model.Layer.Anim.NONE, animOut = com.mhmmtbg.x5reframe.model.Layer.Anim.NONE,
+                    scale = (longest * 0.021f + 0.04f).coerceIn(0.12f, 0.85f))
+            }
+        }
+        commit(state.copy(layers = keep + news))
+        say("${news.size} altyazı satırı eklendi")
+    }
+
+    /** Altyazı oluşturma ilerlemesi (null = çalışmıyor). */
+    var captionProgress by mutableStateOf<Float?>(null)
+
     fun addLayer(kind: com.mhmmtbg.x5reframe.model.Layer.Kind, content: String) {
         val l = com.mhmmtbg.x5reframe.model.Layer(
             java.util.UUID.randomUUID().toString(), kind, content,

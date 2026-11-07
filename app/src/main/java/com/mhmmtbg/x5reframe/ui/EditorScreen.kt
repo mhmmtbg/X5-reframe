@@ -109,6 +109,9 @@ class EditorActions(
     val lutFiles: () -> List<java.io.File> = { emptyList() },
     /** Normal video: görüntüden hareket analizi (sabitleme için). */
     val analyzeFlatStab: () -> Unit = {},
+    /** Otomatik altyazı: kullanılabilir yöntemler (kimlik, açıklama) ve başlatma. */
+    val captionModes: () -> List<Pair<String, String>> = { emptyList() },
+    val autoCaptions: (String) -> Unit = {},
 )
 
 /** Düzenleyici araç çubuğu (yatay kaydırılır). Paneli olmayanlar (Anlık görüntü) doğrudan çalışır. */
@@ -1098,10 +1101,23 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
     val s = c.state
     var editing by remember { mutableStateOf(false) }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        var stickers by remember { mutableStateOf(false) }
+        var captions by remember { mutableStateOf(false) }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ActionButton("+ Metin", Modifier.weight(1f), primary = true) { editing = true }
-            ActionButton("+ Görsel", Modifier.weight(1f), primary = true) { a.pickImage() }
+            ActionButton("+ Görsel", Modifier.weight(1f)) { a.pickImage() }
+            ActionButton("Çıkartma", Modifier.weight(1f)) { stickers = true }
+            ActionButton("Altyazı", Modifier.weight(1f)) { captions = true }
         }
+        c.captionProgress?.let { p ->
+            Text("Altyazı oluşturuluyor… %${(p * 100).toInt()}", style = MaterialTheme.typography.bodySmall)
+            LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().height(4.dp), color = Palette.Accent, trackColor = Palette.SurfaceHigh)
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            com.mhmmtbg.x5reframe.model.Layer.Template.values().forEach { t -> Chip(t.label, false) { c.addTemplate(t) } }
+        }
+        if (stickers) StickerDialog({ stickers = false }) { e -> stickers = false; c.addSticker(e) }
+        if (captions) CaptionDialog(a.captionModes(), { captions = false }) { mode -> captions = false; a.autoCaptions(mode) }
         if (s.layers.isEmpty()) {
             Text("Başlık, alt yazı, logo ya da resim içinde resim ekle. Seçili katmanı önizlemede tek parmakla taşı, iki parmakla büyüt ve döndür; zamanını çizelgedeki çubuktan ayarla.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
             if (editing) TextDialog("", com.mhmmtbg.x5reframe.model.Layer.TextStyle.WHITE, { editing = false }) { t, _ -> c.addLayer(com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, t); editing = false }
@@ -1163,6 +1179,33 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
                 LabeledRow("Stil") {
                     Segmented(com.mhmmtbg.x5reframe.model.Layer.TextStyle.values().toList(), l.style, { it.label }, { st -> c.updateLayer { it.copy(style = st) } }, Modifier.weight(1f))
                 }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.mhmmtbg.x5reframe.model.Layer.Font.values().forEach { f -> Chip(f.label, l.font == f) { c.updateLayer { it.copy(font = f) } } }
+                }
+                val swatches = listOf(0, 0xFFFFFFFF.toInt(), 0xFF111318.toInt(), 0xFFFFD43B.toInt(), 0xFFFF6B6B.toInt(), 0xFF4ADE80.toInt(), 0xFF5B8CFF.toInt(), 0xFFFF8FD1.toInt())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Renk", color = Palette.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
+                    swatches.forEach { col ->
+                        Box(
+                            Modifier.size(26.dp).clip(RoundedCornerShape(13.dp))
+                                .background(if (col == 0) Palette.SurfaceHigh else Color(col))
+                                .border(if (l.color == col) 2.dp else 1.dp, if (l.color == col) Palette.Accent else Palette.Outline, RoundedCornerShape(13.dp))
+                                .clickable { c.updateLayer { it.copy(color = col) } },
+                            contentAlignment = Alignment.Center,
+                        ) { if (col == 0) Text("A", style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+                LabeledRow("Hizalama") {
+                    Segmented(com.mhmmtbg.x5reframe.model.Layer.Align.values().toList(), l.align, { it.label }, { al -> c.updateLayer { it.copy(align = al) } }, Modifier.weight(1f))
+                }
+            }
+            Text("Giriş", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.mhmmtbg.x5reframe.model.Layer.Anim.values().forEach { an -> Chip(an.label, l.animIn == an) { c.updateLayer { it.copy(animIn = an) } } }
+            }
+            Text("Çıkış", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.mhmmtbg.x5reframe.model.Layer.Anim.values().filter { it != com.mhmmtbg.x5reframe.model.Layer.Anim.TYPE }.forEach { an -> Chip(an.label, l.animOut == an) { c.updateLayer { it.copy(animOut = an) } } }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 ActionButton("Baş: şimdi", Modifier.weight(1f)) { c.updateLayer { it.copy(startUs = c.positionUs) }; c.say("Katman ${fmt(c.positionUs)}'de başlar") }
@@ -1189,6 +1232,54 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
             TextDialog("", com.mhmmtbg.x5reframe.model.Layer.TextStyle.WHITE, { editing = false }) { t, _ -> c.addLayer(com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT, t); editing = false }
         }
     }
+}
+
+private val STICKERS = listOf("😀", "😂", "😍", "😎", "🤩", "🥳", "😮", "🤔", "👍", "👏", "🙌", "💪", "❤️", "🔥", "✨", "⭐", "🎉", "🎬", "📍", "➡️", "⬇️", "✅", "❌", "💯", "🏔️", "🌊", "🌅", "🚴", "🏄", "⛷️", "🚗", "✈️")
+
+@Composable
+private fun StickerDialog(onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Çıkartma") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                STICKERS.chunked(6).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { e ->
+                            Box(Modifier.size(40.dp).clip(RoundedCornerShape(10.dp)).background(Palette.SurfaceHigh).clickable { onPick(e) }, contentAlignment = Alignment.Center) {
+                                Text(e, style = MaterialTheme.typography.titleLarge)
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Kapat") } },
+        containerColor = Palette.Surface, tonalElevation = 0.dp,
+    )
+}
+
+/** Otomatik altyazı: nasıl tanınacağını seç. */
+@Composable
+private fun CaptionDialog(modes: List<Pair<String, String>>, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Otomatik altyazı") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Parçadaki konuşma yazıya dökülür ve alt yazı olarak eklenir (öncekilerin yerine). Satırları sonra düzenleyebilirsin.",
+                    color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+                modes.forEach { (id, label) ->
+                    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).background(Palette.SurfaceHigh).clickable { onPick(id) }.padding(12.dp)) {
+                        Text(label, style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                if (modes.isEmpty()) Text("Bu klipte ses yok.", color = Palette.Error, style = MaterialTheme.typography.bodyMedium)
+            }
+        },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Vazgeç") } },
+        containerColor = Palette.Surface, tonalElevation = 0.dp,
+    )
 }
 
 @Composable
