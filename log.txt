@@ -1,0 +1,12 @@
+frames=576 rs_ms=11.837 gyro_calib=[0.00039, 0.00325, 0.01083, 0.00357, -0.00507, 0.0127]
+pairs=575 matches=1108290 median_frame_rotation_deg=0.353
+baseline(τ=40ms)             τ=  40.0ms ρ= +0.00ms ax=1 median=0.2955° p90=0.9224°
+tau_fine                     τ=  -5.0ms ρ= +0.00ms ax=1 median=0.2384° p90=0.6841°
+calib_rad                    τ=  -4.0ms ρ= +0.00ms ax=1 median=0.2393° p90=0.6825°
+calib_deg                    τ=  -5.0ms ρ= +0.00ms ax=1 median=0.2384° p90=0.6841°
+rs_ax0_+                     τ=  -6.0ms ρ=+11.84ms ax=0 median=0.2399° p90=0.6886°
+rs_ax0_-                     τ=  -4.0ms ρ=-11.84ms ax=0 median=0.2395° p90=0.6846°
+rs_ax1_+                     τ=  -4.0ms ρ=+11.84ms ax=1 median=0.2384° p90=0.6829°
+rs_ax1_-                     τ=  -5.0ms ρ=-11.84ms ax=1 median=0.2393° p90=0.6859°
+rs+bias_fit                  τ=  -4.0ms ρ=+11.84ms ax=1 median=0.2384° p90=0.6829°
+{"baseline(\u03c4=40ms)": {"tau_s": 0.04, "rho_s": 0.0, "axis": 1, "median_deg": 0.2955, "p90_deg": 0.9224, "mean_deg": 0.4117}, "tau_fine": {"tau_s": -0.005, "rho_s": 0.0, "axis": 1, "median_deg": 0.2384, "p90_deg": 0.6841, "mean_deg": 0.3155}, "calib_rad": {"tau_s": -0.004, "rho_s": 0.0, "axis": 1, "median_deg": 0.2393, "p90_deg": 0.6825, "mean_deg": 0.316}, "calib_deg": {"tau_s": -0.005, "rho_s": 0.0, "axis": 1, "median_deg": 0.2384, "p90_deg": 0.6841, "mean_deg": 0.3155}, "rs_ax0_+": {"tau_s": -0.006, "rho_s": 0.011836874961853027, "axis": 0, "median_deg": 0.2399, "p90_deg": 0.6886, "mean_deg": 0.3174}, "rs_ax0_-": {"tau_s": -0.004, "rho_s": -0.011836874961853027, "axis": 0, "median_deg": 0.2395, "p90_deg": 0.6846, "mean_deg": 0.3159}, "rs_ax1_+": {"tau_s": -0.004, "rho_s": 0.011836874961853027, "axis": 1, "median_deg": 0.2384, "p90_deg": 0.6829, "mean_deg": 0.3151}, "rs_ax1_-": {"tau_s": -0.005, "rho_s": -0.011836874961853027, "axis": 1, "median_deg": 0.2393, "p90_deg": 0.6859, "mean_deg": 0.3165}, "rs+bias_fit": {"tau_s": -0.004, "rho_s": 0.011836874961853027, "axis": 1, "median_deg": 0.2384, "p90_deg": 0.6829, "mean_deg": 0.3151}, "bias_fit_rad_s": [0.0, 0.0, 0.0], "gyro_calib": [0.0003897389451624303, 0.003245942760937978, 0.010829948803645503, 0.0035650218467447115, -0.005068557949106146, 0.012702486022284219], "rs_ms": 11.836874961853027}
