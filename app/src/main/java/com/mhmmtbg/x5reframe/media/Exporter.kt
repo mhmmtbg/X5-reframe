@@ -397,8 +397,8 @@ class Exporter(
             listener.onDone(outUri, (SystemClock.elapsedRealtime() - t0) / 1000f)
         } catch (t: Throwable) {
             runCatching { if (::muxer.isInitialized) muxer.release() }
-            output.target?.let { f -> runCatching { f.delete() } }
-            if (output.target == null)
+            val target = output.target
+            if (target != null) runCatching { target.delete() }
             else outUri?.let { runCatching { context.contentResolver.delete(it, null, null) } }
             listener.onFailed(if (t is InterruptedException) "İptal edildi" else (t.message ?: t.javaClass.simpleName))
         } finally {
