@@ -6,6 +6,7 @@ on:
     paths:
       - "tools/seam_analyze.py"
       - "tools/seam_fit.py"
+      - "tools/seam_disparity.py"
       - ".github/workflows/seam.yml"
   workflow_dispatch:
 
@@ -36,7 +37,7 @@ jobs:
       - name: Ölç
         run: |
           mkdir -p out/${{ matrix.clip.name }}
-          python3 tools/seam_fit.py media/clip.insv out/${{ matrix.clip.name }}/fit.json 2>&1 | tee out/${{ matrix.clip.name }}/log.txt
+          python3 tools/seam_disparity.py media/clip.insv out/${{ matrix.clip.name }} 2>&1 | tee out/${{ matrix.clip.name }}/log.txt
       - name: Sonucu seam dalına yaz
         if: always()
         run: |
