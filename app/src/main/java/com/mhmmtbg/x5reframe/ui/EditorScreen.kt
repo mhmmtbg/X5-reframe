@@ -34,6 +34,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.draw.clip
+import kotlin.math.roundToInt
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -944,8 +945,16 @@ internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi)
                 if (c.exportUi is EditorController.ExportUi.Failed) {
                     Text("Olmadı: ${(c.exportUi as EditorController.ExportUi.Failed).message}", color = Palette.Error, style = MaterialTheme.typography.bodyMedium)
                 }
-                LabeledRow("Kalite") {
+                LabeledRow("Oran") {
+                    Segmented(Aspect.values().toList(), s.aspect, { it.label }, { c.commit(s.copy(aspect = it)) }, Modifier.weight(1f))
+                }
+                LabeledRow("Çözünürlük") {
                     Segmented(Quality.values().toList(), s.quality, { it.label }, { c.commit(s.copy(quality = it)) }, Modifier.weight(1f))
+                }
+                LabeledRow("Kare hızı") {
+                    val src = c.clip.frameRate.roundToInt()
+                    Segmented(listOf(0, 24, 25, 30).filter { it == 0 || it < src || it == src }.distinct(), s.fps,
+                        { if (it == 0) "Orijinal ($src)" else "$it" }, { c.commit(s.copy(fps = it)) }, Modifier.weight(1f))
                 }
                 LabeledRow("Bit hızı") {
                     Segmented(com.mhmmtbg.x5reframe.model.BitrateLevel.values().toList(), s.bitrate, { it.label }, { c.commit(s.copy(bitrate = it)) }, Modifier.weight(1f))
@@ -957,6 +966,10 @@ internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi)
                     if (s.hevc) "H.265: aynı kalitede daha küçük dosya; bazı eski cihazlar oynatamayabilir." else "H.264: her yerde oynar.",
                     color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
                 )
+                val durSec = if (whole) seq.segments.sumOf { it.outputDurationUs } / 1e6 else (s.outUs - s.inUs) / 1e6
+                val mbps = (if (s.hevc) s.quality.mbpsAvc * 0.7f else s.quality.mbpsAvc.toFloat()) * s.bitrate.factor
+                Text("Tahmini boyut: ~${(mbps * durSec / 8).roundToInt()} MB · ${"%.0f".format(durSec)} sn",
+                    color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
                 if (seq.segments.size > 1) {
                     LabeledRow("Kapsam") {
                         Segmented(listOf(true, false), whole, { if (it) "Tüm proje (${seq.segments.size})" else "Bu parça" }, { whole = it }, Modifier.weight(1f))

@@ -163,6 +163,60 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         }, "auto-edit").start()
     }
 
+    /**
+     * Oto Düzenle: projedeki her çekimi çözümle, kişileri takip eden kadraj ve en iyi anları seç,
+     * hepsini geçişlerle tek kurguda birleştir (toplam ~[targetSec] sn).
+     */
+    private fun autoEditProject(targetSec: Int = 30) {
+        val c = controller ?: return
+        if (autoEditor != null) return
+        storeCurrentEdit()
+        val segs = segments.toList()
+        if (segs.isEmpty()) return
+        player?.pause()
+        c.autoTask = "Oto düzenleme hazırlanıyor…" to 0f
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        Thread({
+            val out = ArrayList<com.mhmmtbg.x5reframe.project.Segment>()
+            val perClipUs = (targetSec * 1_000_000L / segs.size).coerceAtLeast(3_000_000L)
+            var cancelled = false
+            runCatching {
+                segs.forEachIndexed { i, seg ->
+                    if (cancelled) { out += seg; return@forEachIndexed }
+                    val clip = clipCache[seg.clipUri.toString()] ?: ClipInfo.load(this, seg.clipUri, seg.lrvUri).also { clipCache[seg.clipUri.toString()] = it }
+                    val ed = com.mhmmtbg.x5reframe.auto.AutoEditor(applicationContext, clip) { null }
+                    autoEditor = ed
+                    val samples = ed.scan(seg.edit.inUs, seg.edit.outUs) { p ->
+                        runOnUiThread { c.autoTask = "Çekim ${i + 1}/${segs.size} çözümleniyor…" to ((i + p) / segs.size) }
+                    }
+                    if (ed.cancelled) { cancelled = true; out += seg; return@forEachIndexed }
+                    val hasPeople = samples.any { it.faces.isNotEmpty() }
+                    val edit0 = if (hasPeople) seg.edit.copy(keyframes = ed.smartFraming(samples, 80.0)) else seg.edit
+                    val windowUs = if (perClipUs < 8_000_000L) 2_500_000L else 3_500_000L
+                    val ranges = ed.highlights(samples, windowUs, perClipUs)
+                        .ifEmpty { listOf(seg.edit.inUs..minOf(seg.edit.outUs, seg.edit.inUs + perClipUs)) }
+                    ranges.forEach { r ->
+                        val e = edit0.copy(inUs = r.first.coerceAtLeast(seg.edit.inUs), outUs = r.last.coerceAtMost(seg.edit.outUs))
+                        out += store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, e)
+                            .copy(transitionOut = com.mhmmtbg.x5reframe.project.Transition.FADE)
+                    }
+                }
+            }.onFailure { e -> runOnUiThread { c.say("Oto düzenleme hatası: ${e.message}", false) } }
+            runOnUiThread {
+                autoEditor = null
+                c.autoTask = null
+                window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                if (out.size >= segs.size && out != segs) {
+                    val list = out.mapIndexed { k, sg -> if (k == out.size - 1) sg.copy(transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT) else sg }
+                    val totalSec = list.sumOf { (it.edit.outUs - it.edit.inUs) / 1e6 }
+                    viewer = false
+                    updateSegments(list, 0, reopen = true)
+                    controller?.say("Oto düzenleme: ${list.size} an · ${"%.0f".format(totalSec)} sn")
+                } else if (cancelled) c.say("Durduruldu", false)
+            }
+        }, "auto-edit-all").start()
+    }
+
     /** Seçili parçayı öne çıkan aralıklara böl (siyaha geçişlerle). */
     private fun replaceWithHighlights(ranges: List<LongRange>) {
         storeCurrentEdit()
@@ -250,6 +304,11 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             projectAudio = proj.audio
             setupMusicPreview()
             openSegment(0)
+            if (intent.getBooleanExtra(EXTRA_AUTO, false)) {
+                intent.removeExtra(EXTRA_AUTO)
+                // Oynatıcı hazır olunca başlat
+                saveHandler.postDelayed({ autoEditProject(30) }, 1200)
+            }
             observeExports()
             // Kare zamanlaması göstergesi (açıksa yarım saniyede bir güncellenir)
             while (true) {
@@ -506,7 +565,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         snapshot = { snapshot(c) },
         record = { toggleRecording(c) },
         highlights = { actions(c).autoHighlights(15) },
-        autoEdit = { actions(c).autoHighlights(30) },
+        autoEdit = { autoEditProject(30) },
         isFavorite = { favorite },
         toggleFavorite = {
             val key = c.clip.uri.toString()
@@ -530,24 +589,35 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         finish()
     }
 
-    /** O anki kadrajı fotoğraf olarak Resimler/X5Reframe klasörüne kaydet. */
+    /** O anki kareyi tam çözünürlüklü izlerden (dışa aktarım kalitesinde) fotoğraf olarak kaydet. */
     private fun snapshot(c: EditorController) {
-        val p = player ?: return
-        val aspect = c.state.aspect
-        val w = 1920; val h = (1920L * aspect.h / aspect.w).toInt().coerceIn(480, 3840) / 2 * 2
-        p.captureThumbnail(w, h) { bmp ->
-            val name = "X5_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()) + ".jpg"
-            val values = android.content.ContentValues().apply {
-                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
-                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/X5Reframe")
-            }
+        player?.pause()
+        val t = c.positionUs
+        val st = c.state
+        val pano = c.currentView.projection == com.mhmmtbg.x5reframe.model.Projection.EQUIRECT
+        val long = if (pano) 5760 else 3840
+        val aw = st.aspect.w; val ah = st.aspect.h
+        val w = (if (aw >= ah) long else long * aw / ah) / 2 * 2
+        val h = (if (aw >= ah) long * ah / aw else long) / 2 * 2
+        val views = c.sceneAt(t)
+        val base = c.baseAt(t)
+        val color = c.colorUniforms
+        val dyn = getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("dynamic_stitch", true)
+        c.say("Anlık görüntü hazırlanıyor…")
+        Thread({
             val ok = runCatching {
-                val uri = contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
-                contentResolver.openOutputStream(uri)!!.use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, it) }
-            }.isSuccess
-            runOnUiThread { c.say(if (ok) "Anlık görüntü kaydedildi · Resimler/X5Reframe" else "Anlık görüntü kaydedilemedi", ok) }
-        }
+                val pfd = contentResolver.openFileDescriptor(c.clip.uri, "r")!!
+                pfd.use {
+                    val bmp = com.mhmmtbg.x5reframe.photo.StillRenderer.render(c.clip.rig, w, h, st.layout.rects, views, base, color, dyn) {
+                        com.mhmmtbg.x5reframe.media.DualFrameSource(pfd.fileDescriptor, c.clip, realtime = false).also {
+                            it.seekAndShow(t, (1_000_000 / c.clip.frameRate).toLong())
+                        }
+                    }
+                    com.mhmmtbg.x5reframe.photo.StillRenderer.save(this, bmp).also { bmp.recycle() } != null
+                }
+            }.getOrElse { false }
+            runOnUiThread { c.say(if (ok) "Anlık görüntü kaydedildi · ${w}×${h} · Resimler/X5Reframe" else "Anlık görüntü kaydedilemedi", ok) }
+        }, "snapshot").start()
     }
 
     private fun actions(c: EditorController) = EditorActions(
@@ -871,5 +941,6 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         const val EXTRA_LRV = "lrv"
         const val EXTRA_MORE = "more"
         const val EXTRA_VIEWER = "viewer"
+        const val EXTRA_AUTO = "auto"
     }
 }

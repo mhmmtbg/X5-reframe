@@ -45,6 +45,8 @@ class Exporter(
         val spherical: Boolean = false,
         /** Müzik / ses seviyesi: verilirse ses çözülüp karıştırılır ve AAC olarak yeniden kodlanır. */
         val mix: Mix? = null,
+        /** Çıktı kare hızı; null = ilk klibin kare hızı. */
+        val fps: Float? = null,
     )
 
     data class Mix(val music: MusicSpec?, val originalVolume: Float)
@@ -133,7 +135,7 @@ class Exporter(
             muxer = if (tmp != null) MediaMuxer(tmp.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             else MediaMuxer(outPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
-            val fpsHint = jobs.first().clip.frameRate
+            val fpsHint = output.fps ?: jobs.first().clip.frameRate
             val frameDurHint = (1_000_000 / fpsHint).toLong()
             val totalOutUs = jobs.sumOf { (((it.endUs.coerceAtMost(it.clip.durationUs) - it.startUs) / it.speed) / frameDurHint).toLong().coerceAtLeast(1) * frameDurHint }
             if (output.mix != null) {
@@ -160,7 +162,7 @@ class Exporter(
                 }
             }
 
-            val fps = jobs.first().clip.frameRate
+            val fps = output.fps ?: jobs.first().clip.frameRate
             val frameDur = (1_000_000 / fps).toLong()
             encoder = createEncoder(mime, fps)
             val inputSurface = encoder.createInputSurface()

@@ -167,6 +167,7 @@ class ProjectStore(context: Context) {
             put("stabMode", e.stabMode.name); put("stabStrength", e.stabStrength)
             put("stitchDistance", e.stitchDistance)
             put("bitrate", e.bitrate.name)
+            put("fps", e.fps)
             put("color", JSONObject().apply {
                 val g = e.color
                 put("filter", g.filter.name); put("strength", g.filterStrength.toDouble())
@@ -216,6 +217,7 @@ class ProjectStore(context: Context) {
                     com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.values().forEach { a -> g = a.set(g, co.optDouble(a.name, 0.0).toFloat()) }
                     g
                 } ?: com.mhmmtbg.x5reframe.model.ColorGrade(),
+                fps = o.optInt("fps", 0),
                 tracks = (o.optJSONArray("tracks") ?: JSONArray()).let { arr ->
                     (0 until arr.length()).mapNotNull { i -> arr.optJSONArray(i)?.let { r -> r.getLong(0)..r.getLong(1) } }
                 },

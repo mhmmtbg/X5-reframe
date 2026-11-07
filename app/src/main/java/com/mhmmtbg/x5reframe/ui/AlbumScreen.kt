@@ -136,14 +136,19 @@ fun SourceSwitch(current: AlbumSource, onChange: (AlbumSource) -> Unit) {
 
 /** Seçim çubuğu: seçilenlerle düzenleyiciye geç. */
 @Composable
-fun SelectionBar(count: Int, onCancel: () -> Unit, onEdit: () -> Unit) {
+fun SelectionBar(count: Int, onCancel: () -> Unit, onEdit: () -> Unit, onAuto: () -> Unit) {
     Row(Modifier.fillMaxWidth().background(Palette.Surface).padding(horizontal = 8.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onCancel), contentAlignment = Alignment.Center) {
             Icon(Glyphs.Close, "Vazgeç", Modifier.size(22.dp), tint = Palette.Text)
         }
         Text("$count seçildi", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f).padding(start = 4.dp))
         Text(
-            if (count > 1) "Birleştir ve düzenle" else "Düzenle", color = Palette.OnAccent, style = MaterialTheme.typography.labelLarge,
+            "Oto Düzenle", color = Palette.Text, style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.padding(end = 8.dp).clip(RoundedCornerShape(10.dp)).background(Palette.SurfaceHigh)
+                .clickable(enabled = count > 0, onClick = onAuto).padding(horizontal = 14.dp, vertical = 10.dp),
+        )
+        Text(
+            if (count > 1) "Birleştir" else "Düzenle", color = Palette.OnAccent, style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(if (count > 0) Palette.Accent else Palette.SurfaceHigh)
                 .clickable(enabled = count > 0, onClick = onEdit).padding(horizontal = 16.dp, vertical = 10.dp),
         )

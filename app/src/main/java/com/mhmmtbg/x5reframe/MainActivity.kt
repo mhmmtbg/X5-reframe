@@ -128,7 +128,9 @@ class MainActivity : AppCompatActivity() {
             !item.is360 -> runCatching {
                 startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(item.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
             }
-            item.isPhoto -> android.widget.Toast.makeText(this, "360 fotoğraf düzenleme yakında", android.widget.Toast.LENGTH_SHORT).show()
+            item.isPhoto -> startActivity(
+                Intent(this, com.mhmmtbg.x5reframe.photo.PhotoActivity::class.java).setData(item.uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            )
             else -> startActivity(
                 Intent(this, EditorActivity::class.java).setData(item.uri).putExtra(EditorActivity.EXTRA_LRV, item.lrv?.toString())
                     .putExtra(EditorActivity.EXTRA_VIEWER, true).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -137,13 +139,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     /** Seçilen çekimleri çekim sırasıyla tek projede birleştir. */
-    private fun editSelected() {
+    private fun editSelected() = openSelected(auto = false)
+
+    private fun openSelected(auto: Boolean) {
         val chosen = media.filter { it.uri.toString() in selected && !it.isPhoto }.sortedBy { it.takenAt }
         selected = emptySet()
         val first = chosen.firstOrNull() ?: return
         startActivity(
             Intent(this, EditorActivity::class.java).setData(first.uri).putExtra(EditorActivity.EXTRA_LRV, first.lrv?.toString())
                 .putExtra(EditorActivity.EXTRA_MORE, chosen.drop(1).map { it.uri.toString() }.toTypedArray())
+                .putExtra(EditorActivity.EXTRA_AUTO, auto)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         )
     }
@@ -431,7 +436,7 @@ class MainActivity : AppCompatActivity() {
                 )
             }
             if (selecting) Box(Modifier.align(Alignment.BottomCenter)) {
-                com.mhmmtbg.x5reframe.ui.SelectionBar(selected.size, { selected = emptySet() }, ::editSelected)
+                com.mhmmtbg.x5reframe.ui.SelectionBar(selected.size, { selected = emptySet() }, ::editSelected) { openSelected(auto = true) }
             }
         }
     }

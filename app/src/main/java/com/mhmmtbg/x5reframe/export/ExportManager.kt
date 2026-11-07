@@ -100,7 +100,7 @@ object ExportManager {
             au.musicUri?.let { MusicSpec(it, au.musicVolume, au.loop, if (au.fade) 1_500_000 else 0, if (au.fade) 2_000_000 else 0) },
             au.originalVolume,
         ) else null
-        val output = Exporter.Output(w, h, o.hevc, bitrate, o.includeAudio, spherical, mix)
+        val output = Exporter.Output(w, h, o.hevc, bitrate, o.includeAudio, spherical, mix, o.fps.takeIf { it > 0 }?.toFloat())
         _state.value = Status.Running(req, 0f, 0f, queue.size)
 
         val jobs = runCatching { buildJobs(context, req.segments) }.getOrElse {
