@@ -45,6 +45,10 @@ class Player(
     /** Renk düzenlemesi (null = yok). */
     @Volatile var colorProvider: () -> FloatArray? = { null }
 
+    /** Çıktı en/boy oranı ve tuval kipi (kadraj ayarlanırken çerçevenin etrafı görünür). */
+    @Volatile var aspectProvider: () -> Float = { 16f / 9f }
+    @Volatile var canvasProvider: () -> Boolean = { false }
+
     /** Parçanın çıkış noktası (sona kadar süren katmanların çıkış animasyonu için). */
     @Volatile var outProvider: () -> Long = { Long.MAX_VALUE }
 
@@ -55,7 +59,8 @@ class Player(
     /** Sabitleme temel dönüşü (yoksa null). */
     @Volatile var baseProvider: (Long) -> DoubleArray? = { null }
 
-    private val thread = HandlerThread("player").apply { start() }
+    // Görüntü iş parçacığı ekran önceliğinde: arayüz yükü kare zamanlamasını bozmasın
+    private val thread = HandlerThread("player", android.os.Process.THREAD_PRIORITY_DISPLAY).apply { start() }
     private val handler = Handler(thread.looper)
     private val main = Handler(Looper.getMainLooper())
     private val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(readClip.uri, "r")!!
@@ -256,10 +261,19 @@ class Player(
         program.frameTime = t / 1e6f
         program.look = lookProvider()
         updatePerson(t)
-        program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))
+        // Çıktı çerçevesi pencerenin ortasında (tuval kipinde küçültülmüş, etrafı görünür)
+        val canvas = canvasProvider() && !clip.is360 && layoutProvider().size <= 1
+        val fr = com.mhmmtbg.x5reframe.ui.FrameGeometry.frameRect(winW.toFloat(), winH.toFloat(), aspectProvider(), canvas)
+        val fx = fr[0].toInt(); val fw = fr[2].toInt(); val fh = fr[3].toInt()
+        val fy = winH - fr[1].toInt() - fh
+        GLES30.glViewport(0, 0, winW, winH)
+        GLES30.glClearColor(0f, 0f, 0f, 1f)
+        GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+        if (canvas) program.drawCanvas(winW, winH, fx, fy, fw, fh, sceneProvider(t).first(), source, baseProvider(t))
+        else program.drawScene(fw, fh, layoutProvider(), sceneProvider(t), source, baseProvider(t), fx, fy)
         val layers = layersProvider()
         overlay?.retain(layers)
-        overlay?.draw(winW, winH, layers, t, outProvider())
+        overlay?.draw(fw, fh, layers, t, outProvider(), fx, fy)
         egl.swap(window)
     }
 

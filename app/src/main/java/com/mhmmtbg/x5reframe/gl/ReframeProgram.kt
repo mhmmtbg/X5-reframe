@@ -83,6 +83,7 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
     private val uSrcAspect: Int
     private val uPerson: Int
     private val uPersonP: Int
+    private val uCanvas: Int
     /** Kişi maskesi dokusu (0 = yok); [look].person açıkken kullanılır. */
     var personMask = 0
     private val uFlat: Int
@@ -134,6 +135,7 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         uSrcAspect = GLES30.glGetUniformLocation(program, "uSrcAspect")
         uPerson = GLES30.glGetUniformLocation(program, "uPerson")
         uPersonP = GLES30.glGetUniformLocation(program, "uPersonP")
+        uCanvas = GLES30.glGetUniformLocation(program, "uCanvas")
 
         val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
@@ -167,9 +169,10 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
      * Çoklu açı: her bölme kendi kadrajıyla aynı dokulardan çizilir.
      * @param rects normalize (x, y, w, h), sol üst köşe başlangıçlı
      */
-    fun drawScene(width: Int, height: Int, rects: List<FloatArray>, views: List<ViewParams>, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?) {
-        if (rects.size <= 1) { draw(width, height, views.first(), src, base); return }
-        GLES30.glViewport(0, 0, width, height)
+    fun drawScene(width: Int, height: Int, rects: List<FloatArray>, views: List<ViewParams>, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?,
+                  ox: Int = 0, oy: Int = 0) {
+        if (rects.size <= 1) { drawPane(ox, oy, width, height, views.first(), src, base); return }
+        GLES30.glViewport(ox, oy, width, height)
         GLES30.glClearColor(0f, 0f, 0f, 1f)
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         val gap = maxOf(2, width / 400)
@@ -183,7 +186,7 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
             if (r[1] > 0f) { yTop += gap / 2; h -= gap / 2 }
             if (r[1] + r[3] < 1f) h -= gap / 2
             val y = height - yTop - h // GL'de başlangıç sol alt
-            drawPane(x, y, w, h, views.getOrElse(i) { views.first() }, src, base)
+            drawPane(ox + x, oy + y, w, h, views.getOrElse(i) { views.first() }, src, base)
         }
     }
 
@@ -243,8 +246,22 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    /**
+     * Tuval kipi (normal video): tüm pencereye çizer; çıktı çerçevesi [fx],[fy] (sol alt başlangıçlı) konumda
+     * [fw]×[fh] boyutundadır. Çerçeve dışında videonun taşan kısmı soluk görünür; çerçeve ve video sınırları çizilir.
+     */
+    fun drawCanvas(winW: Int, winH: Int, fx: Int, fy: Int, fw: Int, fh: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?) {
+        GLES30.glViewport(0, 0, winW, winH)
+        GLES30.glUseProgram(program)
+        val cx = (fx + fw / 2f) / winW * 2 - 1; val cy = (fy + fh / 2f) / winH * 2 - 1
+        GLES30.glUniform4f(uCanvas, cx, cy, fw.toFloat() / winW, fh.toFloat() / winH)
+        drawFlat(fw, fh, view, src, base, keepViewport = true)
+        GLES30.glUniform4f(uCanvas, 0f, 0f, 0f, 0f)
+    }
+
     /** Düz klip: sığdır / doldur / bulanık arka plan + kaydırma, yakınlaştırma, döndürme. */
-    private fun drawFlat(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?) {
+    private fun drawFlat(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?, keepViewport: Boolean = false) {
+        if (!keepViewport) GLES30.glUniform4f(uCanvas, 0f, 0f, 0f, 0f)
         GLES30.glUniform1i(uFlat, 1)
         // Görüntüden sabitleme: (kayma x, kayma y, dönme, yakınlaştırma); yoksa kapalı
         if (base != null && base.size == 4) GLES30.glUniform4f(uStab, base[0].toFloat(), base[1].toFloat(), base[2].toFloat(), base[3].toFloat())
@@ -464,6 +481,7 @@ uniform vec4 uStab;     // görüntüden sabitleme: kayma x, y, dönme, yakınla
 uniform float uSrcAspect;
 uniform sampler2D uPerson; // kişi maskesi (ham görüntü koordinatında)
 uniform vec2 uPersonP;     // açık mı, arka plan (0 siyah, 1 beyaz, 2 bulanık)
+uniform vec4 uCanvas;      // tuval kipi: çerçevenin merkezi ve yarı boyu (görüntü alanı NDC); z = 0 kapalı
 uniform vec4 uKey;      // renk anahtarı: rgb, açık mı
 uniform vec4 uKeyP;     // benzerlik, yumuşaklık, taşma bastırma, arka plan (0 siyah, 1 beyaz, 2 bulanık)
 
@@ -606,7 +624,8 @@ vec3 flatBlur(vec2 uv) {
 
 void main() {
     if (uFlat == 1) {
-        vec2 fp = vNdc * uScale;                 // uzun kenar [-1, 1], y yukarı
+        vec2 nd = uCanvas.z > 0.0 ? (vNdc - uCanvas.xy) / uCanvas.zw : vNdc;
+        vec2 fp = nd * uScale;                   // uzun kenar [-1, 1], y yukarı
         float cr = cos(uFlatXf.w), sr = sin(uFlatXf.w);
         vec2 q = vec2(cr * fp.x + sr * fp.y, -sr * fp.x + cr * fp.y) / uFlatXf.x + uFlatXf.yz;
         vec2 uv = vec2(q.x / uFlatHalf.x * 0.5 + 0.5, 0.5 - q.y / uFlatHalf.y * 0.5);
@@ -634,6 +653,20 @@ void main() {
         else if (uFlatBlur > 0.5) fc = flatBlur(vec2(fp.x / uFillHalf.x * 0.5 + 0.5, 0.5 - fp.y / uFillHalf.y * 0.5)) * 0.55;
         else fc = vec3(0.0);
         if (uGradeOn > 0.5) fc = finishFx(grade(fc));
+        if (uCanvas.z > 0.0) {
+            // Tuval: çerçeve dışı soluk (video varsa video, yoksa koyu gri), çerçeve beyaz, video sınırı mavi çizgi
+            vec2 en = fwidth(nd); vec2 eu = fwidth(uv);
+            bool outF = abs(nd.x) > 1.0 || abs(nd.y) > 1.0;
+            bool inV = uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
+            if (outF) fc = inV ? flatSample(uv) * 0.38 : vec3(0.08);
+            float frameLine = (abs(abs(nd.x) - 1.0) < en.x * 1.5 && abs(nd.y) <= 1.0 + en.y) || (abs(abs(nd.y) - 1.0) < en.y * 1.5 && abs(nd.x) <= 1.0 + en.x) ? 1.0 : 0.0;
+            vec2 d = min(uv, 1.0 - uv) / max(eu, vec2(1e-6));
+            float vidLine = inV && min(d.x, d.y) < 2.0 ? 1.0 : 0.0;
+            fc = mix(fc, vec3(0.24, 0.43, 0.95), vidLine);
+            fc = mix(fc, vec3(1.0), frameLine);
+            outColor = vec4(fc, 1.0);
+            return;
+        }
         outColor = vec4(fc * uFade, 1.0);
         return;
     }

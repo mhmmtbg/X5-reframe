@@ -53,10 +53,10 @@ class OverlayRenderer {
     }
 
     /** @param t parçanın kaynak zamanı (µs); [segEndUs] "sona kadar" katmanların bitişi (çıkış animasyonu için) */
-    fun draw(width: Int, height: Int, layers: List<Layer>, t: Long, segEndUs: Long = Long.MAX_VALUE) {
+    fun draw(width: Int, height: Int, layers: List<Layer>, t: Long, segEndUs: Long = Long.MAX_VALUE, ox: Int = 0, oy: Int = 0) {
         val active = layers.filter { it.activeAt(t) }
         if (active.isEmpty()) return
-        GLES30.glViewport(0, 0, width, height)
+        GLES30.glViewport(ox, oy, width, height)
         GLES30.glUseProgram(program)
         GLES30.glEnable(GLES30.GL_BLEND)
         GLES30.glUniform1f(uAspect, width.toFloat() / height)

@@ -32,6 +32,12 @@ class OscClientTest {
         "IMG_20260926_150000_00_143.insp" to ByteArray(20_000) { it.toByte() },
     )
     @Volatile private var supportRange = true
+    /** OSC'nin listelemediği ama kameranın kendi kanalında görünen dosyalar (Camera02 klasörü gibi) */
+    private val hidden = linkedMapOf(
+        "VID_20260712_085744_00_031.insv" to ByteArray(4000) { 1 },
+        "LRV_20260712_085744_01_031.lrv" to ByteArray(900) { 2 },
+        "IMG_20260712_090000_00_032.insp" to ByteArray(700) { 3 },
+    )
     private val thumb = Base64.getEncoder().encodeToString(byteArrayOf(1, 2, 3))
 
     @Before
@@ -88,8 +94,13 @@ class OscClientTest {
                     }
                 }
             }
-            method == "GET" && path.startsWith("/DCIM/Camera01/") -> {
-                val data = files[path.substringAfterLast('/')]!!
+            method == "HEAD" && path.startsWith("/DCIM/") -> {
+                val data = (files + hidden)[path.substringAfterLast('/')]
+                if (data == null) out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
+                else out.write("HTTP/1.1 200 OK\r\nContent-Length: ${data.size}\r\nConnection: close\r\n\r\n".toByteArray())
+            }
+            method == "GET" && path.startsWith("/DCIM/") -> {
+                val data = (files + hidden)[path.substringAfterLast('/')]!!
                 val range = headers["range"]?.removePrefix("bytes=")?.substringBefore('-')?.toIntOrNull()
                 if (range != null && supportRange) {
                     out.write("HTTP/1.1 206 Partial Content\r\nContent-Length: ${data.size - range}\r\nContent-Range: bytes $range-${data.size - 1}/${data.size}\r\nConnection: close\r\n\r\n".toByteArray())
@@ -152,6 +163,65 @@ class OscClientTest {
         val tail = c.fetchTrailer(vid)
         assertEquals(1000, tail.size)
         assertArrayEquals(data.copyOfRange(data.size - 1000, data.size), tail)
+    }
+
+    /** Kameranın kendi kanalını (TCP 6666) taklit eden sunucu: eşitleme + dosya listesi (ileti kodu 13). */
+    private fun fakeNative(uris: List<String>): ServerSocket {
+        val ss = ServerSocket(0)
+        thread(isDaemon = true) {
+            val s = runCatching { ss.accept() }.getOrNull() ?: return@thread
+            val inp = s.getInputStream(); val out = s.getOutputStream()
+            fun send(p: ByteArray) { val n = p.size + 4; out.write(byteArrayOf(n.toByte(), (n shr 8).toByte(), 0, 0)); out.write(p); out.flush() }
+            runCatching {
+                while (true) {
+                    val h = ByteArray(4); var o = 0; while (o < 4) { val r = inp.read(h, o, 4 - o); if (r < 0) return@thread; o += r }
+                    val n = (h[0].toInt() and 255) or ((h[1].toInt() and 255) shl 8)
+                    val p = ByteArray(n - 4); o = 0; while (o < p.size) { val r = inp.read(p, o, p.size - o); if (r < 0) return@thread; o += r }
+                    if (p[0].toInt() == 6) send(com.mhmmtbg.x5reframe.camera.InstaClient.SYNC)
+                    if (p[0].toInt() == 4 && p[3].toInt() == 13) {
+                        val req = com.mhmmtbg.x5reframe.camera.Pb.fields(p.copyOfRange(12, p.size))
+                        val start = (req.firstOrNull { it.first == 2 }?.second as? Long ?: 0L).toInt()
+                        val limit = (req.firstOrNull { it.first == 3 }?.second as? Long ?: 500L).toInt()
+                        val w = com.mhmmtbg.x5reframe.camera.Pb.Writer()
+                        uris.drop(start).take(limit).forEach { w.string(1, it) }
+                        w.varint(2, uris.size.toLong())
+                        // Yanıt: kod 200, aynı sıra numarası
+                        send(byteArrayOf(4, 0, 0, 200.toByte(), 0, 2, p[6], p[7], p[8], 0x80.toByte(), 0, 0) + w.bytes())
+                    }
+                }
+            }
+        }
+        return ss
+    }
+
+    @Test
+    fun listsEverythingThroughNativeChannel() {
+        val uris = files.keys.filter { !it.startsWith("LRV") }.map { "/DCIM/Camera01/$it" } +
+            listOf("/DCIM/Camera02/VID_20260712_085744_00_031.insv", "/DCIM/Camera02/IMG_20260712_090000_00_032.insp")
+        val ns = fakeNative(uris)
+        val r = com.mhmmtbg.x5reframe.camera.CameraLister.listAll(client(),
+            { com.mhmmtbg.x5reframe.camera.InstaClient("127.0.0.1", ns.localPort).open() }, "http://127.0.0.1:${server.localPort}", null)
+        ns.close()
+        val names = r.files.map { it.name }.toSet()
+        assertEquals("kamera", r.source)
+        assertTrue("gizli video yok: $names", "VID_20260712_085744_00_031.insv" in names)
+        assertTrue("gizli LRV bulunmadı: $names", "LRV_20260712_085744_01_031.lrv" in names)
+        assertTrue("foto yok", "IMG_20260712_090000_00_032.insp" in names)
+        assertEquals(4000L, r.files.first { it.name == "VID_20260712_085744_00_031.insv" }.size)
+        assertEquals("2026:07:12 08:57:44", r.files.first { it.name.startsWith("VID_20260712") }.date)
+    }
+
+    @Test
+    fun rangeSourceReadsPartsOnly() {
+        val c = client()
+        val vid = c.listFiles().first { it.isVideo }
+        val src = com.mhmmtbg.x5reframe.camera.HttpRangeSource(vid.url, null)
+        assertEquals(300_000L, src.size)
+        val buf = ByteArray(100)
+        assertEquals(100, src.readAt(299_900, buf, 0, 100))
+        val full = files[vid.name]!!
+        assertArrayEquals(full.copyOfRange(299_900, 300_000), buf)
+        assertTrue("çok fazla indirildi: ${src.fetched}", src.fetched < 300_000)
     }
 
     @Test

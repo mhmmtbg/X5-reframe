@@ -259,6 +259,9 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         if (before != after) { history.replace(before); history.push(after); sync() }
     }
 
+    /** Tuval kipi: kadraj ayarlanırken çerçevenin etrafı ve videonun sınırları görünür. */
+    @Volatile var canvasMode = false
+
     /** Önizleme kopyası durumu (üst çubukta). */
     var proxyNote by mutableStateOf<String?>(null)
 

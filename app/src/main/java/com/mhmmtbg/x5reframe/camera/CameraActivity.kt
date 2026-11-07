@@ -151,6 +151,7 @@ class CameraActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        thumbs?.shutdown()
         // Geçici önizleme dosyalarını temizle (telefonda yer kaplamasın)
         if (isFinishing) previewDir().deleteRecursively()
     }
@@ -177,17 +178,28 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    private var thumbs: CamThumbs? = null
+    private var listSource by mutableStateOf("")
+    private var byDay by mutableStateOf(false)
+
     private fun load() {
         phase = Phase.LISTING
         listProgress = "Kameraya ulaşılıyor…"
         Thread {
             try {
                 val c = CameraLink.client()
-                val i = c.info()
+                val i = runCatching { c.info() }.getOrNull()
                 val st = runCatching { c.state() }.getOrNull()
                 runOnUiThread { info = i; camState = st; listProgress = "Dosyalar okunuyor…" }
-                val list = c.listFiles { got, total -> runOnUiThread { listProgress = "Dosyalar okunuyor… $got / $total" } }
-                runOnUiThread { files = list; phase = Phase.READY }
+                val r = CameraLister.listAll(c, { InstaClient(network = CameraLink.network).open() }, "http://192.168.42.1:80", CameraLink.network) { p ->
+                    runOnUiThread { listProgress = p }
+                }
+                if (r.files.isEmpty() && i == null) throw java.io.IOException("kamera yanıt vermiyor")
+                runOnUiThread {
+                    thumbs?.shutdown()
+                    thumbs = CamThumbs(this, CameraLink.network)
+                    files = r.files; listSource = r.source; phase = Phase.READY
+                }
                 refreshLocal()
             } catch (e: Throwable) {
                 runOnUiThread { phase = Phase.IDLE; message = "Kameraya ulaşılamadı: ${e.message ?: e.javaClass.simpleName}" }
@@ -234,17 +246,22 @@ class CameraActivity : AppCompatActivity() {
                 Box(Modifier.size(44.dp).clip(CircleShape).clickable { if (selected.isNotEmpty()) selected = emptySet() else finish() },
                     contentAlignment = Alignment.Center) { Icon(if (selected.isNotEmpty()) Glyphs.Close else Glyphs.Back, "Geri", tint = Palette.Text) }
                 Column(Modifier.weight(1f)) {
-                    Text(if (selected.isNotEmpty()) "${selected.size} seçildi" else info?.model ?: "Kamera", style = MaterialTheme.typography.titleMedium)
+                    Text(if (selected.isNotEmpty()) "${selected.size} seçildi" else (info?.model ?: "Insta360").replace("Insta360 ", ""), style = MaterialTheme.typography.headlineSmall)
                     camState?.let { s ->
                         Text(listOfNotNull(
                             if (s.battery >= 0) "Pil %${(s.battery * 100).toInt()}" else null,
                             when (s.card) { "pass" -> "SD kart hazır"; "noCard" -> "SD kart yok"; "noSpace" -> "SD kart dolu"; "" -> null; else -> "SD: ${s.card}" },
-                            if (files.isNotEmpty()) "${shots().size} dosya" else null,
+                            if (files.isNotEmpty()) "${shots().size} medya" else null,
                         ).joinToString(" · "), color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                if (phase == Phase.READY && selected.isEmpty()) Text("Yenile", color = Palette.AccentText, style = MaterialTheme.typography.labelLarge,
-                    modifier = Modifier.clickable { load() }.padding(8.dp))
+                if (phase == Phase.READY && selected.isEmpty()) {
+                    Box(Modifier.size(44.dp).clip(CircleShape).clickable { byDay = !byDay }, contentAlignment = Alignment.Center) {
+                        Icon(if (byDay) Glyphs.Album else Glyphs.Projects, if (byDay) "Izgara" else "Güne göre", tint = Palette.Text)
+                    }
+                    Text("Yenile", color = Palette.AccentText, style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.clickable { load() }.padding(8.dp))
+                }
             }
             message?.let {
                 Text(it, color = Palette.Text, style = MaterialTheme.typography.bodySmall,
@@ -263,15 +280,24 @@ class CameraActivity : AppCompatActivity() {
                     Phase.READY -> {
                         val list = shots()
                         if (list.isEmpty()) Text("Kamerada çekim yok.", color = Palette.Muted, modifier = Modifier.align(Alignment.Center))
-                        else LazyVerticalGrid(
-                            columns = GridCells.Fixed(3), contentPadding = PaddingValues(2.dp, 2.dp, 2.dp, 120.dp),
+                        else androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+                        // Telefonda 3, tablette daha çok sütun
+                        val cols = (maxWidth.value / 130f).toInt().coerceIn(3, 8)
+                        val groups = if (byDay) list.groupBy { it.date.take(10) } else mapOf("" to list)
+                        LazyVerticalGrid(
+                            columns = GridCells.Fixed(cols), contentPadding = PaddingValues(0.dp, 0.dp, 0.dp, 120.dp),
                             horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
                                 Text("Dokun: önizle (indirmeden) · Uzun bas: seç ve telefona aktar", color = Palette.Muted,
                                     style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
                             }
-                            items(list, key = { it.url }) { f ->
+                            groups.forEach { (day, dayList) ->
+                            if (day.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }, key = "d$day") {
+                                Text(dayLabel(day) + " · ${dayList.size}", style = MaterialTheme.typography.titleSmall,
+                                    modifier = Modifier.padding(start = 12.dp, top = 14.dp, bottom = 6.dp))
+                            }
+                            items(dayList, key = { it.url }) { f ->
                                 val sel = f.url in selected
                                 val dl = CameraDownloads.items.lastOrNull { it.file.url == f.url }
                                 val have = localNames[f.name]?.let { it == f.size || f.size <= 0 } ?: false
@@ -284,6 +310,13 @@ class CameraActivity : AppCompatActivity() {
                                     onLongClick = { selected = selected + f.url },
                                 ))
                             }
+                            }
+                            item(span = { GridItemSpan(maxLineSpan) }) {
+                                Text("${list.size} medya" + if (listSource == "osc") " · kameranın tam listesi alınamadı (OSC)" else "",
+                                    color = Palette.Muted, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                    modifier = Modifier.fillMaxWidth().padding(18.dp))
+                            }
+                        }
                         }
                     }
                 }
@@ -362,15 +395,42 @@ class CameraActivity : AppCompatActivity() {
         }
     }
 
+    private fun dayLabel(d: String): String {
+        val p = d.split(':')
+        if (p.size < 3) return d
+        val months = listOf("Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran", "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık")
+        return "${p[2].toIntOrNull() ?: p[2]} ${months.getOrElse((p[1].toIntOrNull() ?: 1) - 1) { p[1] }} ${p[0]}"
+    }
+
+    private fun fmtDur(ms: Long): String { val s = ms / 1000; return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s / 60) % 60, s % 60) else "%02d:%02d".format(s / 60, s % 60) }
+
     @Composable
     private fun Tile(f: CamFile, sel: Boolean, selecting: Boolean, have: Boolean, dl: CameraDownloads.Item?, modifier: Modifier) {
-        val bmp = remember(f.url) { f.thumbnail?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() } }
+        val th = thumbs
+        androidx.compose.runtime.LaunchedEffect(f.url, th) { th?.request(f, lrvFor(f)) }
+        val info = th?.get(f)
+        val oscBmp = remember(f.url) { f.thumbnail?.let { runCatching { BitmapFactory.decodeByteArray(it, 0, it.size)?.asImageBitmap() }.getOrNull() } }
+        val bmp = info?.bitmap?.asImageBitmap() ?: oscBmp
+        val is360 = f.name.endsWith(".insv", true) || f.name.endsWith(".insp", true)
         Box(modifier.aspectRatio(1f).background(Palette.SurfaceHigh)) {
-            bmp?.let { Image(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
-            if (bmp == null) Text(f.name, color = Palette.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 3,
+            if (bmp != null) Image(bmp, f.name, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+            else if (info == null) LinearProgressIndicator(Modifier.align(Alignment.Center).width(40.dp), color = Palette.Muted, trackColor = Palette.SurfaceHigh)
+            else Text(f.name, color = Palette.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 3,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.Center).padding(6.dp))
-            Text(if (f.isPhoto) "Foto" else "${"%.1f".format(f.size / 1e9)} GB", color = Color.White, style = MaterialTheme.typography.labelSmall,
-                modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp).background(Color(0x99000000), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp))
+            // Alt şerit: tür simgesi, 360 rozeti, süre
+            Row(Modifier.align(Alignment.BottomEnd).fillMaxWidth().background(
+                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))).padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                if (f.isVideo) Icon(Glyphs.Video, null, Modifier.size(14.dp), tint = Color.White)
+                if (is360) Text("360", color = Color.White, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(start = 4.dp).border(1.dp, Color.White, RoundedCornerShape(3.dp)).padding(horizontal = 3.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(when {
+                    f.isPhoto -> "Foto"
+                    info != null && info.durationMs > 0 -> fmtDur(info.durationMs)
+                    else -> "${"%.1f".format(f.size / 1e9)} GB"
+                }, color = Color.White, style = MaterialTheme.typography.labelMedium)
+            }
             val badge = when {
                 dl?.status == CameraDownloads.Status.RUNNING -> "%${if (f.size > 0) (dl.bytes * 100 / f.size) else 0}"
                 dl?.status == CameraDownloads.Status.WAITING -> "Sırada"
@@ -382,6 +442,9 @@ class CameraActivity : AppCompatActivity() {
                 Text(it, color = Color.White, style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier.align(Alignment.TopStart).padding(6.dp).background(Color(0x99000000), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp))
             }
+            if (lrvFor(f) == null && f.isVideo && info != null)
+                Text("LRV yok", color = Color.White, style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(6.dp).background(Color(0x99000000), RoundedCornerShape(4.dp)).padding(horizontal = 5.dp, vertical = 1.dp))
             if (selecting) {
                 Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(22.dp).clip(CircleShape)
                     .background(if (sel) Palette.Accent else Color(0x66000000)).border(1.5.dp, if (sel) Palette.Accent else Color.White, CircleShape),

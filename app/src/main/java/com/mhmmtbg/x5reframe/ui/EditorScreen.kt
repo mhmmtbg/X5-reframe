@@ -155,7 +155,11 @@ fun EditorScreen(
         mutableStateOf<Tool?>(if (startTool == "trim") Tool.TRIM else startTool?.let { n -> Tool.values().firstOrNull { it.name == n } })
     }
     var showExportInit = startTool == "EXPORT"
-    LaunchedEffect(tool) { c.layerTool = tool == Tool.LAYER }
+    LaunchedEffect(tool) {
+        c.layerTool = tool == Tool.LAYER
+        val canvas = (tool == Tool.FRAME || tool == Tool.SMART) && !c.clip.is360 && s.layout.count <= 1
+        if (canvas != c.canvasMode) { c.canvasMode = canvas; actions.redraw() }
+    }
     LaunchedEffect(c.openToolRequest) {
         when (c.openToolRequest) { "layer" -> tool = Tool.LAYER; "trim" -> tool = Tool.TRIM }
         c.openToolRequest = null
@@ -181,10 +185,11 @@ fun EditorScreen(
             contentAlignment = Alignment.Center,
         ) {
             val ratio = s.aspect.w.toFloat() / s.aspect.h
-            val boxRatio = maxWidth.value / maxHeight.value
-            val w = if (ratio > boxRatio) maxWidth else maxHeight * ratio
-            val h = if (ratio > boxRatio) maxWidth / ratio else maxHeight
-            AndroidView(factory = surfaceFactory, modifier = Modifier.size(w, h).semantics {
+            val fr = FrameGeometry.frameRect(maxWidth.value, maxHeight.value, ratio, c.canvasMode)
+            val w = fr[2].dp
+            val h = fr[3].dp
+            // Yüzey tüm alanı kaplar; çerçeve oynatıcıda ortaya çizilir (tuval kipinde etrafı da)
+            AndroidView(factory = surfaceFactory, modifier = Modifier.fillMaxSize().semantics {
                 contentDescription = "Önizleme. Kadrajı değiştirmek için sürükle, yakınlaştırmak için iki parmakla aç."
             })
             if (s.layout.count > 1) {

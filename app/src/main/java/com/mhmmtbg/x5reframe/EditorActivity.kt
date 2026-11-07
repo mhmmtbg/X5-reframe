@@ -859,6 +859,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.baseProvider = { t -> c.baseAt(t) }
             p.colorProvider = { if (c.compareHold) null else c.colorUniforms }
             p.lookProvider = { c.snapshotState.flatLook }
+            p.aspectProvider = { c.snapshotState.aspect.let { it.w.toFloat() / it.h } }
+            p.canvasProvider = { c.canvasMode }
             p.outProvider = { c.snapshotState.outUs }
             p.layersProvider = { c.snapshotState.layers }
             p.setVolume(projectAudio.originalVolume * seg.volume)
@@ -1432,6 +1434,15 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     @SuppressLint("ClickableViewAccessibility")
     private fun createSurface(ctx: android.content.Context): SurfaceView {
         val sv = SurfaceView(ctx)
+        // Önizleme tamponu en fazla ~1440 px: büyük ekran / tablette GPU ve bellek yükü düşer, görüntü yine keskin
+        sv.addOnLayoutChangeListener { v, l, t, r, b, _, _, _, _ ->
+            val w = r - l; val h = b - t
+            if (w > 0 && h > 0) {
+                val k = minOf(1f, 1440f / maxOf(w, h))
+                if (k < 1f) (v as SurfaceView).holder.setFixedSize((w * k).toInt() / 2 * 2, (h * k).toInt() / 2 * 2)
+                else (v as SurfaceView).holder.setSizeFromLayout()
+            }
+        }
         sv.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {}
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -1467,13 +1478,18 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         sv.setOnTouchListener { v, e ->
             val c = controller ?: return@setOnTouchListener false
             taps.onTouchEvent(e)
+            // Dokunma konumu çıktı çerçevesine göre (yüzey çerçeveden büyük olabilir)
+            val fr = com.mhmmtbg.x5reframe.ui.FrameGeometry.frameRect(v.width.toFloat(), v.height.toFloat(),
+                c.state.aspect.let { it.w.toFloat() / it.h }, c.canvasMode)
+            fun fx(x: Float) = ((x - fr[0]) / fr[2])
+            fun fy(y: Float) = ((y - fr[1]) / fr[3])
             if (c.layerTool && c.currentLayer != null) {
                 // Katman sekmesi: tek parmak taşır, iki parmak büyütür ve döndürür.
                 when (e.actionMasked) {
                     MotionEvent.ACTION_DOWN -> {
                         if (player?.playing == true) player?.pause()
                         prevAngle = Float.NaN; prevDist = Float.NaN
-                        val nx = (e.x / v.width).coerceIn(0f, 1f); val ny = (e.y / v.height).coerceIn(0f, 1f)
+                        val nx = fx(e.x).coerceIn(0f, 1f); val ny = fy(e.y).coerceIn(0f, 1f)
                         c.updateLayerLive { it.copy(x = nx, y = ny) }
                     }
                     MotionEvent.ACTION_POINTER_DOWN -> { twoFinger(e)?.let { prevAngle = it.first; prevDist = it.second } }
@@ -1484,7 +1500,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                             c.updateLayerLive { it.copy(scale = (it.scale * k).coerceIn(0.03f, 1.5f), rotation = (it.rotation + da).let { r -> ((r + 540f) % 360f) - 180f }) }
                             prevAngle = tf.first; prevDist = tf.second
                         } else if (e.pointerCount == 1) {
-                            val nx = (e.x / v.width).coerceIn(0f, 1f); val ny = (e.y / v.height).coerceIn(0f, 1f)
+                            val nx = fx(e.x).coerceIn(0f, 1f); val ny = fy(e.y).coerceIn(0f, 1f)
                             c.updateLayerLive { it.copy(x = nx, y = ny) }
                         }
                     }
@@ -1516,7 +1532,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                     // Çoklu açıda dokunulan bölmeyi seç (küçük bölmeler üstte olduğundan sondan başla).
                     val rects = c.state.layout.rects
                     if (rects.size > 1) {
-                        val nx = e.x / v.width; val ny = e.y / v.height
+                        val nx = fx(e.x); val ny = fy(e.y)
                         val hit = rects.indices.reversed().firstOrNull { i ->
                             val r = rects[i]; nx >= r[0] && nx <= r[0] + r[2] && ny >= r[1] && ny <= r[1] + r[3]
                         }
@@ -1527,7 +1543,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 }
                 MotionEvent.ACTION_MOVE -> if (!scaling && e.pointerCount == 1) {
                     val r = c.state.layout.rects[c.activePane.coerceIn(0, c.state.layout.count - 1)]
-                    val degPerPx = c.currentView.fov / max(v.width * r[2], v.height * r[3])
+                    val degPerPx = c.currentView.fov / max(fr[2] * r[2], fr[3] * r[3])
                     val dx = e.x - lastX
                     val dy = e.y - lastY
                     c.updateView { it.copy(yaw = it.yaw - dx * degPerPx, pitch = it.pitch + dy * degPerPx) }
