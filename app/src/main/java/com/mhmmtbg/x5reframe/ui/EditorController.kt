@@ -241,6 +241,11 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     fun setColor(g: com.mhmmtbg.x5reframe.model.ColorGrade) { commit(state.copy(color = g)) }
 
+    /** Önce / sonra: basılı tutulurken renk düzenlemesi gösterilmez. */
+    @Volatile var compareHold = false
+    /** Renk aracındaki histogram (r, g, b × 64). */
+    var histogram by mutableStateOf<FloatArray?>(null)
+
     // ---- Yapay zekâ ile düzenleme ----
 
     class AiMessage(val fromUser: Boolean, val text: String, val error: Boolean = false)

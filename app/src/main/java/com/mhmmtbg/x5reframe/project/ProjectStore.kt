@@ -189,6 +189,8 @@ class ProjectStore(context: Context) {
                 val g = e.color
                 put("filter", g.filter.name); put("strength", g.filterStrength.toDouble())
                 com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.values().forEach { a -> put(a.name, a.get(g).toDouble()) }
+                if (g.hsl != com.mhmmtbg.x5reframe.model.ColorGrade.DEFAULT_HSL) put("hsl", JSONArray().apply { g.hsl.forEach { h -> put(JSONArray().put(h.hue.toDouble()).put(h.sat.toDouble()).put(h.lum.toDouble())) } })
+                g.lut?.let { put("lut", it); put("lutStrength", g.lutStrength.toDouble()) }
             })
             put("tracks", JSONArray().apply { e.tracks.forEach { r -> put(JSONArray().put(r.first).put(r.last)) } })
             put("layout", e.layout.name)
@@ -233,6 +235,10 @@ class ProjectStore(context: Context) {
                         co.optDouble("strength", 1.0).toFloat(),
                     )
                     com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.values().forEach { a -> g = a.set(g, co.optDouble(a.name, 0.0).toFloat()) }
+                    co.optJSONArray("hsl")?.let { arr ->
+                        g = g.copy(hsl = (0 until 6).map { i -> arr.optJSONArray(i)?.let { h -> com.mhmmtbg.x5reframe.model.ColorGrade.Hsl(h.optDouble(0).toFloat(), h.optDouble(1).toFloat(), h.optDouble(2).toFloat()) } ?: com.mhmmtbg.x5reframe.model.ColorGrade.Hsl() })
+                    }
+                    co.optString("lut").takeIf { it.isNotEmpty() && java.io.File(it).exists() }?.let { g = g.copy(lut = it, lutStrength = co.optDouble("lutStrength", 1.0).toFloat()) }
                     g
                 } ?: com.mhmmtbg.x5reframe.model.ColorGrade(),
                 fps = o.optInt("fps", 0),

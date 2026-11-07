@@ -450,6 +450,29 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         controller?.say("Kurgu: ${parts.size} öne çıkan an")
     }
 
+    /** .cube LUT içe aktar: doğrulanıp uygulama klasörüne kopyalanır ve hemen uygulanır. */
+    private val lutPicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        val c = controller ?: return@registerForActivityResult
+        Thread {
+            val res = runCatching {
+                val text = contentResolver.openInputStream(uri)!!.use { it.readBytes().toString(Charsets.UTF_8) }
+                val lut = com.mhmmtbg.x5reframe.model.CubeLut.parse(text)
+                val name = displayName(uri).substringBeforeLast('.').replace(Regex("[^\\p{L}\\p{N} _-]"), "_").take(40).ifBlank { "lut" }
+                val dir = java.io.File(filesDir, "luts").apply { mkdirs() }
+                val f = java.io.File(dir, "$name.cube")
+                f.writeText(text)
+                f to lut.size
+            }
+            runOnUiThread {
+                res.onSuccess { (f, n) ->
+                    c.setColor(c.state.color.copy(lut = f.absolutePath, lutStrength = 1f))
+                    c.say("LUT eklendi: ${f.nameWithoutExtension} (${n}³)")
+                }.onFailure { c.say("LUT okunamadı: ${it.message}", false) }
+            }
+        }.start()
+    }
+
     private val addClipPicker = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
@@ -571,7 +594,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.sceneProvider = { t -> c.sceneAt(t) }
             p.layoutProvider = { c.snapshotState.layout.rects }
             p.baseProvider = { t -> c.baseAt(t) }
-            p.colorProvider = { c.colorUniforms }
+            p.colorProvider = { if (c.compareHold) null else c.colorUniforms }
             p.lookProvider = { c.snapshotState.flatLook }
             p.layersProvider = { c.snapshotState.layers }
             p.setVolume(projectAudio.originalVolume)
@@ -725,6 +748,11 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             updateSegments(list, segIndex, reopen = false)
         },
         freeze = { t -> freezeFrame(t) },
+        applyColorToAll = { g ->
+            storeCurrentEdit()
+            val list = segments.map { it.copy(edit = it.edit.copy(color = g)) }
+            updateSegments(list, segIndex, reopen = false)
+        },
         audio = projectAudio,
         pickMusic = { musicPicker.launch(arrayOf("audio/*")) },
         updateAudio = { a -> setAudio(a) },
@@ -1066,6 +1094,10 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         },
         deepTrack = { c.trackTarget?.let { startDeepTrack(c, c.positionUs, c.currentView, it) } },
         resumeTrack = { c.trackResume?.let { (t, box) -> c.positionUs = t; player?.seekTo(t); startDeepTrack(c, t, c.activeViewAt(t), box) } },
+        requestHistogram = { player?.requestHistogram { h -> controller?.histogram = h } },
+        redraw = { player?.requestRedraw() },
+        importLut = { lutPicker.launch(arrayOf("*/*")) },
+        lutFiles = { java.io.File(filesDir, "luts").listFiles { f -> f.extension.equals("cube", true) }.orEmpty().sortedBy { it.name.lowercase() } },
         dynamicStitch = { getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("dynamic_stitch", true) },
         setDynamicStitch = { on ->
             getSharedPreferences("prefs", MODE_PRIVATE).edit().putBoolean("dynamic_stitch", on).apply()

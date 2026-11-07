@@ -253,6 +253,7 @@ class Exporter(
                         val tOut = k * frameDur
                         program.fade = fadeFactor(job, tOut)
                         val pts = source.currentPts
+                        program.frameTime = tOut / 1e6f
                         if (pts != stitchPts) { program.updateStitch(source, 3, 0.5f); stitchPts = pts }
                         program.drawScene(output.width, output.height, job.layoutRects, job.sceneAt(pts), source, job.baseAt(pts))
                         overlay.draw(output.width, output.height, job.layers, pts)
@@ -368,6 +369,7 @@ class Exporter(
                     while (source.currentPts + frameDur <= t) { if (source.next { it + frameDur > t } < 0) break }
                     GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, fbos[idx])
                     program.fade = 1f
+                    program.frameTime = (k0 + idx) * frameDur / 1e6f
                     program.drawScene(w, h, job.layoutRects, job.sceneAt(source.currentPts), source, job.baseAt(source.currentPts))
                     pts[idx] = source.currentPts
                 }

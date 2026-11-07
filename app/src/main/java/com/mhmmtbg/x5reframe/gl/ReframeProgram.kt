@@ -41,6 +41,16 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
     var color: FloatArray? = null
     private val uGrade = IntArray(4)
     private val uGradeOn: Int
+    private val uFx: Int
+    private val uCurve: Int
+    private val uHsl: Int
+    private val uLut: Int
+    private val uLutN: Int
+    /** Gren için karenin zamanı (sn). */
+    var frameTime = 0f
+    private var lutTex = 0
+    private var lutId = -2
+    private var lutSize = 0
 
     /** 0..1 parlaklık çarpanı (siyaha geçiş). */
     var fade = 1f
@@ -93,6 +103,11 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         for (i in 0..1) uTrans[i] = GLES30.glGetUniformLocation(program, "uTrans$i")
         for (i in 0..3) uGrade[i] = GLES30.glGetUniformLocation(program, "uGrade$i")
         uGradeOn = GLES30.glGetUniformLocation(program, "uGradeOn")
+        uFx = GLES30.glGetUniformLocation(program, "uFx")
+        uCurve = GLES30.glGetUniformLocation(program, "uCurve")
+        uHsl = GLES30.glGetUniformLocation(program, "uHsl")
+        uLut = GLES30.glGetUniformLocation(program, "uLut")
+        uLutN = GLES30.glGetUniformLocation(program, "uLutN")
         uSeam = GLES30.glGetUniformLocation(program, "uSeam")
         uSeamOn = GLES30.glGetUniformLocation(program, "uSeamOn")
         uSeamRange = GLES30.glGetUniformLocation(program, "uSeamRange")
@@ -196,9 +211,7 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         GLES30.glUniform1i(uMode, view.projection.ordinal)
         GLES30.glUniform1f(uStitch, stitchInvDistance)
         GLES30.glUniform1f(uFade, fade)
-        val g = color
-        GLES30.glUniform1f(uGradeOn, if (g != null) 1f else 0f)
-        if (g != null) for (i in 0..3) GLES30.glUniform4f(uGrade[i], g[i * 4], g[i * 4 + 1], g[i * 4 + 2], g[i * 4 + 3])
+        uploadGrade()
         GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, stitch?.seamTexture ?: 0)
         GLES30.glUniform1i(uSeam, 2)
@@ -243,9 +256,7 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         GLES30.glUniform4f(uFlatXf, flatZoom(view), (view.yaw / 45.0).toFloat(), (view.pitch / 45.0).toFloat(), Math.toRadians(view.roll).toFloat())
         GLES30.glUniform1i(uHdr, src.hdrTransfer)
         GLES30.glUniform1f(uFade, fade)
-        val g = color
-        GLES30.glUniform1f(uGradeOn, if (g != null) 1f else 0f)
-        if (g != null) for (i in 0..3) GLES30.glUniform4f(uGrade[i], g[i * 4], g[i * 4 + 1], g[i * 4 + 2], g[i * 4 + 3])
+        uploadGrade()
         GLES30.glUniform1f(uSeamOn, 0f)
         GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
@@ -256,7 +267,56 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    /** Renk ayarları, efektler, eğri, HSL ve LUT dokusu. */
+    private fun uploadGrade() {
+        val g = color
+        GLES30.glUniform1f(uGradeOn, if (g != null) 1f else 0f)
+        // Sampler türleri aynı doku birimini paylaşmasın (sürücü doğrulaması): LUT hep birim 3'te
+        GLES30.glUniform1i(uLut, 3)
+        if (g == null) {
+            GLES30.glUniform4f(uFx, 0f, 0f, 0f, 0f)
+            return
+        }
+        for (i in 0..3) GLES30.glUniform4f(uGrade[i], g[i * 4], g[i * 4 + 1], g[i * 4 + 2], g[i * 4 + 3])
+        val ext = g.size >= com.mhmmtbg.x5reframe.model.ColorGrade.UNIFORM_COUNT
+        val lutAmt = if (ext) g[23] else 0f
+        val lutOk = ext && lutAmt > 0f && bindLut(g[19].toInt())
+        GLES30.glUniform4f(uFx, if (ext) g[16] else 0f, if (ext) g[17] else 0f, if (ext) g[18] else 0f, frameTime % 1000f)
+        GLES30.glUniform4f(uCurve, if (ext) g[20] else 0f, if (ext) g[21] else 0f, if (ext) g[22] else 0f, if (lutOk) lutAmt else 0f)
+        if (ext) GLES30.glUniform3fv(uHsl, 6, g, 24) else GLES30.glUniform3fv(uHsl, 6, FloatArray(18), 0)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE3)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, if (lutOk) lutTex else 0)
+        GLES30.glUniform1i(uLut, 3)
+        GLES30.glUniform1f(uLutN, lutSize.coerceAtLeast(2).toFloat())
+    }
+
+    /** LUT kimliğine ait 3B dokuyu yükle (değiştiyse). */
+    private fun bindLut(id: Int): Boolean {
+        if (id < 0) return false
+        if (id == lutId) return lutTex != 0
+        lutId = id
+        if (lutTex != 0) { GLES30.glDeleteTextures(1, intArrayOf(lutTex), 0); lutTex = 0 }
+        val path = com.mhmmtbg.x5reframe.model.LutStore.pathOf(id) ?: return false
+        val lut = runCatching { com.mhmmtbg.x5reframe.model.CubeLut.parse(java.io.File(path).readText()) }.getOrNull() ?: return false
+        val n = lut.size
+        val bytes = ByteBuffer.allocateDirect(n * n * n * 3).order(ByteOrder.nativeOrder())
+        for (v in lut.data) bytes.put((v * 255f + 0.5f).toInt().coerceIn(0, 255).toByte())
+        bytes.position(0)
+        val t = IntArray(1)
+        GLES30.glGenTextures(1, t, 0)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_3D, t[0])
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 1)
+        GLES30.glTexImage3D(GLES30.GL_TEXTURE_3D, 0, GLES30.GL_RGB8, n, n, n, 0, GLES30.GL_RGB, GLES30.GL_UNSIGNED_BYTE, bytes)
+        GLES30.glPixelStorei(GLES30.GL_UNPACK_ALIGNMENT, 4)
+        for (p in intArrayOf(GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_TEXTURE_WRAP_R)) GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, p, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_3D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        lutTex = t[0]; lutSize = n
+        return true
+    }
+
     fun release() {
+        if (lutTex != 0) GLES30.glDeleteTextures(1, intArrayOf(lutTex), 0)
         stitch?.release()
         GLES30.glDeleteProgram(program)
         GLES30.glDeleteBuffers(1, intArrayOf(vbo), 0)
@@ -350,6 +410,11 @@ uniform vec4 uGrade0;   // pozlama, kontrast, doygunluk, canlılık
 uniform vec4 uGrade1;   // sıcaklık, ton, parlak alanlar, gölgeler
 uniform vec4 uGrade2;   // soldurma, bölünmüş ton, gölge r, gölge g
 uniform vec4 uGrade3;   // gölge b, parlak r, parlak g, parlak b
+uniform vec4 uFx;       // kenar karartma, gren, keskinlik, zaman (sn)
+uniform vec4 uCurve;    // eğri: koyu, orta, açık; LUT şiddeti
+uniform vec3 uHsl[6];   // renk aralıkları: ton, doygunluk, parlaklık
+uniform mediump sampler3D uLut;
+uniform float uLutN;
 uniform int uFlat;      // 1 = düz klip
 uniform vec2 uFlatHalf; // görüntünün yarı boyu (uzun kenar = 1 birimlik çıktı uzayında)
 uniform vec2 uFillHalf; // doldurma yerleşiminde yarı boy (bulanık arka plan için)
@@ -358,6 +423,19 @@ uniform float uFlatBlur;
 uniform int uHdr;       // 6 = PQ (HDR10), 7 = HLG; 0 = SDR
 uniform vec4 uCrop;     // kırpma: sol, üst, genişlik, yükseklik (kaynakta normalize)
 uniform vec2 uFlip;     // yatay / dikey aynalama
+
+vec3 rgb2hsv(vec3 c) {
+    vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+    vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+    vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+    float d = q.x - min(q.w, q.y);
+    return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
+}
+
+vec3 hsv2rgb(vec3 c) {
+    vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+    return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
 
 vec3 grade(vec3 c) {
     c *= exp2(uGrade0.x);
@@ -372,6 +450,50 @@ vec3 grade(vec3 c) {
     c = mix(vec3(l), c, (1.0 + uGrade0.z) * (1.0 + uGrade0.w * (1.0 - clamp(sat * 2.0, 0.0, 1.0))));
     c += uGrade2.y * (vec3(uGrade2.z, uGrade2.w, uGrade3.x) * sh + uGrade3.yzw * hi);
     c = mix(c, 0.08 + c * 0.84, uGrade2.x);
+    c = clamp(c, 0.0, 1.0);
+    // Ton eğrisi (parlaklığa göre, üç düğüm)
+    if (any(notEqual(uCurve.xyz, vec3(0.0)))) {
+        float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        float b1 = max(0.0, 1.0 - abs(y - 0.25) / 0.25);
+        float b2 = max(0.0, 1.0 - abs(y - 0.5) / 0.25);
+        float b3 = max(0.0, 1.0 - abs(y - 0.75) / 0.25);
+        float dy = 0.2 * (uCurve.x * b1 * b1 * (3.0 - 2.0 * b1) + uCurve.y * b2 * b2 * (3.0 - 2.0 * b2) + uCurve.z * b3 * b3 * (3.0 - 2.0 * b3));
+        c = clamp(c + dy, 0.0, 1.0);
+    }
+    // HSL: renk aralığına göre ağırlıklı ton kaydırma, doygunluk, parlaklık
+    vec3 hsv = rgb2hsv(c);
+    if (hsv.y > 0.02) {
+        float shift = 0.0, sat = 0.0, lum = 0.0;
+        float centers[6] = float[6](0.0, 30.0, 60.0, 120.0, 220.0, 280.0);
+        for (int i = 0; i < 6; i++) {
+            float d = abs(hsv.x * 360.0 - centers[i]);
+            d = min(d, 360.0 - d);
+            float w = max(0.0, 1.0 - d / (i == 3 || i == 4 ? 60.0 : 30.0));
+            shift += w * uHsl[i].x; sat += w * uHsl[i].y; lum += w * uHsl[i].z;
+        }
+        if (shift != 0.0 || sat != 0.0 || lum != 0.0) {
+            hsv.x = fract(hsv.x + shift * 30.0 / 360.0);
+            hsv.y = clamp(hsv.y * (1.0 + sat), 0.0, 1.0);
+            hsv.z = clamp(hsv.z * (1.0 + 0.5 * lum * hsv.y), 0.0, 1.0);
+            c = hsv2rgb(hsv);
+        }
+    }
+    if (uCurve.w > 0.0) c = mix(c, texture(uLut, c * ((uLutN - 1.0) / uLutN) + 0.5 / uLutN).rgb, uCurve.w);
+    return c;
+}
+
+// Kenar karartma ve film greni (çıktı pikseline göre)
+vec3 finishFx(vec3 c) {
+    if (uFx.x > 0.0) {
+        vec2 q = vNdc;
+        float v = smoothstep(0.35, 1.45, length(q));
+        c *= 1.0 - uFx.x * 0.75 * v;
+    }
+    if (uFx.y > 0.0) {
+        float n = fract(sin(dot(gl_FragCoord.xy + fract(uFx.w * 7.13) * 431.0, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
+        float y = dot(c, vec3(0.299, 0.587, 0.114));
+        c += n * uFx.y * 0.18 * (1.0 - y * 0.6);
+    }
     return clamp(c, 0.0, 1.0);
 }
 
@@ -417,11 +539,18 @@ void main() {
         float cr = cos(uFlatXf.w), sr = sin(uFlatXf.w);
         vec2 q = vec2(cr * fp.x + sr * fp.y, -sr * fp.x + cr * fp.y) / uFlatXf.x + uFlatXf.yz;
         vec2 uv = vec2(q.x / uFlatHalf.x * 0.5 + 0.5, 0.5 - q.y / uFlatHalf.y * 0.5);
+        vec2 ddx = dFdx(uv), ddy = dFdy(uv);
         vec3 fc;
-        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) fc = flatSample(uv);
+        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) {
+            fc = flatSample(uv);
+            if (uFx.z > 0.0) {
+                vec3 nb = flatSample(uv + ddx) + flatSample(uv - ddx) + flatSample(uv + ddy) + flatSample(uv - ddy);
+                fc = clamp(fc + uFx.z * 1.2 * (fc - nb * 0.25), 0.0, 1.0);
+            }
+        }
         else if (uFlatBlur > 0.5) fc = flatBlur(vec2(fp.x / uFillHalf.x * 0.5 + 0.5, 0.5 - fp.y / uFillHalf.y * 0.5)) * 0.55;
         else fc = vec3(0.0);
-        if (uGradeOn > 0.5) fc = grade(fc);
+        if (uGradeOn > 0.5) fc = finishFx(grade(fc));
         outColor = vec4(fc * uFade, 1.0);
         return;
     }
@@ -475,10 +604,21 @@ void main() {
     if (c0.z < COS_LIMIT) w0 = 0.0;
     if (c1.z < COS_LIMIT) w0 = 1.0;
 
+    vec2 tc0 = texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20));
+    vec2 tc1 = texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21));
     vec3 col = vec3(0.0);
-    if (w0 > 0.0) col += w0 * g0 * texture(uTex0, texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20))).rgb;
-    if (w0 < 1.0) col += (1.0 - w0) * g1 * texture(uTex1, texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21))).rgb;
-    if (uGradeOn > 0.5) col = grade(col);
+    if (w0 > 0.0) col += w0 * g0 * texture(uTex0, tc0).rgb;
+    if (w0 < 1.0) col += (1.0 - w0) * g1 * texture(uTex1, tc1).rgb;
+    if (uFx.z > 0.0) {
+        // Keskinlik: baskın lensin dokusunda çıktı pikseli kadar komşularla (laplace)
+        vec2 dx0 = dFdx(tc0), dy0 = dFdy(tc0), dx1 = dFdx(tc1), dy1 = dFdy(tc1);
+        vec3 nb;
+        if (w0 >= 0.5) nb = texture(uTex0, tc0 + dx0).rgb + texture(uTex0, tc0 - dx0).rgb + texture(uTex0, tc0 + dy0).rgb + texture(uTex0, tc0 - dy0).rgb;
+        else nb = texture(uTex1, tc1 + dx1).rgb + texture(uTex1, tc1 - dx1).rgb + texture(uTex1, tc1 + dy1).rgb + texture(uTex1, tc1 - dy1).rgb;
+        nb *= (w0 >= 0.5 ? g0 : g1);
+        col = clamp(col + uFx.z * 1.2 * (col - nb * 0.25), 0.0, 1.0);
+    }
+    if (uGradeOn > 0.5) col = finishFx(grade(col));
     outColor = vec4(col * uFade, 1.0);
 }
 """

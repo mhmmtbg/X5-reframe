@@ -102,6 +102,11 @@ class EditorActions(
     val resumeTrack: () -> Unit = {},
     val dynamicStitch: () -> Boolean = { true },
     val setDynamicStitch: (Boolean) -> Unit = {},
+    /** Renk aracı: histogram iste, önizlemeyi yeniden çiz, LUT içe aktar / listele. */
+    val requestHistogram: () -> Unit = {},
+    val redraw: () -> Unit = {},
+    val importLut: () -> Unit = {},
+    val lutFiles: () -> List<java.io.File> = { emptyList() },
 )
 
 /** Düzenleyici araç çubuğu (yatay kaydırılır). Paneli olmayanlar (Anlık görüntü) doğrudan çalışır. */
@@ -219,7 +224,7 @@ fun EditorScreen(
                     Tool.AUDIO -> AudioPanel(c, actions, seq)
                     Tool.KEYFRAME -> KeyframePanel(c, actions)
                     Tool.STITCH -> StitchPanel(c, actions)
-                    Tool.COLOR -> ColorPanel(c)
+                    Tool.COLOR -> ColorPanel(c, actions, seq)
                     Tool.AI -> AiPanel(c, actions)
                     Tool.SNAPSHOT -> {}
                 }
@@ -519,50 +524,156 @@ private fun AiPanel(c: EditorController, a: EditorActions) {
 }
 
 @Composable
-private fun ColorPanel(c: EditorController) {
+private fun ColorPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
     val g = c.state.color
     var tab by remember { mutableStateOf(0) }
+    // Histogram: panel açıkken ve renk değişince yenilenir
+    LaunchedEffect(g, c.positionUs) { delay(250); a.requestHistogram() }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Segmented(listOf(0, 1), tab, { if (it == 0) "Filtre" else "Ayar" }, { tab = it }, Modifier.fillMaxWidth())
-        if (tab == 0) {
-            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                com.mhmmtbg.x5reframe.model.ColorGrade.Filter.values().forEach { f ->
-                    val on = f == g.filter
-                    Text(f.label, color = if (on) Palette.OnAccent else Palette.Text, style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Palette.Accent else Palette.SurfaceHigh)
-                            .clickable { c.setColor(g.copy(filter = f, filterStrength = 1f)); c.say("Filtre: ${f.label}") }
-                            .padding(horizontal = 12.dp, vertical = 9.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Histogram(c.histogram, Modifier.weight(1f).height(44.dp))
+            // Önce / sonra: basılı tut
+            Box(
+                Modifier.clip(RoundedCornerShape(10.dp)).background(Palette.SurfaceHigh)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onPress = {
+                            c.compareHold = true; a.redraw()
+                            tryAwaitRelease()
+                            c.compareHold = false; a.redraw()
+                        })
+                    }.padding(horizontal = 12.dp, vertical = 10.dp),
+            ) { Text("Önce / sonra", style = MaterialTheme.typography.labelLarge) }
+        }
+        Segmented(listOf(0, 1, 2, 3, 4), tab, { listOf("Filtre", "Işık", "Efekt", "Eğri", "HSL")[it] }, { tab = it }, Modifier.fillMaxWidth())
+        when (tab) {
+            0 -> {
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.mhmmtbg.x5reframe.model.ColorGrade.Filter.values().forEach { f ->
+                        Chip(f.label, f == g.filter) { c.setColor(g.copy(filter = f, filterStrength = 1f)); c.say("Filtre: ${f.label}") }
+                    }
+                }
+                if (g.filter != com.mhmmtbg.x5reframe.model.ColorGrade.Filter.NONE) {
+                    LabeledRow("Şiddet") {
+                        Slider(
+                            value = g.filterStrength, onValueChange = { v -> c.updateColorLive { it.copy(filterStrength = v) } },
+                            onValueChangeFinished = { c.endColorGesture() }, modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                        )
+                        Text("%${(g.filterStrength * 100).toInt()}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
+                    }
+                }
+                Text("LUT (.cube)", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Chip("Yok", g.lut == null) { c.setColor(g.copy(lut = null)) }
+                    a.lutFiles().forEach { f ->
+                        Chip(f.nameWithoutExtension, g.lut == f.absolutePath) { c.setColor(g.copy(lut = f.absolutePath, lutStrength = 1f)); c.say("LUT: ${f.nameWithoutExtension}") }
+                    }
+                    Chip("+ İçe aktar", false) { a.importLut() }
+                }
+                if (g.lut != null) {
+                    LabeledRow("LUT şiddeti") {
+                        Slider(
+                            value = g.lutStrength, onValueChange = { v -> c.updateColorLive { it.copy(lutStrength = v) } },
+                            onValueChangeFinished = { c.endColorGesture() }, modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                        )
+                    }
                 }
             }
-            if (g.filter != com.mhmmtbg.x5reframe.model.ColorGrade.Filter.NONE) {
-                LabeledRow("Şiddet") {
-                    Slider(
-                        value = g.filterStrength, onValueChange = { v -> c.updateColorLive { it.copy(filterStrength = v) } },
-                        onValueChangeFinished = { c.endColorGesture() }, modifier = Modifier.weight(1f),
-                        colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
-                    )
-                    Text("%${(g.filterStrength * 100).toInt()}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
-                }
+            1, 2, 3 -> {
+                val group = when (tab) { 1 -> com.mhmmtbg.x5reframe.model.ColorGrade.Group.LIGHT; 2 -> com.mhmmtbg.x5reframe.model.ColorGrade.Group.EFFECT; else -> com.mhmmtbg.x5reframe.model.ColorGrade.Group.CURVE }
+                if (tab == 3) CurvePreview(g, Modifier.fillMaxWidth().height(64.dp))
+                com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.values().filter { it.group == group }.forEach { ad -> AdjustRow(c, g, ad) }
             }
-        } else {
-            com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.values().forEach { a ->
-                val v = a.get(g)
-                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    Text(a.label, color = Palette.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(96.dp))
-                    Slider(
-                        value = v, onValueChange = { nv -> c.updateColorLive { a.set(it, nv) } },
-                        onValueChangeFinished = { c.endColorGesture() }, valueRange = a.min..a.max, modifier = Modifier.weight(1f),
-                        colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
-                    )
-                    Text((if (a == com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.EXPOSURE) "%+.1f".format(v) else "%+d".format((v * 100).toInt())),
-                        style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp).clickable { c.setColor(a.set(g, 0f)) })
+            else -> {
+                var band by remember { mutableStateOf(0) }
+                val bandColors = listOf(Color(0xFFE5484D), Color(0xFFF07A2B), Color(0xFFE5C33B), Color(0xFF3FAF5B), Color(0xFF3D6DF2), Color(0xFF9A5CE6))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    bandColors.forEachIndexed { i, col ->
+                        Box(
+                            Modifier.size(30.dp).clip(RoundedCornerShape(15.dp)).background(col)
+                                .border(if (i == band) 3.dp else 0.dp, Palette.Text, RoundedCornerShape(15.dp)).clickable { band = i },
+                        )
+                    }
+                }
+                Text(com.mhmmtbg.x5reframe.model.ColorGrade.HSL_BANDS[band], color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+                val h = g.hsl[band]
+                listOf("Ton" to h.hue, "Doygunluk" to h.sat, "Parlaklık" to h.lum).forEachIndexed { k, (label, v) ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(label, color = Palette.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(96.dp))
+                        Slider(
+                            value = v, onValueChange = { nv ->
+                                c.updateColorLive { cg -> cg.copy(hsl = cg.hsl.mapIndexed { i, x -> if (i != band) x else when (k) { 0 -> x.copy(hue = nv); 1 -> x.copy(sat = nv); else -> x.copy(lum = nv) } }) }
+                            },
+                            onValueChangeFinished = { c.endColorGesture() }, valueRange = -1f..1f, modifier = Modifier.weight(1f),
+                            colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                        )
+                        Text("%+d".format((v * 100).toInt()), style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
+                    }
                 }
             }
         }
-        if (!g.isIdentity) {
-            Text("Rengi sıfırla", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.clickable { c.setColor(com.mhmmtbg.x5reframe.model.ColorGrade()); c.say("Renk sıfırlandı") }.padding(vertical = 4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (seq.segments.size > 1) ActionButton("Tüm parçalara uygula", Modifier.weight(1f)) { seq.applyColorToAll(g); c.say("Renk ${seq.segments.size} parçaya uygulandı") }
+            if (!g.isIdentity) ActionButton("Sıfırla", Modifier.weight(0.6f)) { c.setColor(com.mhmmtbg.x5reframe.model.ColorGrade()); c.say("Renk sıfırlandı") }
         }
+    }
+}
+
+@Composable
+private fun AdjustRow(c: EditorController, g: com.mhmmtbg.x5reframe.model.ColorGrade, a: com.mhmmtbg.x5reframe.model.ColorGrade.Adjust) {
+    val v = a.get(g)
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(a.label, color = Palette.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(96.dp))
+        Slider(
+            value = v, onValueChange = { nv -> c.updateColorLive { a.set(it, nv) } },
+            onValueChangeFinished = { c.endColorGesture() }, valueRange = a.min..a.max, modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+        )
+        Text((if (a == com.mhmmtbg.x5reframe.model.ColorGrade.Adjust.EXPOSURE) "%+.1f".format(v) else if (a.min >= 0f) "%d".format((v * 100).toInt()) else "%+d".format((v * 100).toInt())),
+            style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp).clickable { c.setColor(a.set(g, 0f)) })
+    }
+}
+
+/** RGB histogramı: üç kanal üst üste, yarı saydam. */
+@Composable
+private fun Histogram(h: FloatArray?, modifier: Modifier) {
+    val bg = Palette.SurfaceHigh
+    androidx.compose.foundation.Canvas(modifier.clip(RoundedCornerShape(8.dp)).background(bg)) {
+        if (h == null) return@Canvas
+        val cols = listOf(Color(0x99FF5A5A), Color(0x9955D16E), Color(0x995A8CFF))
+        for (ch in 0..2) {
+            val path = androidx.compose.ui.graphics.Path()
+            path.moveTo(0f, size.height)
+            for (k in 0 until 64) {
+                val x = k / 63f * size.width
+                path.lineTo(x, size.height * (1f - h[ch * 64 + k] * 0.95f))
+            }
+            path.lineTo(size.width, size.height); path.close()
+            drawPath(path, cols[ch])
+        }
+    }
+}
+
+/** Ton eğrisinin görünümü (girdi → çıktı). */
+@Composable
+private fun CurvePreview(g: com.mhmmtbg.x5reframe.model.ColorGrade, modifier: Modifier) {
+    val line = Palette.AccentText; val grid = Palette.Outline; val bg = Palette.SurfaceHigh
+    androidx.compose.foundation.Canvas(modifier.clip(RoundedCornerShape(8.dp)).background(bg)) {
+        for (i in 1..3) {
+            val x = size.width * i / 4f
+            drawLine(grid, androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Offset(x, size.height))
+        }
+        drawLine(grid, androidx.compose.ui.geometry.Offset(0f, size.height), androidx.compose.ui.geometry.Offset(size.width, 0f))
+        fun bump(y: Float, cpos: Float): Float { val b = (1f - kotlin.math.abs(y - cpos) / 0.25f).coerceAtLeast(0f); return b * b * (3 - 2 * b) }
+        val path = androidx.compose.ui.graphics.Path()
+        for (i in 0..48) {
+            val y = i / 48f
+            val o = (y + 0.2f * (g.curveDark * bump(y, 0.25f) + g.curveMid * bump(y, 0.5f) + g.curveLight * bump(y, 0.75f))).coerceIn(0f, 1f)
+            val px = y * size.width; val py = size.height * (1f - o)
+            if (i == 0) path.moveTo(px, py) else path.lineTo(px, py)
+        }
+        drawPath(path, line, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
     }
 }
 

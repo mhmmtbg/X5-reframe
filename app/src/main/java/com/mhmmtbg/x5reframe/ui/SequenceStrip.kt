@@ -49,6 +49,8 @@ class SequenceUi(
     val updateSegment: (Int, (Segment) -> Segment) -> Unit = { _, _ -> },
     /** Oynatma çizgisindeki kareyi dondur (fotoğraf parçası olarak araya ekle). */
     val freeze: (Long) -> Unit = {},
+    /** Rengi projedeki tüm parçalara kopyala. */
+    val applyColorToAll: (com.mhmmtbg.x5reframe.model.ColorGrade) -> Unit = {},
     /** Proje sesi */
     val audio: com.mhmmtbg.x5reframe.project.ProjectAudio = com.mhmmtbg.x5reframe.project.ProjectAudio(),
     val pickMusic: () -> Unit = {},

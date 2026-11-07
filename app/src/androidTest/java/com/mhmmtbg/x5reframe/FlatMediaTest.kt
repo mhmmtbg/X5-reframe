@@ -107,12 +107,12 @@ class FlatMediaTest {
     }
 
     /** Klibi [w]x[h] pbuffer'a çiz ve pikselleri (üst satır başta) döndür. */
-    private fun render(clip: ClipInfo, w: Int, h: Int, fit: FrameFit, view: ViewParams = ViewParams(), look: com.mhmmtbg.x5reframe.model.FlatLook? = null): IntArray {
+    private fun render(clip: ClipInfo, w: Int, h: Int, fit: FrameFit, view: ViewParams = ViewParams(), look: com.mhmmtbg.x5reframe.model.FlatLook? = null, color: FloatArray? = null): IntArray {
         val egl = EglCore()
         val pb = egl.createPbuffer(w, h)
         egl.makeCurrent(pb)
         val pfd = ctx.contentResolver.openFileDescriptor(clip.uri, "r")!!
-        val program = Sources.program(clip).apply { this.look = look ?: com.mhmmtbg.x5reframe.model.FlatLook(fit) }
+        val program = Sources.program(clip).apply { this.look = look ?: com.mhmmtbg.x5reframe.model.FlatLook(fit); this.color = color }
         val src = Sources.open(ctx, clip, pfd.fileDescriptor, realtime = false)
         try {
             assertTrue(src.seekAndShow(500_000, 33_333) >= 0)
@@ -219,6 +219,25 @@ class FlatMediaTest {
         val expected = jobs.sumOf { it.endUs - it.startUs }
         android.util.Log.i("FlatMediaTest", "mixed export dur=$durUs expected=$expected frames=${ex.videoWritten} audio=${ex.audioWritten}")
         assertTrue("süre beklenenden farklı: $durUs / $expected", kotlin.math.abs(durUs - expected) < 200_000)
+    }
+
+    /** v3.5: .cube LUT (ters çeviren 2³) ve kenar karartma GPU'da doğru uygulanıyor mu. */
+    @Test
+    fun appliesLutAndVignette() {
+        val img = File(ctx.cacheDir, "photo_c.png").also { makeImage(it) }
+        val ic = ClipInfo.load(ctx, Uri.fromFile(img))
+        val cube = File(ctx.filesDir, "ters.cube").apply {
+            writeText("LUT_3D_SIZE 2\n1 1 1\n0 1 1\n1 0 1\n0 0 1\n1 1 0\n0 1 0\n1 0 0\n0 0 0\n")
+        }
+        val inv = render(ic, 400, 300, FrameFit.FIT, color = com.mhmmtbg.x5reframe.model.ColorGrade(lut = cube.absolutePath).uniforms())
+        val p = inv[75 * 400 + 100]
+        android.util.Log.i("FlatMediaTest", "lut ${Integer.toHexString(p)}")
+        assertTrue("LUT ters çevirmedi: ${Integer.toHexString(p)}", Color.red(p) > 200 && Color.green(p) < 80 && Color.blue(p) > 200)
+        val plain = render(ic, 400, 300, FrameFit.FIT)
+        val vig = render(ic, 400, 300, FrameFit.FIT, color = com.mhmmtbg.x5reframe.model.ColorGrade(vignette = 1f).uniforms())
+        val corner = 296 * 400 + 396; val mid = 150 * 400 + 300
+        assertTrue("köşe kararmadı", Color.blue(vig[corner]) < Color.blue(plain[corner]) - 60)
+        assertTrue("orta fazla karardı", Color.blue(vig[mid]) > Color.blue(plain[mid]) - 40)
     }
 
     /** Ters oynatma: parlaklığı zamanla artan videonun tersinde ilk kare son kareden parlak olmalı. Hız eğrisiyle süre değişir. */
