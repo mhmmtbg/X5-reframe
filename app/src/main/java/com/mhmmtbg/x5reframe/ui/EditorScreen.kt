@@ -142,7 +142,7 @@ fun EditorScreen(
                 t.inUs = s.inUs
                 t.outUs = s.outUs
                 t.keyframes = c.activeKeyframes.map { it.timeUs }
-                t.positionUs = c.positionUs
+                if (!c.playing) t.positionUs = c.positionUs
             },
         )
 
@@ -232,8 +232,9 @@ private fun ViewHud(c: EditorController, modifier: Modifier) {
     val v = c.currentView
     val editing = c.liveView != null
     Text(
-        (if (editing) "● kaydedilmedi  " else "") + "yön ${v.yaw.toInt()}°  eğim ${v.pitch.toInt()}°  açı ${v.fov.toInt()}°",
-        modifier = modifier.background(Color(0x99000000), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
+        (c.statsText?.takeIf { c.showStats }?.let { "$it\n" } ?: "") +
+            (if (editing) "● kaydedilmedi  " else "") + "yön ${v.yaw.toInt()}°  eğim ${v.pitch.toInt()}°  açı ${v.fov.toInt()}°",
+        modifier = modifier.clickable { c.showStats = !c.showStats }.background(Color(0x99000000), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
         color = if (editing) Palette.Keyframe else Palette.Text,
         style = MaterialTheme.typography.bodySmall,
     )

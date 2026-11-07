@@ -8,7 +8,6 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
 import android.os.ParcelFileDescriptor
-import android.os.SystemClock
 import android.view.Surface
 import com.mhmmtbg.x5reframe.gl.EglCore
 import com.mhmmtbg.x5reframe.gl.ReframeProgram
@@ -58,8 +57,9 @@ class Player(
 
     @Volatile var playing = false
         private set
-    private var playStartWall = 0L
+    private var playStartNs = 0L
     private var playStartPts = 0L
+    val stats = FrameStats()
     private val frameDurUs = (1_000_000 / clip.frameRate).toLong()
 
     private val audio: AudioPreview? = clip.audioTrack?.let { AudioPreview(pfd.fileDescriptor, it) }
@@ -130,8 +130,9 @@ class Player(
     fun play() = handler.post {
         if (playing || released || !::source.isInitialized) return@post
         playing = true
-        playStartWall = SystemClock.elapsedRealtime()
+        playStartNs = System.nanoTime()
         playStartPts = source.currentPts
+        stats.pause()
         audio?.start(source.currentPts)
         main.post { listener.onPlayingChanged(true) }
         handler.post(loop)
@@ -139,6 +140,7 @@ class Player(
 
     fun pause() {
         playing = false
+        stats.pause()
         handler.post { audio?.stop() }
         main.post { listener.onPlayingChanged(false) }
     }
@@ -173,32 +175,45 @@ class Player(
             drawNow()
             if (pts >= 0) postPosition(pts)
             if (playing) {
-                playStartWall = SystemClock.elapsedRealtime(); playStartPts = source.currentPts
+                playStartNs = System.nanoTime(); playStartPts = source.currentPts
+                stats.pause()
                 audio?.start(source.currentPts)
             }
         } catch (t: Throwable) { error(t) }
     }
 
+    /**
+     * Oynatma saati (µs, klip zamanı). Ses çalıyorsa donanım zaman damgasından ara değerlenmiş
+     * ses konumu; yoksa duvar saati. Her ikisi de sürekli ilerler, sıçramaz.
+     */
+    private fun clockUs(): Long =
+        audio?.positionUs() ?: (playStartPts + (System.nanoTime() - playStartNs) / 1000)
+
     private val loop = object : Runnable {
         override fun run() {
             if (!playing || released) return
             try {
-                val pts = source.next(true)
+                // Geç kalan kareleri göstermeden atla (en fazla 6 art arda), böylece görüntü saati yakalar.
+                var pts: Long
+                var skipped = 0
+                while (true) {
+                    pts = source.next { p -> skipped >= 6 || p + frameDurUs >= clockUs() }
+                    if (pts < 0 || source.lastRendered) break
+                    skipped++
+                    stats.frameDropped()
+                }
                 if (pts < 0) {
                     playing = false
                     audio?.stop()
+                    stats.pause()
                     main.post { listener.onPlayingChanged(false) }
                     return
                 }
-                // Ses çalıyorsa ana saat sestir; yoksa duvar saati.
-                val audioPos = audio?.positionUs()
-                val wait = if (audioPos != null) {
-                    (pts - audioPos) / 1000
-                } else {
-                    playStartWall + (pts - playStartPts) / 1000 - SystemClock.elapsedRealtime()
-                }
-                if (wait > 0) Thread.sleep(wait.coerceAtMost(100))
+                // Karenin zamanı gelene kadar bekle (erken çözüldüyse).
+                val waitUs = pts - clockUs()
+                if (waitUs > 1000) Thread.sleep((waitUs / 1000).coerceAtMost(100), ((waitUs % 1000) * 1000).toInt())
                 drawNow()
+                stats.frameShown()
                 postPosition(pts)
                 handler.post(this)
             } catch (t: Throwable) { error(t) }

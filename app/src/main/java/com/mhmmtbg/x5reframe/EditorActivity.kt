@@ -200,7 +200,12 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         }
         lifecycleScope.launch {
             val proj = existing ?: run {
-                val lrvUri = intent.getStringExtra(EXTRA_LRV)?.let(Uri::parse)
+                // LRV: seçimle geldiyse onu, gelmediyse kaydedilmiş medya klasöründe ada göre ara.
+                val lrvUri = intent.getStringExtra(EXTRA_LRV)?.let(Uri::parse) ?: withContext(Dispatchers.IO) {
+                    com.mhmmtbg.x5reframe.project.LrvFinder.findInTree(
+                        this@EditorActivity, com.mhmmtbg.x5reframe.project.LrvFinder.savedFolder(this@EditorActivity), displayName(newUri!!),
+                    )
+                }
                 val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, newUri!!, lrvUri) } }
                 val clip = r.getOrElse { loadError = it.message ?: it.javaClass.simpleName; return@launch }
                 clipCache[newUri.toString()] = clip
@@ -213,6 +218,12 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             setupMusicPreview()
             openSegment(0)
             observeExports()
+            // Kare zamanlaması göstergesi (açıksa yarım saniyede bir güncellenir)
+            while (true) {
+                kotlinx.coroutines.delay(500)
+                val c = controller ?: continue
+                if (c.showStats) c.statsText = player?.stats?.snapshot()?.toString() + (if (c.clip.lrv != null) " · LRV" else " · tam çözünürlük")
+            }
         }
     }
 
@@ -575,12 +586,27 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     // ---- Player.Listener ----
 
+    private var lastUiPositionMs = 0L
+
+    /**
+     * Oynatma sırasında her karede yalnızca zaman çizelgesi çizgisi güncellenir; arayüzün geri kalanı
+     * (Compose) saniyede ~8 kez. Her karede tüm ekranın yeniden oluşturulması önizlemeyi takıltıyordu.
+     */
     override fun onPosition(us: Long) {
-        if (!userScrubbing) controller?.positionUs = us
+        if (userScrubbing) return
+        timelineView?.positionUs = us
+        val c = controller ?: return
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!c.playing || now - lastUiPositionMs >= 120) {
+            lastUiPositionMs = now
+            c.positionUs = us
+        }
     }
 
     override fun onPlayingChanged(playing: Boolean) {
         controller?.playing = playing
+        // Durunca konumu tam kareye eşitle
+        if (!playing) timelineView?.positionUs?.let { controller?.positionUs = it }
         syncMusic(playing)
     }
 

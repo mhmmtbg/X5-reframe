@@ -27,13 +27,20 @@ class AudioPreview(private val fd: FileDescriptor, private val track: Int) {
 
     private fun applyVolume() { audioTrack?.setVolume(if (muted) 0f else volume.coerceIn(0f, 1f)) }
 
-    /** Çalan sesin konumu (µs); ses henüz başlamadıysa null. */
+    private val ts = android.media.AudioTimestamp()
+
+    /**
+     * Hoparlörden o an çıkan sesin konumu (µs); ses henüz başlamadıysa null.
+     * AudioTrack.getTimestamp ile donanım zaman damgası alınıp şimdiye ara değerlenir;
+     * playbackHeadPosition birçok cihazda 20–40 ms'lik sıçramalarla ilerlediği için kullanılmaz.
+     */
     fun positionUs(): Long? {
         val at = audioTrack ?: return null
         if (at.playState != AudioTrack.PLAYSTATE_PLAYING) return null
-        val head = at.playbackHeadPosition.toLong() and 0xffffffffL
-        if (head == 0L) return null
-        return startUs + head * 1_000_000 / sampleRate
+        if (!at.getTimestamp(ts) || ts.framePosition <= 0) return null
+        val nowNs = System.nanoTime()
+        val frames = ts.framePosition + (nowNs - ts.nanoTime) * sampleRate / 1_000_000_000L
+        return startUs + frames * 1_000_000 / sampleRate
     }
 
     fun start(fromUs: Long) {
@@ -81,6 +88,7 @@ class AudioPreview(private val fd: FileDescriptor, private val track: Int) {
 
             val info = MediaCodec.BufferInfo()
             var inEos = false
+            var pcm = ByteArray(16 * 1024)
             while (running) {
                 if (!inEos) {
                     val ii = codec.dequeueInputBuffer(5000)
@@ -106,12 +114,13 @@ class AudioPreview(private val fd: FileDescriptor, private val track: Int) {
                             offset += skipBytes; size -= skipBytes
                         }
                         if (size > 0) {
-                            val pcm = ByteArray(size)
+                            if (pcm.size < size) pcm = ByteArray(size)
                             buf.position(offset); buf.get(pcm, 0, size)
-                            val out = if (channels > 2) downmix(pcm, channels) else pcm
+                            val out = if (channels > 2) downmix(pcm.copyOf(size), channels) else pcm
+                            val outSize = if (channels > 2) out.size else size
                             var w = 0
-                            while (w < out.size && running) {
-                                val r = at.write(out, w, out.size - w)
+                            while (w < outSize && running) {
+                                val r = at.write(out, w, outSize - w)
                                 if (r <= 0) break
                                 w += r
                             }

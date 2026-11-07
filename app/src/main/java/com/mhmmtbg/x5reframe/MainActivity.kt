@@ -69,12 +69,17 @@ class MainActivity : AppCompatActivity() {
     private var folder by mutableStateOf<Uri?>(null)
     private var media by mutableStateOf<List<DocumentFile>>(emptyList())
 
-    private val picker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            runCatching { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
-            openNew(uri)
-        }
+    /** Yeni proje: .insv ile birlikte LRV de seçilirse önizleme hızlı olur (çoklu seçim). */
+    private val picker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNullOrEmpty()) return@registerForActivityResult
+        uris.forEach { runCatching { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
+        val pr = com.mhmmtbg.x5reframe.project.LrvFinder.pair(uris) { u -> nameOf(u) } ?: return@registerForActivityResult
+        openNew(pr.first, pr.second)
     }
+
+    private fun nameOf(u: Uri): String = runCatching {
+        contentResolver.query(u, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+    }.getOrNull() ?: (u.lastPathSegment ?: "")
 
     private val folderPicker = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
         if (uri != null) {
@@ -214,7 +219,7 @@ class MainActivity : AppCompatActivity() {
     @Composable
     private fun ProjectsTab() {
         if (projects.isEmpty()) {
-            EmptyState("Henüz proje yok", "Yeni proje ile kameranın SD kartından bir .insv klibi seç. Yaptığın düzenlemeler otomatik kaydedilir.")
+            EmptyState("Henüz proje yok", "Yeni proje ile kameranın SD kartından .insv klibini seç; aynı adlı LRV dosyasını da birlikte seçersen önizleme çok daha akıcı olur. Medya sekmesinden açınca LRV otomatik bulunur.")
             return
         }
         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

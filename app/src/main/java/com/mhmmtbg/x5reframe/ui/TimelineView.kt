@@ -27,13 +27,13 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
     var listener: Listener? = null
 
     var durationUs = 1L
-        set(v) { field = v.coerceAtLeast(1); invalidate() }
+        set(v) { val n = v.coerceAtLeast(1); if (field != n) { field = n; invalidate() } }
     var positionUs = 0L
-        set(v) { field = v; invalidate() }
+        set(v) { if (field != v) { field = v; invalidate() } }
     var inUs = 0L
-        set(v) { field = v; invalidate() }
+        set(v) { if (field != v) { field = v; invalidate() } }
     var outUs = 1L
-        set(v) { field = v; invalidate() }
+        set(v) { if (field != v) { field = v; invalidate() } }
     var keyframes: List<Long> = emptyList()
         set(v) { if (field != v) { field = v; invalidate() } }
     /** Klip boyunca eşit aralıklı küçük kareler (isteğe bağlı). */

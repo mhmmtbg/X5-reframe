@@ -45,6 +45,9 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
     /** Kuyrukta bekleyen dışa aktarım sayısı. */
     var exportQueued by mutableIntStateOf(0)
     var previewMuted by mutableStateOf(false)
+    /** Geliştirici göstergesi: önizleme kare zamanlaması (kadraj bilgisine dokununca açılır). */
+    var statsText by mutableStateOf<String?>(null)
+    var showStats by mutableStateOf(false)
     private var feedbackId by mutableIntStateOf(0)
 
     /** Oynatıcı iş parçacığının okuduğu anlık kopyalar. */
