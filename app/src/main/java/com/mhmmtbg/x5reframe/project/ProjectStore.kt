@@ -160,7 +160,7 @@ class ProjectStore(context: Context) {
             put("inUs", e.inUs); put("outUs", e.outUs)
             put("baseView", viewToJson(e.baseView))
             put("keyframes", JSONArray().apply {
-                e.keyframes.forEach { k -> put(JSONObject().put("t", k.timeUs).put("view", viewToJson(k.view))) }
+                e.keyframes.forEach { k -> put(JSONObject().put("t", k.timeUs).put("view", viewToJson(k.view)).put("c", k.curve.name)) }
             })
             put("aspect", e.aspect.name); put("quality", e.quality.name)
             put("hevc", e.hevc); put("includeAudio", e.includeAudio)
@@ -178,7 +178,7 @@ class ProjectStore(context: Context) {
             put("extraPanes", JSONArray().apply {
                 e.extraPanes.forEach { p ->
                     put(JSONObject().put("baseView", viewToJson(p.baseView)).put("keyframes", JSONArray().apply {
-                        p.keyframes.forEach { k -> put(JSONObject().put("t", k.timeUs).put("view", viewToJson(k.view))) }
+                        p.keyframes.forEach { k -> put(JSONObject().put("t", k.timeUs).put("view", viewToJson(k.view)).put("c", k.curve.name)) }
                     }))
                 }
             })
@@ -189,7 +189,7 @@ class ProjectStore(context: Context) {
             return EditState(
                 inUs = o.optLong("inUs"), outUs = o.optLong("outUs"),
                 keyframes = (0 until kfs.length()).map { i ->
-                    val k = kfs.getJSONObject(i); Keyframe(k.getLong("t"), viewFromJson(k.getJSONObject("view")))
+                    val k = kfs.getJSONObject(i); Keyframe(k.getLong("t"), viewFromJson(k.getJSONObject("view")), curveOf(k.optString("c")))
                 },
                 baseView = o.optJSONObject("baseView")?.let(::viewFromJson) ?: ViewParams(),
                 aspect = runCatching { Aspect.valueOf(o.optString("aspect")) }.getOrDefault(Aspect.LANDSCAPE),
@@ -222,7 +222,7 @@ class ProjectStore(context: Context) {
                         val po = arr.getJSONObject(i)
                         val ks = po.optJSONArray("keyframes") ?: JSONArray()
                         com.mhmmtbg.x5reframe.model.Pane(
-                            (0 until ks.length()).map { j -> val k = ks.getJSONObject(j); Keyframe(k.getLong("t"), viewFromJson(k.getJSONObject("view"))) },
+                            (0 until ks.length()).map { j -> val k = ks.getJSONObject(j); Keyframe(k.getLong("t"), viewFromJson(k.getJSONObject("view")), curveOf(k.optString("c"))) },
                             po.optJSONObject("baseView")?.let(::viewFromJson) ?: ViewParams(),
                         )
                     }
@@ -241,3 +241,6 @@ class ProjectStore(context: Context) {
         )
     }
 }
+
+private fun curveOf(name: String?): com.mhmmtbg.x5reframe.model.Curve =
+    com.mhmmtbg.x5reframe.model.Curve.values().firstOrNull { it.name == name } ?: com.mhmmtbg.x5reframe.model.Curve.EASE_IN_OUT

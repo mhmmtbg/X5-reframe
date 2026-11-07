@@ -101,7 +101,7 @@ fun List<Keyframe>.viewAt(timeUs: Long, fallback: ViewParams): ViewParams {
     val i = indexOfFirst { it.timeUs > timeUs }
     val a = this[i - 1]; val b = this[i]
     val t0 = (timeUs - a.timeUs).toDouble() / (b.timeUs - a.timeUs)
-    val t = t0 * t0 * (3 - 2 * t0)
+    val t = a.curve.apply(t0)
     val dyaw = ViewParams.wrap(b.view.yaw - a.view.yaw)
     return ViewParams(
         yaw = ViewParams.wrap(a.view.yaw + dyaw * t),

@@ -52,6 +52,13 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private var loadError by mutableStateOf<String?>(null)
     private var loaded by mutableStateOf(false)
 
+    /** Oynatıcı sayfası (albümden açılınca) ya da düzenleyici. */
+    private var viewer by mutableStateOf(false)
+    private var cameFromViewer = false
+    private var editorStartTool by mutableStateOf<String?>(null)
+    private var cleanToggles by mutableStateOf(0)
+    private var favorite by mutableStateOf(false)
+
     /** Projedeki parçalar ve seçili parça (arayüz için). */
     private var segments by mutableStateOf<List<com.mhmmtbg.x5reframe.project.Segment>>(emptyList())
     private var segIndex by mutableStateOf(0)
@@ -182,11 +189,15 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         store = com.mhmmtbg.x5reframe.project.ProjectStore(this)
         val existing = intent.getStringExtra(EXTRA_PROJECT)?.let { store.get(it) }
         val newUri: Uri? = if (existing == null) intent.data ?: run { finish(); return } else null
+        viewer = intent.getBooleanExtra(EXTRA_VIEWER, false)
+        cameFromViewer = viewer
         setContent {
             X5Theme {
                 val c = controller
                 if (loaded && c != null) {
-                    EditorScreen(c, actions(c), ::createSurface, ::createTimeline, sequenceUi())
+                    androidx.activity.compose.BackHandler(enabled = !viewer && cameFromViewer) { showViewer() }
+                    if (viewer) com.mhmmtbg.x5reframe.ui.ViewerScreen(c, viewerActions(c), ::createSurface, cleanToggles, sequenceUi())
+                    else EditorScreen(c, actions(c), ::createSurface, ::createTimeline, sequenceUi(), editorStartTool)
                 } else {
                     Box(Modifier.fillMaxSize().background(Palette.Background), contentAlignment = Alignment.Center) {
                         Text(
@@ -199,7 +210,10 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             }
         }
         lifecycleScope.launch {
-            val proj = existing ?: run {
+            val reuse = if (existing == null && viewer) withContext(Dispatchers.IO) {
+                store.list().firstOrNull { it.segments.size == 1 && it.segments[0].clipUri == newUri }
+            } else null
+            val proj = existing ?: reuse ?: run {
                 // LRV: seçimle geldiyse onu, gelmediyse kaydedilmiş medya klasöründe ada göre ara.
                 val lrvUri = intent.getStringExtra(EXTRA_LRV)?.let(Uri::parse) ?: withContext(Dispatchers.IO) {
                     com.mhmmtbg.x5reframe.project.LrvFinder.findInTree(
@@ -209,10 +223,29 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 val r = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, newUri!!, lrvUri) } }
                 val clip = r.getOrElse { loadError = it.message ?: it.javaClass.simpleName; return@launch }
                 clipCache[newUri.toString()] = clip
-                withContext(Dispatchers.IO) { store.create(newUri!!, displayName(newUri), clip.durationUs, clip.lrv?.uri) }
-                    .also { saveHandler.postDelayed({ captureThumb() }, 1500) }
+                withContext(Dispatchers.IO) {
+                    var p = store.create(newUri!!, displayName(newUri), clip.durationUs, clip.lrv?.uri)
+                    // Albümde birden fazla çekim seçildiyse arkaya ekle
+                    val more = intent.getStringArrayExtra(EXTRA_MORE).orEmpty().map(Uri::parse)
+                    if (more.isNotEmpty()) {
+                        val folder = com.mhmmtbg.x5reframe.project.LrvFinder.savedFolder(this@EditorActivity)
+                        val extra = more.mapNotNull { u ->
+                            val lrv = com.mhmmtbg.x5reframe.project.LrvFinder.findInTree(this@EditorActivity, folder, displayName(u))
+                            runCatching { ClipInfo.load(this@EditorActivity, u, lrv) }.getOrNull()?.let { ci ->
+                                clipCache[u.toString()] = ci
+                                store.newSegment(u, displayName(u), ci.durationUs, ci.lrv?.uri)
+                            }
+                        }
+                        p = p.copy(segments = p.segments + extra)
+                        store.save(p)
+                    }
+                    p
+                }.also { saveHandler.postDelayed({ captureThumb() }, 1500) }
             }
             project = proj
+            favorite = proj.segments.firstOrNull()?.clipUri?.toString()?.let {
+                getSharedPreferences("prefs", MODE_PRIVATE).getStringSet("favorites", emptySet()).orEmpty().contains(it)
+            } ?: false
             segments = proj.segments
             projectAudio = proj.audio
             setupMusicPreview()
@@ -299,13 +332,18 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     private fun addSegment(uri: Uri) {
         lifecycleScope.launch {
-            val clip = withContext(Dispatchers.IO) { runCatching { ClipInfo.load(this@EditorActivity, uri, null) } }.getOrElse {
+            val clip = withContext(Dispatchers.IO) {
+                val lrv = com.mhmmtbg.x5reframe.project.LrvFinder.findInTree(
+                    this@EditorActivity, com.mhmmtbg.x5reframe.project.LrvFinder.savedFolder(this@EditorActivity), displayName(uri),
+                )
+                runCatching { ClipInfo.load(this@EditorActivity, uri, lrv) }
+            }.getOrElse {
                 controller?.say("Eklenemedi: ${it.message}", false); return@launch
             }
             clipCache[uri.toString()] = clip
             storeCurrentEdit()
             val proj = project ?: return@launch
-            val seg = store.newSegment(uri, displayName(uri), clip.durationUs, null)
+            val seg = store.newSegment(uri, displayName(uri), clip.durationUs, clip.lrv?.uri)
             val list = proj.segments + seg
             updateSegments(list, list.size - 1, reopen = true)
         }
@@ -386,8 +424,108 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         }
     }.getOrNull() ?: (uri.lastPathSegment ?: "Klip")
 
+    // ---- Kayıt modu ----
+
+    private val sensors by lazy { getSystemService(SENSOR_SERVICE) as android.hardware.SensorManager }
+    private var gyroRef: FloatArray? = null
+    private var gyroStartView: com.mhmmtbg.x5reframe.model.ViewParams? = null
+    private val gyroListener = object : android.hardware.SensorEventListener {
+        private val r = FloatArray(9); private val rr = FloatArray(9); private val o = FloatArray(3)
+        override fun onSensorChanged(e: android.hardware.SensorEvent) {
+            val c = controller ?: return
+            android.hardware.SensorManager.getRotationMatrixFromVector(r, e.values)
+            @Suppress("DEPRECATION")
+            val rot = windowManager.defaultDisplay.rotation
+            val (ax, ay) = when (rot) {
+                android.view.Surface.ROTATION_90 -> android.hardware.SensorManager.AXIS_Z to android.hardware.SensorManager.AXIS_MINUS_X
+                android.view.Surface.ROTATION_270 -> android.hardware.SensorManager.AXIS_MINUS_Z to android.hardware.SensorManager.AXIS_X
+                else -> android.hardware.SensorManager.AXIS_X to android.hardware.SensorManager.AXIS_Z
+            }
+            android.hardware.SensorManager.remapCoordinateSystem(r, ax, ay, rr)
+            android.hardware.SensorManager.getOrientation(rr, o)
+            val ref = gyroRef ?: o.copyOf().also { gyroRef = it }
+            val start = gyroStartView ?: return
+            val dyaw = Math.toDegrees((o[0] - ref[0]).toDouble())
+            val dpitch = Math.toDegrees((o[1] - ref[1]).toDouble())
+            c.updateView { start.copy(yaw = start.yaw + dyaw, pitch = start.pitch - dpitch) }
+        }
+        override fun onAccuracyChanged(s: android.hardware.Sensor?, a: Int) {}
+    }
+
+    private fun toggleRecording(c: EditorController) {
+        if (c.recording) { stopRecording(); return }
+        val p = player ?: return
+        c.startRecording(c.positionUs)
+        if (c.recordGyro) {
+            gyroRef = null; gyroStartView = c.currentView
+            sensors.getDefaultSensor(android.hardware.Sensor.TYPE_GAME_ROTATION_VECTOR)?.let {
+                sensors.registerListener(gyroListener, it, android.hardware.SensorManager.SENSOR_DELAY_GAME)
+            } ?: c.say("Telefonda hareket sensörü yok; parmakla bak", false)
+        }
+        if (!p.playing) p.play()
+    }
+
+    private fun stopRecording() {
+        sensors.unregisterListener(gyroListener)
+        gyroStartView = null
+        player?.pause()
+        controller?.stopRecording()
+    }
+
+    private fun showViewer() { viewer = true; editorStartTool = null }
+
+    private fun viewerActions(c: EditorController) = com.mhmmtbg.x5reframe.ui.ViewerActions(
+        editor = actions(c),
+        openEditor = { tool -> player?.pause(); editorStartTool = tool; viewer = false },
+        snapshot = { snapshot(c) },
+        record = { toggleRecording(c) },
+        highlights = { actions(c).autoHighlights(15) },
+        autoEdit = { actions(c).autoHighlights(30) },
+        isFavorite = { favorite },
+        toggleFavorite = {
+            val key = c.clip.uri.toString()
+            val prefs = getSharedPreferences("prefs", MODE_PRIVATE)
+            val set = prefs.getStringSet("favorites", emptySet()).orEmpty().toMutableSet()
+            favorite = if (key in set) { set.remove(key); false } else { set.add(key); true }
+            prefs.edit().putStringSet("favorites", set).apply()
+            c.say(if (favorite) "Favorilere eklendi" else "Favorilerden çıkarıldı")
+        },
+        delete = if (android.provider.DocumentsContract.isDocumentUri(this, c.clip.uri)) ({ deleteClip(c) }) else null,
+    )
+
+    /** Kameradaki çekimi ve LRV kopyasını sil; projesini de kaldır. */
+    private fun deleteClip(c: EditorController) {
+        player?.pause()
+        val ok = runCatching { android.provider.DocumentsContract.deleteDocument(contentResolver, c.clip.uri) }.getOrDefault(false)
+        if (!ok) { c.say("Silinemedi: klasöre yazma izni yok. Ayarlar'dan klasörü yeniden seç.", false); return }
+        c.clip.lrv?.uri?.let { runCatching { android.provider.DocumentsContract.deleteDocument(contentResolver, it) } }
+        project?.let { store.delete(it.id) }
+        project = null
+        finish()
+    }
+
+    /** O anki kadrajı fotoğraf olarak Resimler/X5Reframe klasörüne kaydet. */
+    private fun snapshot(c: EditorController) {
+        val p = player ?: return
+        val aspect = c.state.aspect
+        val w = 1920; val h = (1920L * aspect.h / aspect.w).toInt().coerceIn(480, 3840) / 2 * 2
+        p.captureThumbnail(w, h) { bmp ->
+            val name = "X5_" + java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US).format(java.util.Date()) + ".jpg"
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/X5Reframe")
+            }
+            val ok = runCatching {
+                val uri = contentResolver.insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)!!
+                contentResolver.openOutputStream(uri)!!.use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 92, it) }
+            }.isSuccess
+            runOnUiThread { c.say(if (ok) "Anlık görüntü kaydedildi · Resimler/X5Reframe" else "Anlık görüntü kaydedilemedi", ok) }
+        }
+    }
+
     private fun actions(c: EditorController) = EditorActions(
-        back = { finish() },
+        back = { if (!viewer && cameFromViewer) showViewer() else finish() },
         playPause = {
             val p = player
             if (p != null) { if (p.playing) p.pause() else { c.clearLive(); p.play() } }
@@ -469,8 +607,12 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 return true
             }
         })
+        val taps = android.view.GestureDetector(ctx, object : android.view.GestureDetector.SimpleOnGestureListener() {
+            override fun onDoubleTap(e: MotionEvent): Boolean { if (viewer) cleanToggles++; return true }
+        })
         sv.setOnTouchListener { v, e ->
             val c = controller ?: return@setOnTouchListener false
+            taps.onTouchEvent(e)
             if (c.layerTool && c.currentLayer != null) {
                 // Katman sekmesi: seçili katmanı parmakla taşı.
                 when (e.actionMasked) {
@@ -486,7 +628,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             scale.onTouchEvent(e)
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
-                    if (player?.playing == true) player?.pause()
+                    // Oynatıcı sayfasında video akarken etrafa bakılabilir; düzenleyicide durur.
+                    if (player?.playing == true && !viewer) player?.pause()
                     // Çoklu açıda dokunulan bölmeyi seç (küçük bölmeler üstte olduğundan sondan başla).
                     val rects = c.state.layout.rects
                     if (rects.size > 1) {
@@ -596,6 +739,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         if (userScrubbing) return
         timelineView?.positionUs = us
         val c = controller ?: return
+        c.recordSample(us)
         val now = android.os.SystemClock.uptimeMillis()
         if (!c.playing || now - lastUiPositionMs >= 120) {
             lastUiPositionMs = now
@@ -605,6 +749,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     override fun onPlayingChanged(playing: Boolean) {
         controller?.playing = playing
+        if (!playing && controller?.recording == true) stopRecording()
         // Durunca konumu tam kareye eşitle
         if (!playing) timelineView?.positionUs?.let { controller?.positionUs = it }
         syncMusic(playing)
@@ -675,5 +820,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         const val CANCELLED = "İptal edildi"
         const val EXTRA_PROJECT = "project"
         const val EXTRA_LRV = "lrv"
+        const val EXTRA_MORE = "more"
+        const val EXTRA_VIEWER = "viewer"
     }
 }

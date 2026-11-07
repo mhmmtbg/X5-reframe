@@ -91,8 +91,9 @@ fun EditorScreen(
     surfaceFactory: (Context) -> SurfaceView,
     timelineFactory: (Context) -> TimelineView,
     seq: SequenceUi,
+    startTool: String? = null,
 ) {
-    var tool by rememberSaveable { mutableStateOf(Tool.FRAME) }
+    var tool by rememberSaveable(startTool) { mutableStateOf(if (startTool == "trim") Tool.TRIM else Tool.FRAME) }
     LaunchedEffect(tool) { c.layerTool = tool == Tool.LAYER }
     var showExport by remember { mutableStateOf(false) }
     val s = c.state
@@ -206,7 +207,7 @@ private fun TopBar(c: EditorController, a: EditorActions, onExport: () -> Unit) 
 }
 
 @Composable
-private fun FeedbackPill(c: EditorController, modifier: Modifier) {
+internal fun FeedbackPill(c: EditorController, modifier: Modifier) {
     val fb = c.feedback
     var visible by remember { mutableStateOf(false) }
     LaunchedEffect(fb?.id) {
@@ -666,7 +667,7 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
 }
 
 @Composable
-private fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi) {
+internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi) {
     val s = c.state
     val (w, h) = s.outputSize()
     var whole by remember { mutableStateOf(seq.segments.size > 1) }

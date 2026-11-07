@@ -119,7 +119,7 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     fun updateView(transform: (ViewParams) -> ViewParams) {
         val p = ap
-        if (p.keyframes.isEmpty()) {
+        if (p.keyframes.isEmpty() && !recording) {
             history.replace(withActive(p.copy(baseView = transform(p.baseView).clamped())))
             state = history.current
             snapshotState = state
@@ -211,6 +211,43 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         val kept = ap.keyframes.filter { it.timeUs < from || it.timeUs > to }
         commit(withActive(ap.copy(keyframes = (kept + keys).sortedBy { it.timeUs })))
         setLive(null)
+    }
+
+    // ---- Kayıt modu: oynarken parmakla / telefonu çevirerek yapılan bakış anahtar karelere dönüşür ----
+
+    var recording by mutableStateOf(false)
+        private set
+    /** Telefon hareketiyle bakış (jiroskop). */
+    var recordGyro by mutableStateOf(false)
+    private val recBuf = ArrayList<Keyframe>()
+
+    fun startRecording(t: Long) {
+        recBuf.clear()
+        val v = (liveView ?: ap.viewAt(t)).clamped()
+        setLive(v)
+        recording = true
+        recBuf += Keyframe(t, v)
+        say(if (recordGyro) "Kayıt: telefonu çevirerek bak" else "Kayıt: parmağınla bak")
+    }
+
+    /** Oynatıcının her karesinde çağrılır. */
+    fun recordSample(t: Long) {
+        if (!recording) return
+        val v = liveView ?: return
+        val last = recBuf.lastOrNull()
+        if (last == null || t - last.timeUs >= 40_000) recBuf += Keyframe(t, v)
+    }
+
+    /** Kaydı bitir: yumuşat, sadeleştir ve aralıktaki anahtar karelerin yerine koy. */
+    fun stopRecording() {
+        if (!recording) return
+        recording = false
+        val keys = PathSimplifier.simplify(recBuf)
+        recBuf.clear()
+        if (keys.size >= 2) {
+            replaceKeyframes(keys.first().timeUs, keys.last().timeUs, keys)
+            say("Kayıt: ${keys.size} anahtar kare · ${fmt(keys.last().timeUs - keys.first().timeUs)}")
+        } else { clearLive(); say("Kayıt çok kısa", false) }
     }
 
     // ---- Katmanlar ----

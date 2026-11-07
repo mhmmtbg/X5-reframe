@@ -45,7 +45,7 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
     /** Bölgesel (dinamik) dikiş; kapalıyken klasik tek mesafeli dikiş. */
     var dynamicStitch = true
     /** Önizleme: 48 bölge; dışa aktarım: 192 bölge x 3 kuşak (ince taneli). */
-    val stitch = if (highQualityStitch) StitchEstimator(rig, 192, 3) else StitchEstimator(rig, 48, 1)
+    val stitch = if (highQualityStitch) StitchEstimator(rig, 192, 3).apply { async = false } else StitchEstimator(rig, 48, 1)
     private var framesSinceEstimate = Int.MAX_VALUE / 2
 
     init {

@@ -229,7 +229,9 @@ class Player(
         val t = source.currentPts
         if (t != stitchPts) {
             // Oynatırken birkaç karede bir, dururken her yeni karede ölç.
-            program.updateStitch(source, if (playing) 6 else 1, if (playing) 0.35f else 0.7f)
+            // Oynarken GPU'yu bekletmeyen eşzamansız okuma; dururken bu karenin sonucu hemen gerekir.
+            program.stitch.async = playing
+            program.updateStitch(source, if (playing) 10 else 1, if (playing) 0.4f else 0.7f)
             stitchPts = t
         }
         program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))

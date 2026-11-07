@@ -123,7 +123,13 @@ void main() {
     private val program: Int
     private val vbo: Int
     private val loc = HashMap<String, Int>()
-    private val pixels = ByteBuffer.allocateDirect(bins * height * 4).order(ByteOrder.nativeOrder())
+    private var pixels: ByteBuffer = ByteBuffer.allocateDirect(bins * height * 4).order(ByteOrder.nativeOrder())
+    /** İki PBO ile eşzamansız okuma: GPU'yu bekletmeden bir önceki ölçüm işlenir. */
+    private val pbo = IntArray(2)
+    private var pboIndex = 0
+    private var pboPending = false
+    /** true: okuma bir ölçüm gecikmeli ama GPU beklemez (önizleme). */
+    var async = true
     private val upload = ByteBuffer.allocateDirect(bins * bands * 4).order(ByteOrder.nativeOrder())
 
     /** Zamanla yumuşatılmış sonuçlar, [band * bins + bin] */
@@ -154,6 +160,13 @@ void main() {
         GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0, GLES30.GL_TEXTURE_2D, fboTex, 0)
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
 
+        GLES30.glGenBuffers(2, pbo, 0)
+        for (b in pbo) {
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, b)
+            GLES30.glBufferData(GLES30.GL_PIXEL_PACK_BUFFER, bins * height * 4, null, GLES30.GL_STREAM_READ)
+        }
+        GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+
         GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, seamTexture)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
@@ -172,7 +185,7 @@ void main() {
     }
 
     /** Ani sahne değişiminde (arama) bir sonraki tahmin yumuşatılmadan uygulanır. */
-    fun reset() { initialized = false }
+    fun reset() { initialized = false; pboPending = false }
 
     /**
      * Geçerli karelerden dikişi tahmin et ve dokuyu güncelle.
@@ -203,13 +216,36 @@ void main() {
         GLES30.glEnableVertexAttribArray(0)
         GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 8, 0)
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
-        pixels.rewind()
-        GLES30.glReadPixels(0, 0, bins, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, pixels)
+        var ready = false
+        if (async) {
+            // Bu ölçümü PBO'ya yaz; varsa bir öncekini oku (o çoktan bitmiştir).
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, pbo[pboIndex])
+            GLES30.glReadPixels(0, 0, bins, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, 0)
+            val prev = pbo[1 - pboIndex]
+            if (pboPending) {
+                GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, prev)
+                val mapped = GLES30.glMapBufferRange(GLES30.GL_PIXEL_PACK_BUFFER, 0, bins * height * 4, GLES30.GL_MAP_READ_BIT) as? ByteBuffer
+                if (mapped != null) {
+                    pixels.rewind(); mapped.order(ByteOrder.nativeOrder()); pixels.put(mapped); pixels.rewind()
+                    ready = true
+                }
+                GLES30.glUnmapBuffer(GLES30.GL_PIXEL_PACK_BUFFER)
+            }
+            GLES30.glBindBuffer(GLES30.GL_PIXEL_PACK_BUFFER, 0)
+            pboPending = true
+            pboIndex = 1 - pboIndex
+        } else {
+            pixels.rewind()
+            GLES30.glReadPixels(0, 0, bins, height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, pixels)
+            ready = true
+        }
         GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, prevFbo[0])
         GLES30.glViewport(prevVp[0], prevVp[1], prevVp[2], prevVp[3])
 
-        solve(smoothing)
-        writeTexture()
+        if (ready) {
+            solve(smoothing)
+            writeTexture()
+        }
     }
 
     private fun px(x: Int, y: Int, c: Int) = (pixels.get((y * bins + x) * 4 + c).toInt() and 0xff)
@@ -270,10 +306,26 @@ void main() {
             // Güven azsa önceki değere (ilk karede uzak = 0'a) yakın kal
             sm[cell] = if (ws > 0.15f) vs / ws else prev * 0.9f
         }
+        // Renk: lensler arası oran sahneye göre çok oynak ölçülür (hizasız içerik, gölge).
+        // Güvenilir hücrelerin ortancası etrafında ±%8 ile sınırla ve dikiş boyunca geniş yumuşat.
+        val valid = (0 until cells).filter { conf[it] > 0.2f }.map { g[it] }.sorted()
+        val gMed = if (valid.size >= 4) valid[valid.size / 2] else 1f
+        val gc = FloatArray(cells) { g[it].coerceIn(gMed * 0.92f, gMed * 1.08f) }
+        val gs = FloatArray(cells)
+        val greach = maxOf(4, bins / 8)
+        for (b in 0 until bands) for (k in 0 until bins) {
+            var ws = 0f; var vs = 0f
+            for (o in -greach..greach) {
+                val q = b * bins + (k + o + bins) % bins
+                val w = 0.2f + conf[q]
+                ws += w; vs += w * gc[q]
+            }
+            gs[b * bins + k] = vs / ws
+        }
         val a = if (initialized) smoothing else 1f
         for (i in 0 until cells) {
             delta[i] += a * (sm[i] - delta[i])
-            gain[i] += a * (g[i] - gain[i])
+            gain[i] += a * 0.5f * (gs[i] - gain[i])
         }
         initialized = true
     }
@@ -297,5 +349,6 @@ void main() {
         GLES30.glDeleteFramebuffers(1, intArrayOf(fbo), 0)
         GLES30.glDeleteProgram(program)
         GLES30.glDeleteBuffers(1, intArrayOf(vbo), 0)
+        GLES30.glDeleteBuffers(2, pbo, 0)
     }
 }

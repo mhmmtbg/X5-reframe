@@ -104,6 +104,15 @@ class StitchTest {
             c.drawBitmap(b, src, android.graphics.Rect(i * sw, 0, (i + 1) * sw, b.height), null)
         }
         f.outputStream().use { res.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        // Uygulama test sonrası kaldırılınca kendi klasörü silinir; İndirilenler'e de kopyala.
+        runCatching {
+            val v = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, f.name)
+                put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/x5test")
+            }
+            val uri = ctx.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, v)!!
+            ctx.contentResolver.openOutputStream(uri)!!.use { res.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+        }
         res.recycle()
     }
 }

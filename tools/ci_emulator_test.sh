@@ -10,5 +10,5 @@ echo "exit=$?" >> out/test.log
 adb logcat -d -s ExportTest:* PlaybackTest:* StitchTest:* AndroidRuntime:E > out/logcat.txt || true
 latest=$(adb shell ls -t /sdcard/Movies/X5Reframe/ 2>/dev/null | head -1 | tr -d '\r')
 [ -n "$latest" ] && adb pull "/sdcard/Movies/X5Reframe/$latest" out/export.mp4 || true
-adb pull /sdcard/Android/data/com.mhmmtbg.x5reframe/files/ out/files || true
+adb pull /sdcard/Download/x5test out/files || true
 find out/files -name "*.mp4" -delete 2>/dev/null || true

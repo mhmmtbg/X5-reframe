@@ -233,7 +233,7 @@ class AutoEditor(
                     if (lostSince < 0) lostSince = t
                     if (t - lostSince > 1_500_000) break // konu kayboldu
                 }
-                if (n % 3 == 0) keys += Keyframe(t, view.copy(fov = startView.fov, projection = startView.projection))
+                if (n % 3 == 0) keys += Keyframe(t, view.copy(fov = startView.fov, projection = startView.projection), com.mhmmtbg.x5reframe.model.Curve.LINEAR)
                 progress(((t - fromUs).toFloat() / (toUs - fromUs).coerceAtLeast(1)).coerceIn(0f, 1f))
                 t += step; n++
             }
