@@ -266,12 +266,12 @@ class CameraActivity : AppCompatActivity() {
                 "2. Aşağıdan \"Bağlan\"a dokun; açılan pencerede kameranın ağını (adı \"X5 …\" ile başlar) seç.",
                 "3. Bağlanınca çekimler listelenir. Seç ve \"Telefona aktar\": video ve hızlı önizleme dosyası albüm klasörüne iner.",
             ).forEach { Text(it, color = Palette.Muted, style = MaterialTheme.typography.bodyMedium) }
-            Text("Resmi uygulama kameraya bağlıysa önce onu kapat; kamera aynı anda tek bağlantı kabul eder.",
+            Text("Resmi uygulama kameraya bağlıysa önce onu kapat; kamera aynı anda tek bağlantı kabul eder. Parola, kamerada Ayarlar > Wi-Fi bölümünde yazar.",
                 color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(ssid, { ssid = it; prefs.edit().putString("cam_ssid", it).apply() }, Modifier.fillMaxWidth(),
                 label = { Text("Ağ adı başlangıcı") }, singleLine = true, colors = colors)
             OutlinedTextField(pass, { pass = it; prefs.edit().putString("cam_pass", it).apply() }, Modifier.fillMaxWidth(),
-                label = { Text("Wi-Fi parolası (kamerada Ayarlar > Wi-Fi'de yazar)") }, singleLine = true, colors = colors)
+                X, singleLine = true, colors = colors)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (connecting) "Bağlanıyor…" else "Bağlan", color = Palette.OnAccent, style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Palette.Accent)
