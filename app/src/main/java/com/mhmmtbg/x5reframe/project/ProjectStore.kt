@@ -83,7 +83,7 @@ class ProjectStore(context: Context) {
 
     @Synchronized
     /** Kablosuz önizlemede hiçbir şey diske yazılmaz (projeler listesine düşmez). */
-    @Volatile var readOnly = false
+    var readOnly = false
 
     fun save(p: Project) {
         if (readOnly) return
