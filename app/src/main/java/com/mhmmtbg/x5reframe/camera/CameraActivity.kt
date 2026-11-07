@@ -271,7 +271,7 @@ class CameraActivity : AppCompatActivity() {
             OutlinedTextField(ssid, { ssid = it; prefs.edit().putString("cam_ssid", it).apply() }, Modifier.fillMaxWidth(),
                 label = { Text("Ağ adı başlangıcı") }, singleLine = true, colors = colors)
             OutlinedTextField(pass, { pass = it; prefs.edit().putString("cam_pass", it).apply() }, Modifier.fillMaxWidth(),
-                X, singleLine = true, colors = colors)
+                label = { Text("Wi-Fi parolası") }, singleLine = true, colors = colors)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(if (connecting) "Bağlanıyor…" else "Bağlan", color = Palette.OnAccent, style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Palette.Accent)
