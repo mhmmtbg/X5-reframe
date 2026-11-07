@@ -157,7 +157,7 @@ fun EditorScreen(
     var showExportInit = startTool == "EXPORT"
     LaunchedEffect(tool) {
         c.layerTool = tool == Tool.LAYER
-        val canvas = (tool == Tool.FRAME || tool == Tool.SMART) && !c.clip.is360 && s.layout.count <= 1
+        val canvas = (tool == Tool.FRAME || tool == Tool.SMART) && !c.clip.is360 && c.state.layout.count <= 1
         if (canvas != c.canvasMode) { c.canvasMode = canvas; actions.redraw() }
     }
     LaunchedEffect(c.openToolRequest) {
