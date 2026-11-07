@@ -67,6 +67,8 @@ class ViewerActions(
     val record: () -> Unit,
     val highlights: () -> Unit,
     val autoEdit: () -> Unit,
+    /** İleri (false) ya da selfie (true) yönüne çevir; çekimi yapan kişi görüntüden bulunur. */
+    val orient: (selfie: Boolean) -> Unit,
     val isFavorite: () -> Boolean,
     val toggleFavorite: () -> Unit,
     /** Kameradaki dosyayı sil (izin yoksa null). */
@@ -100,6 +102,7 @@ fun ViewerScreen(
     var confirmDelete by remember { mutableStateOf(false) }
     val fav = a.isFavorite()
 
+    com.mhmmtbg.x5reframe.ui.theme.BlackSystemBars()
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AndroidView(factory = surfaceFactory, modifier = Modifier.fillMaxSize())
 
@@ -203,22 +206,13 @@ fun ViewerScreen(
 }
 
 private fun applyMode(c: EditorController, a: ViewerActions, m: ViewMode) {
+    // Insta360 gibi: her modda ufuk düz ve görüntü kameranın gidişini yumuşakça izler (FlowState).
     val hasImu = c.stabilizer != null
+    if (hasImu && c.state.stabMode != StabMode.HORIZON) c.commit(c.state.copy(stabMode = StabMode.HORIZON))
     when (m) {
-        ViewMode.FREE -> {
-            if (hasImu) c.commit(c.state.copy(stabMode = StabMode.LOCK))
-            c.say("Serbest 360°: sürükleyerek bak")
-        }
-        ViewMode.FORWARD -> {
-            if (hasImu) c.commit(c.state.copy(stabMode = StabMode.SMOOTH))
-            c.changeView { it.copy(yaw = 0.0, pitch = 0.0, roll = 0.0) }
-            c.say("İleri: kameranın gittiği yön")
-        }
-        ViewMode.SELFIE -> {
-            if (hasImu) c.commit(c.state.copy(stabMode = StabMode.SMOOTH))
-            c.changeView { it.copy(yaw = 180.0, pitch = 0.0, roll = 0.0) }
-            c.say("Selfie: kameraya bakan taraf")
-        }
+        ViewMode.FREE -> c.say("Serbest 360°: sürükleyerek bak")
+        ViewMode.FORWARD -> a.orient(false)
+        ViewMode.SELFIE -> a.orient(true)
         ViewMode.SMART -> a.editor.autoFrame()
     }
 }

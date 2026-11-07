@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 360 küre (halkalı gezegen) + kadraj köşeleri: düz, efektsiz. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group android:rotation="-18" android:pivotX="54" android:pivotY="54">
+        <path android:pathData="M26.5,54 a27.5,9 0 0 1 55.0,0" android:strokeColor="#FFFFFF" android:strokeWidth="3.4" android:strokeLineCap="round" />
+    </group>
+    <path android:pathData="M54,39.5 a14.5,14.5 0 1 1 0,29 a14.5,14.5 0 1 1 0,-29 z" android:fillColor="#FFFFFF" />
+    <group android:rotation="-18" android:pivotX="54" android:pivotY="54">
+        <path android:pathData="M81.5,54 a27.5,9 0 0 1 -55.0,0" android:strokeColor="#FFFFFF" android:strokeWidth="3.4" android:strokeLineCap="round" />
+    </group>
+    <path
+        android:pathData="M23,44 v-3 a5,5 0 0 1 5,-5 h8 M72,36 h8 a5,5 0 0 1 5,5 v3 M85,64 v3 a5,5 0 0 1 -5,5 h-8 M36,72 h-8 a5,5 0 0 1 -5,-5 v-3"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
+</vector>

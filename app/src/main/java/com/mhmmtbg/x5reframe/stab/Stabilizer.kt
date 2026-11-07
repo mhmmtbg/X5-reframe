@@ -9,8 +9,8 @@ import kotlin.math.sqrt
 
 enum class StabMode(val label: String, val hint: String) {
     OFF("Kapalı", "Görüntü kamerayla birlikte hareket eder."),
-    SMOOTH("Akıcı", "Sarsıntılar yumuşatılır, kamera hareketi korunur (FlowState benzeri)."),
-    HORIZON("Ufuk kilidi", "Sarsıntı yumuşatılır ve ufuk hep düz tutulur."),
+    SMOOTH("Akıcı", "Sarsıntılar yumuşatılır; kameranın eğimi ve dönüşü korunur."),
+    HORIZON("FlowState", "Varsayılan: sarsıntı giderilir, ufuk düz tutulur, görüntü kameranın gidişini yumuşakça izler."),
     LOCK("Yön kilidi", "Ufuk düz ve bakış yönü sabit: kamera dönse de görüntü aynı yöne bakar."),
 }
 
@@ -164,8 +164,12 @@ class Stabilizer(imu: Imu, rigFromImu: DoubleArray) {
         fun rigFromImuFor(@Suppress("UNUSED_PARAMETER") camera: String): DoubleArray =
             doubleArrayOf(0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0)
 
-        /** IMU zamanı = video zamanı + bu kayma (sn); aynı kalibrasyondan. */
-        const val IMU_TIME_OFFSET = 0.04
+        /**
+         * IMU zamanı = video zamanı + bu kayma (sn).
+         * tools/stab_eval.py ile ardışık her kare çiftinde (gerçek kare zamanlarıyla, 1 ms adımla) ölçüldü:
+         * eski 40 ms değerinde kare arası hata p90 0,92°, −5 ms'de 0,68° (titreme ~%25 az).
+         */
+        const val IMU_TIME_OFFSET = -0.005
 
         fun mul3(m: DoubleArray, v: DoubleArray) = doubleArrayOf(
             m[0] * v[0] + m[1] * v[1] + m[2] * v[2],

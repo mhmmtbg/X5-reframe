@@ -1,36 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 360 küre + üzerine oturan kadraj çerçevesi. Düz, efektsiz. -->
+<!-- 360 küre (halkalı gezegen) + kadraj köşeleri: düz, efektsiz. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <group android:pivotX="54" android:pivotY="54" android:scaleX="1.25" android:scaleY="1.25">
-    <!-- Küre dış çemberi -->
-    <path
-        android:pathData="M54,30a24,24 0,1 1,0 48a24,24 0,1 1,0 -48z"
-        android:strokeWidth="3"
-        android:strokeColor="#E8ECF1"
-        android:fillColor="#00000000" />
-    <!-- Ekvator -->
-    <path
-        android:pathData="M30,54a24,8 0,1 0,48 0a24,8 0,1 0,-48 0z"
-        android:strokeWidth="2.2"
-        android:strokeColor="#8A96A6"
-        android:fillColor="#00000000" />
-    <!-- Meridyen -->
-    <path
-        android:pathData="M54,30a9,24 0,1 0,0 48a9,24 0,1 0,0 -48z"
-        android:strokeWidth="2.2"
-        android:strokeColor="#8A96A6"
-        android:fillColor="#00000000" />
-    <!-- Kadraj köşeleri -->
-    <path
-        android:pathData="M40,47v-6h8 M60,41h8v6 M68,61v6h-8 M48,67h-8v-6"
-        android:strokeWidth="4"
-        android:strokeLineCap="round"
-        android:strokeLineJoin="round"
-        android:strokeColor="#FFC94D"
-        android:fillColor="#00000000" />
+    <group android:rotation="-18" android:pivotX="54" android:pivotY="54">
+        <path android:pathData="M26.5,54 a27.5,9 0 0 1 55.0,0" android:strokeColor="#FFC94D" android:strokeWidth="3.4" android:strokeLineCap="round" />
     </group>
+    <path android:pathData="M54,39.5 a14.5,14.5 0 1 1 0,29 a14.5,14.5 0 1 1 0,-29 z" android:fillColor="#FFC94D" />
+    <group android:rotation="-18" android:pivotX="54" android:pivotY="54">
+        <path android:pathData="M81.5,54 a27.5,9 0 0 1 -55.0,0" android:strokeColor="#000000" android:strokeWidth="8" />
+        <path android:pathData="M81.5,54 a27.5,9 0 0 1 -55.0,0" android:strokeColor="#FFC94D" android:strokeWidth="3.4" android:strokeLineCap="round" />
+    </group>
+    <path
+        android:pathData="M23,44 v-3 a5,5 0 0 1 5,-5 h8 M72,36 h8 a5,5 0 0 1 5,5 v3 M85,64 v3 a5,5 0 0 1 -5,5 h-8 M36,72 h-8 a5,5 0 0 1 -5,-5 v-3"
+        android:strokeColor="#FFFFFF" android:strokeWidth="4.6" android:strokeLineCap="round" android:strokeLineJoin="round" />
 </vector>

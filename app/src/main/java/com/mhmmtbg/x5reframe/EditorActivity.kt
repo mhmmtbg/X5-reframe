@@ -167,6 +167,39 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
      * Oto Düzenle: projedeki her çekimi çözümle, kişileri takip eden kadraj ve en iyi anları seç,
      * hepsini geçişlerle tek kurguda birleştir (toplam ~[targetSec] sn).
      */
+    /** Oto düzenleme ve akıllı kadrajda kullanılan sabitleme: ufuk düz, yön kameranın gidişini izler. */
+    private fun autoStab(clip: ClipInfo, inUs: Long): ((Long) -> DoubleArray?)? {
+        val imu = clip.imu ?: return null
+        val st = runCatching { com.mhmmtbg.x5reframe.stab.Stabilizer(imu, com.mhmmtbg.x5reframe.stab.Stabilizer.rigFromImuFor(clip.cameraType)) }.getOrNull() ?: return null
+        return { t -> st.base(t / 1e6, com.mhmmtbg.x5reframe.stab.StabMode.HORIZON, AUTO_STAB_STRENGTH, inUs / 1e6) }
+    }
+
+    /** Müzik varsa vuruş aralığı (sn). */
+    private fun musicBeat(): Double? {
+        val uri = projectAudio.musicUri ?: return null
+        return runCatching {
+            val r = com.mhmmtbg.x5reframe.media.PcmReader(this, uri)
+            val hz = 100.0
+            val per = (com.mhmmtbg.x5reframe.media.MIX_RATE / hz).toInt()
+            val buf = ShortArray(per * 2)
+            val env = FloatArray(6000)
+            var n = 0
+            while (n < env.size && !r.eos) {
+                r.read(per, buf, 1f, false)
+                var e = 0.0
+                for (k in 0 until per * 2) { val v = buf[k] / 32768.0; e += v * v }
+                env[n++] = e.toFloat()
+            }
+            r.close()
+            com.mhmmtbg.x5reframe.auto.AutoDirector.beatPeriod(env.copyOf(n), hz)
+        }.getOrNull()
+    }
+
+    /**
+     * Oto Düzenle: projedeki her çekimi sabitlenmiş görünümde çözümle; çekimi yapan kişiyi, diğer kişileri,
+     * sesi ve hareketi değerlendirip kısa çekimlerden (ileri, selfie, kişi, panorama; ilkinde gezegen açılışı)
+     * bir kurgu oluştur. Müzik eklenmişse kesmeler vuruşlara oturur.
+     */
     private fun autoEditProject(targetSec: Int = 30) {
         val c = controller ?: return
         if (autoEditor != null) return
@@ -178,40 +211,55 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         Thread({
             val out = ArrayList<com.mhmmtbg.x5reframe.project.Segment>()
-            val perClipUs = (targetSec * 1_000_000L / segs.size).coerceAtLeast(3_000_000L)
+            val perClipUs = (targetSec * 1_000_000L / segs.size).coerceAtLeast(4_000_000L)
+            val beat = musicBeat()
+            // Çekim süresi: ~3 sn; müzik varsa 4'ün katı vuruş
+            val shotUs = if (beat != null) {
+                val beats = (Math.round(3.0 / beat / 4.0) * 4).coerceAtLeast(4)
+                (beats * beat * 1e6).toLong()
+            } else 3_000_000L
             var cancelled = false
+            var lastType: com.mhmmtbg.x5reframe.auto.AutoDirector.ShotType? = null
             runCatching {
                 segs.forEachIndexed { i, seg ->
                     if (cancelled) { out += seg; return@forEachIndexed }
                     val clip = clipCache[seg.clipUri.toString()] ?: ClipInfo.load(this, seg.clipUri, seg.lrvUri).also { clipCache[seg.clipUri.toString()] = it }
-                    val ed = com.mhmmtbg.x5reframe.auto.AutoEditor(applicationContext, clip) { null }
+                    val stab = autoStab(clip, seg.edit.inUs)
+                    val ed = com.mhmmtbg.x5reframe.auto.AutoEditor(applicationContext, clip, stab ?: { null })
                     autoEditor = ed
                     val samples = ed.scan(seg.edit.inUs, seg.edit.outUs) { p ->
                         runOnUiThread { c.autoTask = "Çekim ${i + 1}/${segs.size} çözümleniyor…" to ((i + p) / segs.size) }
                     }
                     if (ed.cancelled) { cancelled = true; out += seg; return@forEachIndexed }
-                    val hasPeople = samples.any { it.faces.isNotEmpty() }
-                    val edit0 = if (hasPeople) seg.edit.copy(keyframes = ed.smartFraming(samples, 80.0)) else seg.edit
-                    val windowUs = if (perClipUs < 8_000_000L) 2_500_000L else 3_500_000L
-                    val ranges = ed.highlights(samples, windowUs, perClipUs)
-                        .ifEmpty { listOf(seg.edit.inUs..minOf(seg.edit.outUs, seg.edit.inUs + perClipUs)) }
-                    ranges.forEach { r ->
-                        val e = edit0.copy(inUs = r.first.coerceAtLeast(seg.edit.inUs), outUs = r.last.coerceAtMost(seg.edit.outUs))
+                    val shots = com.mhmmtbg.x5reframe.auto.AutoDirector.compile(samples, shotUs, perClipUs, first = i == 0, lastType = lastType)
+                    val base = seg.edit.copy(
+                        stabMode = if (stab != null) com.mhmmtbg.x5reframe.stab.StabMode.HORIZON else seg.edit.stabMode,
+                        stabStrength = if (stab != null) AUTO_STAB_STRENGTH else seg.edit.stabStrength,
+                        layout = com.mhmmtbg.x5reframe.model.Layout.SINGLE, extraPanes = emptyList(), tracks = emptyList(),
+                    )
+                    if (shots.isEmpty()) { out += seg; return@forEachIndexed }
+                    shots.forEach { sh ->
+                        val e = base.copy(
+                            inUs = sh.range.first.coerceAtLeast(seg.edit.inUs), outUs = sh.range.last.coerceAtMost(seg.edit.outUs),
+                            keyframes = sh.keys,
+                        )
                         out += store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, e)
-                            .copy(transitionOut = com.mhmmtbg.x5reframe.project.Transition.FADE)
+                            .copy(transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT)
                     }
+                    lastType = shots.last().type
                 }
             }.onFailure { e -> runOnUiThread { c.say("Oto düzenleme hatası: ${e.message}", false) } }
             runOnUiThread {
                 autoEditor = null
                 c.autoTask = null
                 window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                if (out.size >= segs.size && out != segs) {
-                    val list = out.mapIndexed { k, sg -> if (k == out.size - 1) sg.copy(transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT) else sg }
+                if (out.isNotEmpty() && out != segs && !cancelled) {
+                    // Son çekim siyaha kararır
+                    val list = out.mapIndexed { k, sg -> if (k == out.size - 1) sg.copy(transitionOut = com.mhmmtbg.x5reframe.project.Transition.FADE) else sg }
                     val totalSec = list.sumOf { (it.edit.outUs - it.edit.inUs) / 1e6 }
                     viewer = false
                     updateSegments(list, 0, reopen = true)
-                    controller?.say("Oto düzenleme: ${list.size} an · ${"%.0f".format(totalSec)} sn")
+                    controller?.say("Oto düzenleme: ${list.size} çekim · ${"%.0f".format(totalSec)} sn" + if (beat != null) " · müziğe göre" else "")
                 } else if (cancelled) c.say("Durduruldu", false)
             }
         }, "auto-edit-all").start()
@@ -557,6 +605,40 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         }
     }
 
+    /** Klip başına bulunan "çekimi yapan kişi" yönü (sabitlenmiş çerçevede). */
+    private val holderYaw = HashMap<String, Double?>()
+
+    private fun orient(c: EditorController, selfie: Boolean) {
+        fun apply(h: Double?) {
+            val yaw = when {
+                h == null -> if (selfie) 180.0 else 0.0
+                selfie -> h
+                else -> com.mhmmtbg.x5reframe.model.ViewParams.wrap(h + 180.0)
+            }
+            c.changeView { it.copy(yaw = yaw, pitch = if (selfie) -8.0 else -4.0, roll = 0.0, fov = if (selfie) 110.0 else 100.0,
+                projection = com.mhmmtbg.x5reframe.model.Projection.SUPERWIDE) }
+            c.say(when {
+                selfie && h != null -> "Selfie: çekimi yapan kişi"
+                selfie -> "Selfie: kişi bulunamadı, arka lens yönü"
+                h != null -> "İleri: gidiş yönü"
+                else -> "İleri: kameranın ön yönü"
+            })
+        }
+        val key = c.clip.uri.toString()
+        if (holderYaw.containsKey(key)) { apply(holderYaw[key]); return }
+        runAuto(c) { ed ->
+            val st = c.state
+            val samples = ed.scan(st.inUs, st.outUs, stepUs = 1_000_000L) { p -> runOnUiThread { c.autoTask = "Çekimi yapan kişi aranıyor…" to p } }
+            val track = com.mhmmtbg.x5reframe.auto.AutoDirector.holderTrack(samples)
+            val h = track?.let { t ->
+                // Açısal ortalama
+                val sx = t.sumOf { kotlin.math.sin(Math.toRadians(it)) }; val cx = t.sumOf { kotlin.math.cos(Math.toRadians(it)) }
+                Math.toDegrees(kotlin.math.atan2(sx, cx))
+            }
+            runOnUiThread { if (!ed.cancelled) { holderYaw[key] = h; apply(h) } }
+        }
+    }
+
     private fun showViewer() { viewer = true; editorStartTool = null }
 
     private fun viewerActions(c: EditorController) = com.mhmmtbg.x5reframe.ui.ViewerActions(
@@ -566,6 +648,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         record = { toggleRecording(c) },
         highlights = { actions(c).autoHighlights(15) },
         autoEdit = { autoEditProject(30) },
+        orient = { selfie -> orient(c, selfie) },
         isFavorite = { favorite },
         toggleFavorite = {
             val key = c.clip.uri.toString()
@@ -644,16 +727,22 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         },
         setMuted = { player?.setMuted(it); syncMusic(player?.playing == true) },
         pickImage = { imagePicker.launch("image/*") },
-        autoFrame = { runAuto(c) { ed ->
+        autoFrame = {
+            // Akıllı kadraj tek çekimdir: sabitlenmiş (ufuk düz, gidişi izleyen) görünümde kişileri / ileri yönü izler.
             val s0 = c.state
-            val samples = ed.scan(s0.inUs, s0.outUs) { p -> runOnUiThread { c.autoTask = "Yüzler aranıyor…" to p } }
-            val keys = ed.smartFraming(samples, c.currentView.fov.coerceIn(50.0, 100.0))
-            val faces = samples.count { it.faces.isNotEmpty() }
-            runOnUiThread {
-                if (faces == 0) c.say("Klipte yüz bulunamadı", false)
-                else { c.replaceKeyframes(s0.inUs, s0.outUs, keys); c.say("Akıllı kadraj: ${keys.size} anahtar kare") }
+            if (c.stabilizer != null && s0.stabMode != com.mhmmtbg.x5reframe.stab.StabMode.HORIZON)
+                c.commit(s0.copy(stabMode = com.mhmmtbg.x5reframe.stab.StabMode.HORIZON, stabStrength = AUTO_STAB_STRENGTH))
+            runAuto(c) { ed ->
+                val st = c.state
+                val samples = ed.scan(st.inUs, st.outUs) { p -> runOnUiThread { c.autoTask = "Sahne çözümleniyor…" to p } }
+                val keys = com.mhmmtbg.x5reframe.auto.AutoDirector.singleTake(samples, c.currentView.fov.coerceIn(70.0, 100.0))
+                val people = samples.count { it.faces.isNotEmpty() }
+                runOnUiThread {
+                    c.replaceKeyframes(st.inUs, st.outUs, keys)
+                    c.say(if (people == 0) "Akıllı kadraj: kişi yok, ileri yön izleniyor" else "Akıllı kadraj: ${keys.size} anahtar kare")
+                }
             }
-        } },
+        },
         autoTrack = { runAuto(c) { ed ->
             val from = c.positionUs; val to = c.state.outUs
             val start = c.currentView
@@ -942,5 +1031,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         const val EXTRA_MORE = "more"
         const val EXTRA_VIEWER = "viewer"
         const val EXTRA_AUTO = "auto"
+        /** Oto düzenlemede yön takibinin yumuşaklığı (FlowState'e yakın, ~0,6 sn). */
+        const val AUTO_STAB_STRENGTH = 0.6
     }
 }

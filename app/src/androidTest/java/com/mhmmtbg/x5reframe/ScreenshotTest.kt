@@ -25,26 +25,35 @@ class ScreenshotTest {
 
     @Test
     fun screens() {
-        ActivityScenario.launch(MainActivity::class.java).use {
-            Thread.sleep(2500)
-            shot("ui_album")
+        for (mode in listOf(com.mhmmtbg.x5reframe.ui.theme.ThemeMode.DARK, com.mhmmtbg.x5reframe.ui.theme.ThemeMode.LIGHT)) {
+            inst.runOnMainSync { com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(ctx, mode) }
+            val tag = mode.name.lowercase()
+            for ((tab, name) in listOf(0 to "album", 1 to "projects", 2 to "settings")) {
+                ctx.getSharedPreferences("prefs", android.content.Context.MODE_PRIVATE).edit().putInt("tab", tab).commit()
+                ActivityScenario.launch(MainActivity::class.java).use {
+                    Thread.sleep(2000)
+                    shot("ui_${tag}_$name")
+                }
+            }
+            val clip = File("/data/local/tmp/clip.insv")
+            val lrv = File("/data/local/tmp/clip.lrv")
+            if (!clip.exists()) continue
+            val base = Intent(ctx, EditorActivity::class.java).setData(Uri.fromFile(clip))
+                .putExtra(EditorActivity.EXTRA_LRV, if (lrv.exists()) Uri.fromFile(lrv).toString() else null)
+            if (mode == com.mhmmtbg.x5reframe.ui.theme.ThemeMode.DARK) {
+                ActivityScenario.launch<EditorActivity>(Intent(base).putExtra(EditorActivity.EXTRA_VIEWER, true)).use {
+                    Thread.sleep(6000)
+                    shot("ui_viewer")
+                }
+            }
+            ActivityScenario.launch<EditorActivity>(Intent(base)).use {
+                Thread.sleep(6000)
+                val b = shot("ui_${tag}_editor")
+                assertTrue("düzenleyici boş görünüyor", variance(b) > 50.0)
+            }
         }
-        val clip = File("/data/local/tmp/clip.insv")
-        val lrv = File("/data/local/tmp/clip.lrv")
-        assumeTrue("örnek klip yok", clip.exists())
-        val base = Intent(ctx, EditorActivity::class.java).setData(Uri.fromFile(clip))
-            .putExtra(EditorActivity.EXTRA_LRV, if (lrv.exists()) Uri.fromFile(lrv).toString() else null)
-        ActivityScenario.launch<EditorActivity>(Intent(base).putExtra(EditorActivity.EXTRA_VIEWER, true)).use {
-            Thread.sleep(6000)
-            shot("ui_viewer")
-            Thread.sleep(3500) // kenar etiketleri gizlenir
-            shot("ui_viewer_icons")
-        }
-        ActivityScenario.launch<EditorActivity>(Intent(base)).use {
-            Thread.sleep(6000)
-            val b = shot("ui_editor")
-            assertTrue("düzenleyici boş görünüyor", variance(b) > 50.0)
-        }
+        inst.runOnMainSync { com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(ctx, com.mhmmtbg.x5reframe.ui.theme.ThemeMode.SYSTEM) }
+        assumeTrue(true)
     }
 
     private fun shot(name: String): Bitmap {

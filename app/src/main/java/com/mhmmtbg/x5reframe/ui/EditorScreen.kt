@@ -122,6 +122,7 @@ fun EditorScreen(
     var showExport by remember { mutableStateOf(false) }
     val s = c.state
 
+    com.mhmmtbg.x5reframe.ui.theme.ThemedSystemBars()
     Column(Modifier.fillMaxSize().background(Palette.Background)) {
         TopBar(c, actions, onExport = { showExport = true })
         val ex = c.exportUi
@@ -170,6 +171,7 @@ fun EditorScreen(
                 t.outUs = s.outUs
                 t.keyframes = c.activeKeyframes.map { it.timeUs }
                 t.trackRanges = s.tracks
+                t.setDark(Palette.dark)
                 if (!c.playing) t.positionUs = c.positionUs
             },
         )
@@ -229,10 +231,10 @@ private fun TopBar(c: EditorController, a: EditorActions, onExport: () -> Unit) 
             )
         }
         IconButton(onClick = c::undo, enabled = c.canUndo) {
-            Icon(Glyphs.Undo, "Geri al", tint = if (c.canUndo) Palette.Text else Palette.Outline)
+            Icon(Glyphs.Undo, "Geri al", tint = if (c.canUndo) Palette.Text else Palette.Disabled)
         }
         IconButton(onClick = c::redo, enabled = c.canRedo) {
-            Icon(Glyphs.Redo, "Yinele", tint = if (c.canRedo) Palette.Text else Palette.Outline)
+            Icon(Glyphs.Redo, "Yinele", tint = if (c.canRedo) Palette.Text else Palette.Disabled)
         }
         Button(
             onClick = onExport,
@@ -258,10 +260,10 @@ internal fun FeedbackPill(c: EditorController, modifier: Modifier) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (positive) {
-                Icon(Glyphs.Check, null, tint = Palette.Accent, modifier = Modifier.size(16.dp))
+                Icon(Glyphs.Check, null, tint = Color(0xFFFFC94D), modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
             }
-            Text(fb?.text ?: "", color = if (positive) Palette.Text else Palette.Error, style = MaterialTheme.typography.bodyMedium)
+            Text(fb?.text ?: "", color = if (positive) Color.White else Color(0xFFFF8A8A), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }
@@ -274,7 +276,7 @@ private fun ViewHud(c: EditorController, modifier: Modifier) {
         (c.statsText?.takeIf { c.showStats }?.let { "$it\n" } ?: "") +
             (if (editing) "● kaydedilmedi  " else "") + "yön ${v.yaw.toInt()}°  eğim ${v.pitch.toInt()}°  açı ${v.fov.toInt()}°",
         modifier = modifier.clickable { c.showStats = !c.showStats }.background(Color(0x99000000), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
-        color = if (editing) Palette.Keyframe else Palette.Text,
+        color = if (editing) Color(0xFF6EC6FF) else Color.White,
         style = MaterialTheme.typography.bodySmall,
     )
 }
@@ -291,7 +293,7 @@ private fun Transport(c: EditorController, a: EditorActions) {
             modifier = Modifier.weight(1f), maxLines = 1, softWrap = false,
         )
         IconButton(onClick = { c.previousKeyframeTime()?.let(a.seek) }, enabled = c.previousKeyframeTime() != null) {
-            Icon(Glyphs.PrevKey, "Önceki anahtar kare", tint = if (c.previousKeyframeTime() != null) Palette.Text else Palette.Outline)
+            Icon(Glyphs.PrevKey, "Önceki anahtar kare", tint = if (c.previousKeyframeTime() != null) Palette.Text else Palette.Disabled)
         }
         IconButton(onClick = { a.step(false) }) { Icon(Glyphs.FrameBack, "Bir kare geri", tint = Palette.Text) }
         FilledIconButton(
@@ -301,7 +303,7 @@ private fun Transport(c: EditorController, a: EditorActions) {
         ) { Icon(if (c.playing) Glyphs.Pause else Glyphs.Play, if (c.playing) "Duraklat" else "Oynat") }
         IconButton(onClick = { a.step(true) }) { Icon(Glyphs.FrameFwd, "Bir kare ileri", tint = Palette.Text) }
         IconButton(onClick = { c.nextKeyframeTime()?.let(a.seek) }, enabled = c.nextKeyframeTime() != null) {
-            Icon(Glyphs.NextKey, "Sonraki anahtar kare", tint = if (c.nextKeyframeTime() != null) Palette.Text else Palette.Outline)
+            Icon(Glyphs.NextKey, "Sonraki anahtar kare", tint = if (c.nextKeyframeTime() != null) Palette.Text else Palette.Disabled)
         }
         Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
             IconButton(onClick = { c.previewMuted = !c.previewMuted; a.setMuted(c.previewMuted) }) {
@@ -517,13 +519,15 @@ private fun ActionButton(text: String, modifier: Modifier = Modifier, primary: B
         Button(
             onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 44.dp), elevation = null,
             shape = RoundedCornerShape(8.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Palette.SurfaceHigh, contentColor = Palette.Accent),
+            colors = ButtonDefaults.buttonColors(containerColor = Palette.SurfaceHigh, contentColor = Palette.Accent,
+                disabledContainerColor = Palette.SurfaceHigh, disabledContentColor = Palette.Disabled),
         ) { Text(text, maxLines = 1) }
     } else {
         OutlinedButton(
-            onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 44.dp).alpha(if (enabled) 1f else 0.5f),
+            onClick = onClick, enabled = enabled, modifier = modifier.heightIn(min = 44.dp),
             shape = RoundedCornerShape(8.dp),
-            colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.Text),
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (enabled) Palette.Outline else Palette.SurfaceHigh),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = Palette.Text, disabledContentColor = Palette.Disabled),
         ) { Text(text, maxLines = 1) }
     }
 }

@@ -45,9 +45,10 @@ data class EditState(
     val quality: Quality = Quality.FHD,
     val hevc: Boolean = false,
     val includeAudio: Boolean = true,
-    val stabMode: com.mhmmtbg.x5reframe.stab.StabMode = com.mhmmtbg.x5reframe.stab.StabMode.OFF,
+    /** Varsayılan FlowState gibi: ufuk düz, görüntü kameranın gidişini izler (IMU yoksa etkisiz). */
+    val stabMode: com.mhmmtbg.x5reframe.stab.StabMode = com.mhmmtbg.x5reframe.stab.StabMode.HORIZON,
     /** 0..1 yumuşatma şiddeti */
-    val stabStrength: Double = 0.5,
+    val stabStrength: Double = 0.6,
     /** Dikiş mesafesi (m); 0 = uzak (sonsuz). */
     val stitchDistance: Double = 0.0,
     val layout: Layout = Layout.SINGLE,

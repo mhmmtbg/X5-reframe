@@ -203,6 +203,7 @@ class PhotoActivity : AppCompatActivity() {
 
     @Composable
     private fun Screen() {
+        com.mhmmtbg.x5reframe.ui.theme.BlackSystemBars()
         Box(Modifier.fillMaxSize().background(Color.Black)) {
             AndroidView(factory = ::createSurface, modifier = Modifier.fillMaxSize())
             Row(Modifier.fillMaxWidth().background(Color(0x66000000)).statusBarsPadding().height(52.dp).padding(horizontal = 4.dp),

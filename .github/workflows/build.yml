@@ -27,7 +27,7 @@ jobs:
         id: build
         run: |
           set -o pipefail
-          gradle :app:assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
+          gradle :app:testReleaseUnitTest :app:assembleRelease --no-daemon --stacktrace 2>&1 | tee build.log
 
       - name: APK'yı Actions'a yükle
         if: success()

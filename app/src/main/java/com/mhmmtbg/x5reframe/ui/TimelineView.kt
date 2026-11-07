@@ -74,6 +74,24 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
     private val rect = RectF()
     private val diamond = Path()
 
+    private var dark = true
+
+    /** Açık / koyu tema renkleri. */
+    fun setDark(d: Boolean) {
+        if (d == dark) return
+        dark = d
+        pTrack.color = if (d) 0xFF1B1D21.toInt() else 0xFFE1E5EA.toInt()
+        pDim.color = if (d) 0xB0000000.toInt() else 0xB0F5F6F8.toInt()
+        pHandle.color = if (d) 0xFFFFC94D.toInt() else 0xFFC77A00.toInt()
+        pKey.color = if (d) 0xFF6EC6FF.toInt() else 0xFF1565C0.toInt()
+        pKeyFlash.color = if (d) 0xFFFFFFFF.toInt() else 0xFF12151A.toInt()
+        pHead.color = if (d) 0xFFFFFFFF.toInt() else 0xFF12151A.toInt()
+        pTick.color = if (d) 0xFF5A6270.toInt() else 0xFFA0A8B3.toInt()
+        pText.color = if (d) 0xFFA3ABB7.toInt() else 0xFF59626E.toInt()
+        pTrackRange.color = if (d) 0xFF3DDC84.toInt() else 0xFF1E9E57.toInt()
+        invalidate()
+    }
+
     private var flashKeyUs = -1L
     private var flashUntil = 0L
 

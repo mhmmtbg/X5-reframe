@@ -222,6 +222,28 @@ class MainActivity : AppCompatActivity() {
         var lrv by remember { mutableStateOf(prefs.getBoolean(KEY_PREFER_LRV, true)) }
         val version = runCatching { packageManager.getPackageInfo(packageName, 0).versionName }.getOrNull() ?: "?"
         LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+            item { SectionTitle("Görünüm") }
+            item {
+                var theme by remember { mutableStateOf(com.mhmmtbg.x5reframe.ui.theme.ThemeMode.load(this@MainActivity)) }
+                Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp)) {
+                    Text("Tema", style = MaterialTheme.typography.bodyLarge)
+                    Spacer(Modifier.height(8.dp))
+                    Row(Modifier.fillMaxWidth().background(Palette.SurfaceHigh, RoundedCornerShape(10.dp)).padding(3.dp)) {
+                        com.mhmmtbg.x5reframe.ui.theme.ThemeMode.values().forEach { m ->
+                            val on = m == theme
+                            Box(
+                                Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (on) Palette.Accent else Palette.SurfaceHigh)
+                                    .clickable {
+                                        if (m != theme) { theme = m; com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(this@MainActivity, m) }
+                                    }.padding(vertical = 9.dp),
+                                contentAlignment = Alignment.Center,
+                            ) { Text(m.label, color = if (on) Palette.OnAccent else Palette.Text, style = MaterialTheme.typography.labelLarge) }
+                        }
+                    }
+                    Text("Koyu tema saf siyahtır (AMOLED ekranda pil dostu). Otomatik, telefonun ayarını izler.",
+                        color = Palette.Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
             item { SectionTitle("Medya") }
             item {
                 SettingRow("Kamera klasörü", folder?.let { DocumentFile.fromTreeUri(this@MainActivity, it)?.name } ?: "Seçilmedi") { folderPicker.launch(null) }
@@ -271,7 +293,7 @@ class MainActivity : AppCompatActivity() {
             }
             androidx.compose.material3.Switch(value, onChange, colors = androidx.compose.material3.SwitchDefaults.colors(
                 checkedThumbColor = Palette.OnAccent, checkedTrackColor = Palette.Accent,
-                uncheckedThumbColor = Palette.Muted, uncheckedTrackColor = Palette.SurfaceHigh, uncheckedBorderColor = Palette.Outline,
+                uncheckedThumbColor = Palette.Muted, uncheckedTrackColor = Palette.SurfaceHigh, uncheckedBorderColor = Palette.Muted,
             ))
         }
     }
