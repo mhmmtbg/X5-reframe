@@ -11,8 +11,8 @@ android {
         applicationId = "com.mhmmtbg.x5reframe"
         minSdk = 29
         targetSdk = 34
-        versionCode = 41
-        versionName = "3.5.0"
+        versionCode = 42
+        versionName = "3.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -62,6 +62,8 @@ dependencies {
     // Cihaz içi (modeli APK'ya gömülü, internetsiz) yüz ve nesne algılama
     implementation("com.google.mlkit:face-detection:16.1.7")
     implementation("com.google.mlkit:object-detection:17.0.2")
+    // Kişiyi arka plandan ayırma (selfie segmentasyonu, model APK'da)
+    implementation("com.google.mlkit:segmentation-selfie:16.0.0-beta6")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
 
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")

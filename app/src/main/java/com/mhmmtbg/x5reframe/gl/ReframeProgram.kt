@@ -77,6 +77,14 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         set(v) { look = look.copy(fit = v) }
     private val uCrop: Int
     private val uFlip: Int
+    private val uKey: Int
+    private val uKeyP: Int
+    private val uStab: Int
+    private val uSrcAspect: Int
+    private val uPerson: Int
+    private val uPersonP: Int
+    /** Kişi maskesi dokusu (0 = yok); [look].person açıkken kullanılır. */
+    var personMask = 0
     private val uFlat: Int
     private val uFlatHalf: Int
     private val uFillHalf: Int
@@ -120,6 +128,12 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         uHdr = GLES30.glGetUniformLocation(program, "uHdr")
         uCrop = GLES30.glGetUniformLocation(program, "uCrop")
         uFlip = GLES30.glGetUniformLocation(program, "uFlip")
+        uKey = GLES30.glGetUniformLocation(program, "uKey")
+        uKeyP = GLES30.glGetUniformLocation(program, "uKeyP")
+        uStab = GLES30.glGetUniformLocation(program, "uStab")
+        uSrcAspect = GLES30.glGetUniformLocation(program, "uSrcAspect")
+        uPerson = GLES30.glGetUniformLocation(program, "uPerson")
+        uPersonP = GLES30.glGetUniformLocation(program, "uPersonP")
 
         val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
@@ -176,7 +190,7 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
     fun drawPane(x: Int, y: Int, width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?) {
         GLES30.glViewport(x, y, width, height)
         GLES30.glUseProgram(program)
-        if (rig == null) { drawFlat(width, height, view, src); return }
+        if (rig == null) { drawFlat(width, height, view, src, base); return }
         GLES30.glUniform1i(uFlat, 0)
         for (i in 0..1) {
             val lens: Lens = rig.lenses[i]
@@ -230,8 +244,17 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
     }
 
     /** Düz klip: sığdır / doldur / bulanık arka plan + kaydırma, yakınlaştırma, döndürme. */
-    private fun drawFlat(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource) {
+    private fun drawFlat(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?) {
         GLES30.glUniform1i(uFlat, 1)
+        // Görüntüden sabitleme: (kayma x, kayma y, dönme, yakınlaştırma); yoksa kapalı
+        if (base != null && base.size == 4) GLES30.glUniform4f(uStab, base[0].toFloat(), base[1].toFloat(), base[2].toFloat(), base[3].toFloat())
+        else GLES30.glUniform4f(uStab, 0f, 0f, 0f, 0f)
+        GLES30.glUniform1f(uSrcAspect, flatAspect)
+        val person = look.person
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE4)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, if (person != null) personMask else 0)
+        GLES30.glUniform1i(uPerson, 4)
+        GLES30.glUniform2f(uPersonP, if (person != null && personMask != 0) 1f else 0f, person?.ordinal?.toFloat() ?: 0f)
         for (i in 0..1) {
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + i)
             GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, src.lensTexture(0))
@@ -247,6 +270,9 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
         val a = (flatAspect * cr.w / cr.h).coerceAtLeast(0.01f)
         GLES30.glUniform4f(uCrop, cr.l, cr.t, cr.w, cr.h)
         GLES30.glUniform2f(uFlip, if (look.flipH) 1f else 0f, if (look.flipV) 1f else 0f)
+        val k = look.chroma
+        GLES30.glUniform4f(uKey, ((k.color shr 16) and 255) / 255f, ((k.color shr 8) and 255) / 255f, (k.color and 255) / 255f, if (k.on) 1f else 0f)
+        GLES30.glUniform4f(uKeyP, k.similarity, k.smooth.coerceAtLeast(0.001f), k.spill, look.chromaBg.ordinal.toFloat())
         val fitHy = minOf(sy, sx / a)
         val fillHy = maxOf(sy, sx / a)
         val hy = if (fit == com.mhmmtbg.x5reframe.model.FrameFit.FILL) fillHy else fitHy
@@ -423,6 +449,12 @@ uniform float uFlatBlur;
 uniform int uHdr;       // 6 = PQ (HDR10), 7 = HLG; 0 = SDR
 uniform vec4 uCrop;     // kırpma: sol, üst, genişlik, yükseklik (kaynakta normalize)
 uniform vec2 uFlip;     // yatay / dikey aynalama
+uniform vec4 uStab;     // görüntüden sabitleme: kayma x, y, dönme, yakınlaştırma (0 = kapalı)
+uniform float uSrcAspect;
+uniform sampler2D uPerson; // kişi maskesi (ham görüntü koordinatında)
+uniform vec2 uPersonP;     // açık mı, arka plan (0 siyah, 1 beyaz, 2 bulanık)
+uniform vec4 uKey;      // renk anahtarı: rgb, açık mı
+uniform vec4 uKeyP;     // benzerlik, yumuşaklık, taşma bastırma, arka plan (0 siyah, 1 beyaz, 2 bulanık)
 
 vec3 rgb2hsv(vec3 c) {
     vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
@@ -516,11 +548,39 @@ vec3 hdrToSdr(vec3 e) {
     return pow(clamp(lin, 0.0, 1.0), vec3(1.0 / 2.2));
 }
 
-vec3 flatSample(vec2 uv) {
+// Çerçeve uv → ham görüntü uv (aynalama, kırpma, sabitleme)
+vec2 flatUv(vec2 uv) {
     uv = mix(uv, 1.0 - uv, uFlip);
     uv = uCrop.xy + uv * uCrop.zw;
+    if (uStab.w > 0.0) {
+        vec2 q = (uv - 0.5) / uStab.w;
+        q.x *= uSrcAspect;
+        float cs = cos(uStab.z), sn = sin(uStab.z);
+        q = vec2(cs * q.x - sn * q.y, sn * q.x + cs * q.y);
+        q.x /= uSrcAspect;
+        uv = q + 0.5 + uStab.xy;
+    }
+    return uv;
+}
+
+vec3 flatColor(vec2 uv) {
     vec3 c = texture(uTex0, texCoord(uTexMat0, uSub0, uv)).rgb;
     return uHdr != 0 ? hdrToSdr(c) : c;
+}
+
+vec3 flatSample(vec2 uv) { return flatColor(flatUv(uv)); }
+
+vec2 cbcr(vec3 c) { return vec2(-0.1687 * c.r - 0.3313 * c.g + 0.5 * c.b, 0.5 * c.r - 0.4187 * c.g - 0.0813 * c.b); }
+
+/** Renk anahtarı: görünürlük (0 = anahtar renk) ve taşması bastırılmış renk. */
+vec4 keyed(vec3 c) {
+    float d = distance(cbcr(c), cbcr(uKey.rgb));
+    float a = smoothstep(uKeyP.x * 0.3, uKeyP.x * 0.3 + uKeyP.y * 0.3, d);
+    // Taşma: anahtar kanalı diğer ikisinin ortalamasını aşmasın
+    vec3 k = uKey.rgb;
+    if (k.g >= k.r && k.g >= k.b) c.g = mix(c.g, min(c.g, (c.r + c.b) * 0.5 + 0.02), uKeyP.z * (1.0 - a * 0.5));
+    else if (k.b >= k.r) c.b = mix(c.b, min(c.b, (c.r + c.g) * 0.5 + 0.02), uKeyP.z * (1.0 - a * 0.5));
+    return vec4(c, a);
 }
 
 vec3 flatBlur(vec2 uv) {
@@ -546,6 +606,18 @@ void main() {
             if (uFx.z > 0.0) {
                 vec3 nb = flatSample(uv + ddx) + flatSample(uv - ddx) + flatSample(uv + ddy) + flatSample(uv - ddy);
                 fc = clamp(fc + uFx.z * 1.2 * (fc - nb * 0.25), 0.0, 1.0);
+            }
+            if (uPersonP.x > 0.5) {
+                float pa = smoothstep(0.35, 0.65, texture(uPerson, flatUv(uv)).r);
+                vec3 bg = uPersonP.y > 1.5 ? flatBlur(uv) * 0.9
+                        : vec3(uPersonP.y > 0.5 ? 1.0 : 0.0);
+                fc = mix(bg, fc, pa);
+            }
+            if (uKey.w > 0.5) {
+                vec4 kc = keyed(fc);
+                vec3 bg = uKeyP.w > 1.5 ? flatBlur(vec2(fp.x / uFillHalf.x * 0.5 + 0.5, 0.5 - fp.y / uFillHalf.y * 0.5)) * 0.8
+                        : vec3(uKeyP.w > 0.5 ? 1.0 : 0.0);
+                fc = mix(bg, kc.rgb, kc.a);
             }
         }
         else if (uFlatBlur > 0.5) fc = flatBlur(vec2(fp.x / uFillHalf.x * 0.5 + 0.5, 0.5 - fp.y / uFillHalf.y * 0.5)) * 0.55;

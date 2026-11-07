@@ -1095,6 +1095,24 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         deepTrack = { c.trackTarget?.let { startDeepTrack(c, c.positionUs, c.currentView, it) } },
         resumeTrack = { c.trackResume?.let { (t, box) -> c.positionUs = t; player?.seekTo(t); startDeepTrack(c, t, c.activeViewAt(t), box) } },
         requestHistogram = { player?.requestHistogram { h -> controller?.histogram = h } },
+        analyzeFlatStab = {
+            if (c.stabProgress == null) {
+                player?.pause()
+                c.stabProgress = 0f
+                Thread({
+                    val r = runCatching {
+                        com.mhmmtbg.x5reframe.stab.FlatStab.analyze(this, c.clip, { controller !== c }) { p -> runOnUiThread { if (c.stabProgress != null) c.stabProgress = p } }
+                    }
+                    runOnUiThread {
+                        c.stabProgress = null
+                        r.onSuccess { fs ->
+                            c.commit(c.state.copy(flatStab = fs, stabMode = com.mhmmtbg.x5reframe.stab.StabMode.SMOOTH))
+                            c.say("Sabitlendi · ${fs.size} kare analiz edildi")
+                        }.onFailure { c.say("Analiz edilemedi: ${it.message}", false) }
+                    }
+                }, "flat-stab").start()
+            }
+        },
         redraw = { player?.requestRedraw() },
         importLut = { lutPicker.launch(arrayOf("*/*")) },
         lutFiles = { java.io.File(filesDir, "luts").listFiles { f -> f.extension.equals("cube", true) }.orEmpty().sortedBy { it.name.lowercase() } },

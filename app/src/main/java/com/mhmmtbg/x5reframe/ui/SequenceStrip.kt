@@ -85,7 +85,7 @@ fun SequenceStrip(seq: SequenceUi) {
                         if (seg.reverse) add("◀◀")
                         if (seg.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) add(seg.curve.label)
                         if (seg.edit.layout.count > 1) add(seg.edit.layout.label)
-                        if (seg.transitionOut == Transition.FADE) add("◐")
+                        if (seg.transitionOut != Transition.CUT) add("◐")
                     }
                     Text(tags.joinToString(" · ").ifEmpty { seg.clipName.substringAfterLast('_').substringBefore('.') },
                         style = MaterialTheme.typography.bodySmall, color = Palette.Muted, maxLines = 1)

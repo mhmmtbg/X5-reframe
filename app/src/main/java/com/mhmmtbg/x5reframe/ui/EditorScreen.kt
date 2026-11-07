@@ -107,6 +107,8 @@ class EditorActions(
     val redraw: () -> Unit = {},
     val importLut: () -> Unit = {},
     val lutFiles: () -> List<java.io.File> = { emptyList() },
+    /** Normal video: görüntüden hareket analizi (sabitleme için). */
+    val analyzeFlatStab: () -> Unit = {},
 )
 
 /** Düzenleyici araç çubuğu (yatay kaydırılır). Paneli olmayanlar (Anlık görüntü) doğrudan çalışır. */
@@ -122,7 +124,7 @@ private enum class Tool(val label: String) {
 }
 
 /** Düz video / fotoğrafta yalnızca 360°'ye özgü olmayan araçlar. */
-private val FLAT_TOOLS = listOf(Tool.TRIM, Tool.SPEED, Tool.FRAME, Tool.KEYFRAME, Tool.COLOR, Tool.AUDIO, Tool.LAYER, Tool.SNAPSHOT)
+private val FLAT_TOOLS = listOf(Tool.TRIM, Tool.SPEED, Tool.FRAME, Tool.STAB, Tool.KEYFRAME, Tool.COLOR, Tool.AUDIO, Tool.LAYER, Tool.SNAPSHOT)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -217,7 +219,7 @@ fun EditorScreen(
                     Tool.FRAME -> if (c.clip.is360) FramePanel(c) else FlatFramePanel(c)
                     Tool.TRIM -> TrimPanel(c)
                     Tool.SPEED -> SpeedPanel(c, seq)
-                    Tool.STAB -> StabPanel(c)
+                    Tool.STAB -> if (c.clip.is360) StabPanel(c) else FlatStabPanel(c, actions)
                     Tool.MULTI -> MultiPanel(c)
                     Tool.LAYER -> LayerPanel(c, actions)
                     Tool.AUTO -> AutoPanel(c, actions)
@@ -821,6 +823,28 @@ private fun FramePanel(c: EditorController) {
     }
 }
 
+/** Yeşil / mavi ekran: aç-kapa, anahtar renk, benzerlik ve kenar yumuşaklığı. */
+@Composable
+private fun ChromaControls(
+    k: com.mhmmtbg.x5reframe.model.ChromaKey, commit: (com.mhmmtbg.x5reframe.model.ChromaKey) -> Unit,
+    live: (com.mhmmtbg.x5reframe.model.ChromaKey) -> Unit, end: () -> Unit,
+) {
+    SwitchRow("Yeşil / mavi ekranı kaldır", k.on) { commit(k.copy(on = it)) }
+    if (!k.on) return
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Chip("Yeşil", k.color == 0xFF00B140.toInt()) { commit(k.copy(color = 0xFF00B140.toInt())) }
+        Chip("Mavi", k.color == 0xFF0047BB.toInt()) { commit(k.copy(color = 0xFF0047BB.toInt())) }
+    }
+    LabeledRow("Benzerlik") {
+        Slider(value = k.similarity, onValueChange = { live(k.copy(similarity = it)) }, onValueChangeFinished = end, valueRange = 0.05f..1f,
+            modifier = Modifier.weight(1f), colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh))
+    }
+    LabeledRow("Yumuşaklık") {
+        Slider(value = k.smooth, onValueChange = { live(k.copy(smooth = it)) }, onValueChangeFinished = end, valueRange = 0.01f..0.5f,
+            modifier = Modifier.weight(1f), colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh))
+    }
+}
+
 /** Düz klip kadrajı: oran, yerleşim, yakınlaştırma, döndürme. Kaydırma için önizlemeyi sürükleyin. */
 @Composable
 private fun FlatFramePanel(c: EditorController) {
@@ -868,6 +892,15 @@ private fun FlatFramePanel(c: EditorController) {
             ActionButton("Sıfırla", Modifier.weight(1f)) { c.changeView { ViewParams() }; c.say("Kadraj sıfırlandı") }
         }
         Text("Kaydırmak için önizlemeyi sürükle; iki parmakla yakınlaştır ve döndür. Anahtar kare eklersen kadraj kareler arasında yumuşakça değişir.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        ChromaControls(s.chroma, { k -> c.commit(c.state.copy(chroma = k)) }, { k -> c.updateLive { it.copy(chroma = k) } }, { c.endLive() })
+        if (s.chroma.on) LabeledRow("Arka plan") {
+            Segmented(com.mhmmtbg.x5reframe.model.ChromaBg.values().toList(), s.chromaBg, { it.label }, { b -> c.commit(s.copy(chromaBg = b)) }, Modifier.weight(1f))
+        }
+        Text("Kişiyi arka plandan ayır", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+        val personOpts: List<com.mhmmtbg.x5reframe.model.ChromaBg?> = listOf(null, com.mhmmtbg.x5reframe.model.ChromaBg.BLUR, com.mhmmtbg.x5reframe.model.ChromaBg.BLACK, com.mhmmtbg.x5reframe.model.ChromaBg.WHITE)
+        Segmented(personOpts, s.personBg, { it?.label ?: "Kapalı" }, { b -> c.commit(s.copy(personBg = b)); c.say(if (b == null) "Kişi ayırma kapalı" else "Arka plan: ${b.label}") }, Modifier.fillMaxWidth())
+        if (s.personBg != null) Text("Cihaz içi yapay zekâ ile kişi algılanır (internet gerekmez). Önizleme oynarken her 3 karede bir güncellenir; dışa aktarımda her kare işlenir.",
+            color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -1121,6 +1154,7 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
                 Segmented(com.mhmmtbg.x5reframe.model.Layer.Blend.values().toList(), l.blend, { it.label }, { b -> c.updateLayer { it.copy(blend = b) } }, Modifier.weight(1f))
             }
             if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.IMAGE) {
+                ChromaControls(l.chroma, { k -> c.updateLayer { it.copy(chroma = k) } }, { k -> c.updateLayerLive { it.copy(chroma = k) } }, { c.endLayerGesture() })
                 LabeledRow("Biçim") {
                     Segmented(com.mhmmtbg.x5reframe.model.Layer.Mask.values().toList(), l.mask, { it.label }, { m -> c.updateLayer { it.copy(mask = m) } }, Modifier.weight(1f))
                 }
@@ -1188,6 +1222,43 @@ private fun MultiPanel(c: EditorController) {
         } else {
             Text("Aynı 360° çekimden birden fazla açıyı tek videoda göstermek için bir düzen seç.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
         }
+    }
+}
+
+/** Normal video sabitleme: önce hareket analizi, sonra şiddet. */
+@Composable
+private fun FlatStabPanel(c: EditorController, a: EditorActions) {
+    val s = c.state
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val p = c.stabProgress
+        if (p != null) {
+            Text("Hareket analiz ediliyor… %${(p * 100).toInt()}", style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(progress = { p }, modifier = Modifier.fillMaxWidth().height(6.dp), color = Palette.Accent, trackColor = Palette.SurfaceHigh)
+            return@Column
+        }
+        if (s.flatStab == null) {
+            Text("Titrek videoyu görüntüden sabitler: kamera hareketi kare kare ölçülür, yumuşatılır ve hafif yakınlaştırmayla telafi edilir.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            ActionButton("Analiz et ve sabitle", Modifier.fillMaxWidth(), primary = true) { a.analyzeFlatStab() }
+            return@Column
+        }
+        Segmented(listOf(com.mhmmtbg.x5reframe.stab.StabMode.OFF, com.mhmmtbg.x5reframe.stab.StabMode.SMOOTH), s.stabMode,
+            { if (it == com.mhmmtbg.x5reframe.stab.StabMode.OFF) "Kapalı" else "Sabit" },
+            { m -> c.commit(s.copy(stabMode = m)); c.say(if (m == com.mhmmtbg.x5reframe.stab.StabMode.OFF) "Sabitleme kapalı" else "Sabitleme açık") }, Modifier.fillMaxWidth())
+        if (s.stabMode != com.mhmmtbg.x5reframe.stab.StabMode.OFF) {
+            LabeledRow("Şiddet") {
+                Slider(
+                    value = s.stabStrength.toFloat(), onValueChange = { v -> c.updateLive { it.copy(stabStrength = v.toDouble()) } }, onValueChangeFinished = { c.endLive() },
+                    modifier = Modifier.weight(1f),
+                    colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+                )
+            }
+            val z = s.flatStab.correction(0, s.stabStrength.toFloat())?.get(3) ?: 1.0
+            Text("Kenarlar görünmesin diye ${"%.2f".format(z)}× yakınlaştırılır. Şiddet arttıkça hareket daha akıcı olur, kırpma artar.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        }
+        Text("Yeniden analiz et", color = Palette.AccentText, style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.clickable { a.analyzeFlatStab() }.padding(vertical = 4.dp))
     }
 }
 

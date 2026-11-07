@@ -243,11 +243,29 @@ class Player(
         program.color = colorProvider()
         program.frameTime = t / 1e6f
         program.look = lookProvider()
+        updatePerson(t)
         program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))
         val layers = layersProvider()
         overlay?.retain(layers)
         overlay?.draw(winW, winH, layers, t)
         egl.swap(window)
+    }
+
+    private var personMask: com.mhmmtbg.x5reframe.person.PersonMask? = null
+    private var personPts = -1L
+    private var personTick = 0
+
+    /** Kişiyi ayır açıksa maskeyi güncelle (oynarken her 3 karede bir, dururken her karede). */
+    private fun updatePerson(t: Long) {
+        val lk = program.look
+        if (lk.person == null || clip.is360) { program.personMask = 0; return }
+        val pm = personMask ?: runCatching { com.mhmmtbg.x5reframe.person.PersonMask(clip.displayAspect, stream = true) }
+            .onFailure { error(it) }.getOrNull()?.also { personMask = it } ?: return
+        if (t != personPts && (!playing || personTick++ % 3 == 0)) {
+            runCatching { pm.update(program, source) }
+            personPts = t
+        }
+        program.personMask = if (pm.valid) pm.texture else 0
     }
 
     /**
@@ -316,6 +334,7 @@ class Player(
             released = true
             runCatching { audio?.stop() }
             runCatching { if (::source.isInitialized) source.release() }
+            runCatching { personMask?.release() }
             runCatching { if (::program.isInitialized) program.release() }
             runCatching { overlay?.release() }
             runCatching {

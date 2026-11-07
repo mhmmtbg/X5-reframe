@@ -88,7 +88,8 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     /** Oynatıcı ve dışa aktarım için sabitleme temel dönüşü. */
     fun baseAt(t: Long, s: EditState = snapshotState): DoubleArray? =
-        stabilizer?.base(t / 1e6, s.stabMode, s.stabStrength, s.inUs / 1e6)
+        if (!clip.is360) { if (s.stabMode == com.mhmmtbg.x5reframe.stab.StabMode.OFF) null else s.flatStab?.correction(t, s.stabStrength.toFloat()) }
+        else stabilizer?.base(t / 1e6, s.stabMode, s.stabStrength, s.inUs / 1e6)
 
     private fun sync() {
         state = history.current
@@ -240,6 +241,26 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
     }
 
     fun setColor(g: com.mhmmtbg.x5reframe.model.ColorGrade) { commit(state.copy(color = g)) }
+
+    private var liveStart: EditState? = null
+
+    /** Kaydırıcı sürüklenirken genel durum değişikliği (geçmişe tek adım olarak yazılır). */
+    fun updateLive(f: (EditState) -> EditState) {
+        if (liveStart == null) liveStart = state
+        history.replace(f(state))
+        state = history.current; snapshotState = state
+        refreshColor(); onChanged()
+    }
+
+    fun endLive() {
+        val before = liveStart ?: return
+        liveStart = null
+        val after = state
+        if (before != after) { history.replace(before); history.push(after); sync() }
+    }
+
+    /** Normal video hareket analizi ilerlemesi (null = çalışmıyor). */
+    var stabProgress by mutableStateOf<Float?>(null)
 
     /** Önce / sonra: basılı tutulurken renk düzenlemesi gösterilmez. */
     @Volatile var compareHold = false

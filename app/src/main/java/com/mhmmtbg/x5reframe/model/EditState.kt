@@ -42,8 +42,22 @@ data class CropRect(val l: Float = 0f, val t: Float = 0f, val r: Float = 1f, val
     val h get() = (b - t).coerceAtLeast(0.05f)
 }
 
-/** Düz klibin görünümü: yerleşim, kırpma, aynalama. */
-data class FlatLook(val fit: FrameFit = FrameFit.FIT, val crop: CropRect = CropRect(), val flipH: Boolean = false, val flipV: Boolean = false)
+/**
+ * Renk anahtarı (yeşil / mavi ekran): anahtar renge yakın pikseller saydamlaşır.
+ * [similarity] eşik (0..1), [smooth] kenar yumuşaklığı, [spill] yeşil taşmasını bastırma.
+ */
+data class ChromaKey(val on: Boolean = false, val color: Int = 0xFF00B140.toInt(), val similarity: Float = 0.3f, val smooth: Float = 0.08f, val spill: Float = 0.6f)
+
+/** Anahtarlanan / ayrılan arka planın yerine ne gelsin. */
+enum class ChromaBg(val label: String) { BLACK("Siyah"), WHITE("Beyaz"), BLUR("Bulanık") }
+
+/** Düz klibin görünümü: yerleşim, kırpma, aynalama, renk anahtarı. */
+data class FlatLook(
+    val fit: FrameFit = FrameFit.FIT, val crop: CropRect = CropRect(), val flipH: Boolean = false, val flipV: Boolean = false,
+    val chroma: ChromaKey = ChromaKey(), val chromaBg: ChromaBg = ChromaBg.BLACK,
+    /** Kişiyi ayır: arka plan bununla değiştirilir (null = kapalı). */
+    val person: ChromaBg? = null,
+)
 
 enum class BitrateLevel(val label: String, val factor: Float) { STANDARD("Standart", 1f), HIGH("Yüksek", 1.6f), MAX("En yüksek", 2.5f) }
 
@@ -80,8 +94,13 @@ data class EditState(
     val crop: CropRect = CropRect(),
     val flipH: Boolean = false,
     val flipV: Boolean = false,
+    val chroma: ChromaKey = ChromaKey(),
+    val chromaBg: ChromaBg = ChromaBg.BLACK,
+    /** Normal videoda görüntüden ölçülmüş hareket (sabitleme için; 360°'de IMU kullanılır). */
+    val flatStab: com.mhmmtbg.x5reframe.stab.FlatStab? = null,
+    val personBg: ChromaBg? = null,
 ) {
-    val flatLook: FlatLook get() = FlatLook(fit, crop, flipH, flipV)
+    val flatLook: FlatLook get() = FlatLook(fit, crop, flipH, flipV, chroma, chromaBg, personBg)
 
     fun pane(i: Int): Pane = if (i == 0) Pane(keyframes, baseView)
         else extraPanes.getOrNull(i - 1) ?: Pane(baseView = baseView.copy(yaw = ViewParams.wrap(baseView.yaw + defaultPaneYaw[i % 4])))

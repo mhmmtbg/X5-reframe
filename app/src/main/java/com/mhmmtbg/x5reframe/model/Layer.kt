@@ -25,6 +25,8 @@ data class Layer(
     val blend: Blend = Blend.NORMAL,
     val mask: Mask = Mask.NONE,
     val flipH: Boolean = false,
+    /** Görsel katmanda yeşil / mavi ekranı kaldır. */
+    val chroma: ChromaKey = ChromaKey(),
 ) {
     enum class Kind { TEXT, IMAGE }
 

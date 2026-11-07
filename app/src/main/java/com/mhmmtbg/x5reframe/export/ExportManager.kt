@@ -136,13 +136,18 @@ object ExportManager {
             val stab = if (e.stabMode == StabMode.OFF) null else clip.imu?.let { Stabilizer(it, Stabilizer.rigFromImuFor(clip.cameraType)) }
             Exporter.Job(
                 clip, e.inUs, e.outUs, { t -> e.sceneAt(t) },
-                { t -> stab?.base(t / 1e6, e.stabMode, e.stabStrength, e.inUs / 1e6) },
+                { t ->
+                    if (!clip.is360) { if (e.stabMode == StabMode.OFF) null else e.flatStab?.correction(t, e.stabStrength.toFloat()) }
+                    else stab?.base(t / 1e6, e.stabMode, e.stabStrength, e.inUs / 1e6)
+                },
                 e.layout.rects, e.stitchInv, seg.speed,
                 reverse = seg.reverse, curve = seg.curve,
                 layers = e.layers,
                 color = if (e.color.isIdentity) null else e.color.uniforms(),
                 look = e.flatLook,
                 fadeInUs = if (i > 0 && segs[i - 1].transitionOut == Transition.FADE) fade else 0,
+                crossIn = if (i > 0) segs[i - 1].transitionOut else Transition.CUT,
+                crossInUs = if (i > 0 && segs[i - 1].transitionOut.overlaps) Transition.OVERLAP_US else 0,
                 fadeOutUs = if (i < segs.size - 1 && seg.transitionOut == Transition.FADE) fade else 0,
             )
         }

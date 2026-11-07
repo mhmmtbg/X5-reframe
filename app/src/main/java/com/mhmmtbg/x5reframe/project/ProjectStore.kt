@@ -13,7 +13,18 @@ import org.json.JSONObject
 import java.io.File
 import java.util.UUID
 
-enum class Transition(val label: String) { CUT("Kesme"), FADE("Siyaha geçiş") }
+/**
+ * Parçalar arası geçiş. [shader] 0 olanlar örtüşmesiz (kesme, siyaha geçiş); diğerlerinde iki parça
+ * [OVERLAP_US] boyunca üst üste biner ve birlikte çizilir.
+ */
+enum class Transition(val label: String, val shader: Int = 0) {
+    CUT("Kesme"), FADE("Siyaha geçiş"), DISSOLVE("Çapraz geçiş", 1), SLIDE("Kaydır", 2), SLIDE_UP("Yukarı kaydır", 3),
+    WIPE("Silme", 4), ZOOM("Yakınlaş", 5), CIRCLE("Daire", 6), BLUR("Bulanık", 7);
+
+    val overlaps: Boolean get() = shader != 0
+
+    companion object { const val OVERLAP_US = 600_000L }
+}
 
 /** Projede sıralı bir klip parçası: kaynak dosya + o parçanın düzenlemesi. */
 data class Segment(
@@ -169,6 +180,14 @@ class ProjectStore(context: Context) {
             return Project(o.getString("id"), o.getString("name"), o.getLong("createdAt"), o.getLong("updatedAt"), segs, audio)
         }
 
+        private fun chromaToJson(k: com.mhmmtbg.x5reframe.model.ChromaKey) = JSONObject().put("on", k.on).put("color", k.color)
+            .put("similarity", k.similarity.toDouble()).put("smooth", k.smooth.toDouble()).put("spill", k.spill.toDouble())
+
+        private fun chromaFromJson(o: JSONObject) = com.mhmmtbg.x5reframe.model.ChromaKey(
+            o.optBoolean("on"), o.optInt("color", 0xFF00B140.toInt()), o.optDouble("similarity", 0.3).toFloat(),
+            o.optDouble("smooth", 0.08).toFloat(), o.optDouble("spill", 0.6).toFloat(),
+        )
+
         fun editToJson(e: EditState) = JSONObject().apply {
             put("inUs", e.inUs); put("outUs", e.outUs)
             put("baseView", viewToJson(e.baseView))
@@ -185,6 +204,14 @@ class ProjectStore(context: Context) {
             if (!e.crop.isFull) put("crop", JSONArray(listOf(e.crop.l, e.crop.t, e.crop.r, e.crop.b).map { it.toDouble() }))
             if (e.flipH) put("flipH", true)
             if (e.flipV) put("flipV", true)
+            if (e.chroma.on) { put("chroma", chromaToJson(e.chroma)); put("chromaBg", e.chromaBg.name) }
+            e.personBg?.let { put("personBg", it.name) }
+            e.flatStab?.let { fs ->
+                val f = fs.toFloats()
+                val bb = java.nio.ByteBuffer.allocate(f.size * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                f.forEach { bb.putFloat(it) }
+                put("flatStab", android.util.Base64.encodeToString(bb.array(), android.util.Base64.NO_WRAP))
+            }
             put("color", JSONObject().apply {
                 val g = e.color
                 put("filter", g.filter.name); put("strength", g.filterStrength.toDouble())
@@ -199,7 +226,8 @@ class ProjectStore(context: Context) {
                     put(JSONObject().put("id", l.id).put("kind", l.kind.name).put("content", l.content)
                         .put("x", l.x.toDouble()).put("y", l.y.toDouble()).put("scale", l.scale.toDouble()).put("opacity", l.opacity.toDouble())
                         .put("startUs", l.startUs).put("endUs", l.endUs).put("visible", l.visible).put("style", l.style.name)
-                        .put("rotation", l.rotation.toDouble()).put("blend", l.blend.name).put("mask", l.mask.name).put("flipH", l.flipH))
+                        .put("rotation", l.rotation.toDouble()).put("blend", l.blend.name).put("mask", l.mask.name).put("flipH", l.flipH)
+                        .apply { if (l.chroma.on) put("chroma", chromaToJson(l.chroma)) })
                 }
             })
             put("extraPanes", JSONArray().apply {
@@ -247,6 +275,15 @@ class ProjectStore(context: Context) {
                 } ?: com.mhmmtbg.x5reframe.model.CropRect(),
                 flipH = o.optBoolean("flipH", false),
                 flipV = o.optBoolean("flipV", false),
+                chroma = o.optJSONObject("chroma")?.let(::chromaFromJson) ?: com.mhmmtbg.x5reframe.model.ChromaKey(),
+                flatStab = o.optString("flatStab").takeIf { it.isNotEmpty() }?.let { b64 ->
+                    runCatching {
+                        val bb = java.nio.ByteBuffer.wrap(android.util.Base64.decode(b64, android.util.Base64.NO_WRAP)).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                        com.mhmmtbg.x5reframe.stab.FlatStab.fromFloats(FloatArray(bb.remaining() / 4) { bb.getFloat() })
+                    }.getOrNull()
+                },
+                chromaBg = runCatching { com.mhmmtbg.x5reframe.model.ChromaBg.valueOf(o.optString("chromaBg", "BLACK")) }.getOrDefault(com.mhmmtbg.x5reframe.model.ChromaBg.BLACK),
+                personBg = o.optString("personBg").takeIf { it.isNotEmpty() }?.let { n -> runCatching { com.mhmmtbg.x5reframe.model.ChromaBg.valueOf(n) }.getOrNull() },
                 fit = runCatching { com.mhmmtbg.x5reframe.model.FrameFit.valueOf(o.optString("fit", "FIT")) }.getOrDefault(com.mhmmtbg.x5reframe.model.FrameFit.FIT),
                 tracks = (o.optJSONArray("tracks") ?: JSONArray()).let { arr ->
                     (0 until arr.length()).mapNotNull { i -> arr.optJSONArray(i)?.let { r -> r.getLong(0)..r.getLong(1) } }
@@ -265,6 +302,7 @@ class ProjectStore(context: Context) {
                                 blend = runCatching { com.mhmmtbg.x5reframe.model.Layer.Blend.valueOf(l.optString("blend", "NORMAL")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Blend.NORMAL),
                                 mask = runCatching { com.mhmmtbg.x5reframe.model.Layer.Mask.valueOf(l.optString("mask", "NONE")) }.getOrDefault(com.mhmmtbg.x5reframe.model.Layer.Mask.NONE),
                                 flipH = l.optBoolean("flipH", false),
+                                chroma = l.optJSONObject("chroma")?.let(::chromaFromJson) ?: com.mhmmtbg.x5reframe.model.ChromaKey(),
                             )
                         }.getOrNull()
                     }

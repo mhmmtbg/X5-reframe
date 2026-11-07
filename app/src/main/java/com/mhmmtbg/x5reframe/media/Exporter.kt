@@ -72,6 +72,9 @@ class Exporter(
         /** Geriye oynat (kare blokları ileri çözülüp ters sırayla yazılır). */
         val reverse: Boolean = false,
         val curve: com.mhmmtbg.x5reframe.model.SpeedCurve = com.mhmmtbg.x5reframe.model.SpeedCurve.NONE,
+        /** Önceki parçadan bu parçaya örtüşmeli geçiş (çapraz geçiş, kaydırma…): tür ve süre. */
+        val crossIn: com.mhmmtbg.x5reframe.project.Transition = com.mhmmtbg.x5reframe.project.Transition.CUT,
+        val crossInUs: Long = 0,
     ) {
         val effEndUs: Long get() = endUs.coerceAtMost(clip.durationUs)
         val map: com.mhmmtbg.x5reframe.model.SpeedMap by lazy { com.mhmmtbg.x5reframe.model.SpeedMap(effEndUs - startUs, speed, curve) }
@@ -126,7 +129,7 @@ class Exporter(
 
     private fun audioCopyable(): Boolean {
         val fmts = jobs.map { j ->
-            if (j.speed != 1.0 || j.reverse || j.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) return false
+            if (j.speed != 1.0 || j.reverse || j.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE || j.crossInUs > 0) return false
             val a = j.clip.audioTrack ?: return jobs.none { it.clip.audioTrack != null }
             runCatching {
                 context.contentResolver.openFileDescriptor(j.clip.uri, "r")!!.use { pfd ->
@@ -177,13 +180,13 @@ class Exporter(
 
             val fpsHint = output.fps ?: jobs.first().clip.frameRate
             val frameDurHint = (1_000_000 / fpsHint).toLong()
-            val totalOutUs = jobs.sumOf { (it.outputDurationUs / frameDurHint).coerceAtLeast(1) * frameDurHint }
+            val plan = plan(frameDurHint)
+            val totalOutUs = plan.totalFrames * frameDurHint
             if (mixSpec != null) {
                 // Karışım yolu: AAC kodlayıcının biçimini almak için ilk sesi önceden üret.
-                var off = 0L
-                val segs = jobs.map { j ->
-                    val d = (j.outputDurationUs / frameDurHint).coerceAtLeast(1) * frameDurHint
-                    AudioMixer.Seg(j.clip.uri, if (output.includeAudio && j.audible) j.clip.audioTrack else null, j.startUs, off, d, j.speed).also { off += d }
+                val segs = jobs.mapIndexed { i, j ->
+                    AudioMixer.Seg(j.clip.uri, if (output.includeAudio && j.audible) j.clip.audioTrack else null, j.startUs,
+                        plan.start[i] * frameDurHint, plan.frames[i] * frameDurHint, j.speed)
                 }
                 val ms = mixSpec!!
                 mixer = AudioMixer(context, segs, ms.music, if (output.includeAudio) ms.originalVolume else 0f, totalOutUs)
@@ -214,71 +217,68 @@ class Exporter(
             egl.makeCurrent(win)
             val overlay = com.mhmmtbg.x5reframe.gl.OverlayRenderer()
 
-            val totalOut = jobs.sumOf { it.outputDurationUs }.coerceAtLeast(1)
-            var timeline = 0L
-            var lastReport = 0L
-
-            for (job in jobs) {
-                if (cancelled) break
-                val pfd = context.contentResolver.openFileDescriptor(job.clip.uri, "r")!!
-                pfds += pfd
-                val program = Sources.program(job.clip, highQuality = true).apply {
-                    stitchInvDistance = job.stitchInv
-                    color = job.color
-                    look = job.look
-                    dynamicStitch = context.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("dynamic_stitch", true)
-                }
-                val source = Sources.open(context, job.clip, pfd.fileDescriptor, realtime = false)
-                try {
-                    val audio = if (mixSpec == null && output.includeAudio && job.speed == 1.0 && !job.reverse && job.curve == com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) openAudio(pfd, job) else null
-                    val end = job.effEndUs
-                    val nFrames = (job.outputDurationUs / frameDur).coerceAtLeast(1)
+            val totalOut = (plan.totalFrames * frameDur).coerceAtLeast(1)
+            val progress = Progress(t0, totalOut) { 0L }
+            val transition = if (plan.overlap.any { it > 0 }) com.mhmmtbg.x5reframe.gl.TransitionProgram() else null
+            val fbo = if (transition != null) Array(2) { com.mhmmtbg.x5reframe.gl.Fbo(output.width, output.height) } else null
+            var cur: JobRun? = null
+            try {
+                for (i in jobs.indices) {
+                    if (cancelled) break
+                    val run = cur ?: JobRun(jobs[i], frameDur, overlay, pfds)
+                    cur = null
+                    val job = run.job
+                    val start = plan.start[i] * frameDur
+                    val n = plan.overlap.getOrElse(i + 1) { 0 }
                     if (job.reverse) {
-                        val p = Progress(t0, totalOut) { timeline }
-                        renderReverse(job, source, program, overlay, win, egl, frameDur, nFrames, timeline, p)
-                        timeline += nFrames * frameDur
+                        renderReverse(job, run.source, run.program, overlay, win, egl, frameDur, plan.frames[i], start, Progress(t0, totalOut) { start })
+                        run.close()
                         continue
                     }
-                    if (source.seekAndShow(job.startUs, frameDur) < 0) continue
-                    var stitchPts = -1L
-                    for (k in 0 until nFrames) {
+                    val audio = if (mixSpec == null && output.includeAudio && job.speed == 1.0 && job.curve == com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) openAudio(run.pfd, job) else null
+                    // Bu parçanın baştaki k0 karesi önceki geçişte çizildi
+                    val k0 = plan.overlap[i].toLong()
+                    for (k in k0 until plan.frames[i] - n) {
                         if (cancelled) break
-                        val tSrc = job.sourceAt(k * frameDur)
-                        // Hedef kaynak zamanına kadar ilerle (hızlandırmada kare atlanır, yavaşlatmada aynı kare tekrar çizilir).
-                        var eos = false
-                        while (source.currentPts + frameDur <= tSrc) {
-                            if (source.next { it + frameDur > tSrc } < 0) { eos = true; break }
-                        }
-                        if (eos) break
-                        val tOut = k * frameDur
-                        program.fade = fadeFactor(job, tOut)
-                        val pts = source.currentPts
-                        program.frameTime = tOut / 1e6f
-                        if (pts != stitchPts) { program.updateStitch(source, 3, 0.5f); stitchPts = pts }
-                        program.drawScene(output.width, output.height, job.layoutRects, job.sceneAt(pts), source, job.baseAt(pts))
-                        overlay.draw(output.width, output.height, job.layers, pts)
-                        egl.setPresentationTime(win, (timeline + tOut) * 1000)
+                        val pts = run.frame(k) ?: break
+                        egl.setPresentationTime(win, (start + k * frameDur) * 1000)
                         egl.swap(win)
                         drain(false)
-                        audio?.writeUpTo(pts, timeline)
-                        if (mixer != null) produceAudio(timeline + tOut)
-
-                        val now = SystemClock.elapsedRealtime()
-                        if (now - lastReport > 250) {
-                            lastReport = now
-                            val done = (timeline + tOut).toFloat() / totalOut
-                            val elapsed = (now - t0) / 1000f
-                            listener.onProgress(done.coerceIn(0f, 1f), if (elapsed > 0) ((timeline + tOut) / 1e6f) / elapsed else 0f)
-                        }
+                        audio?.writeUpTo(pts, start)
+                        if (mixer != null) produceAudio(start + k * frameDur)
+                        progress.report(start + k * frameDur)
                     }
-                    audio?.writeUpTo(end, timeline)
+                    if (n > 0 && !cancelled) {
+                        // Örtüşmeli geçiş: A'nın son n karesi ile B'nin ilk n karesi birleştirilir
+                        val nextRun = JobRun(jobs[i + 1], frameDur, overlay, pfds)
+                        val type = jobs[i + 1].crossIn
+                        for (q in 0 until n) {
+                            if (cancelled) break
+                            val ka = plan.frames[i] - n + q
+                            fbo!![0].bind(); val pa = run.frame(ka)
+                            fbo[1].bind(); nextRun.frame(q.toLong())
+                            com.mhmmtbg.x5reframe.gl.Fbo.unbind()
+                            transition!!.draw(fbo[0].tex, fbo[1].tex, output.width, output.height, (q + 0.5f) / n, type)
+                            val tOut = start + ka * frameDur
+                            egl.setPresentationTime(win, tOut * 1000)
+                            egl.swap(win)
+                            drain(false)
+                            if (pa != null) audio?.writeUpTo(pa, start)
+                            if (mixer != null) produceAudio(tOut)
+                            progress.report(tOut)
+                        }
+                        cur = nextRun
+                    }
+                    audio?.writeUpTo(job.effEndUs, start)
                     audio?.close()
-                    timeline += nFrames * frameDur
-                } finally {
-                    runCatching { source.release() }
-                    runCatching { program.release() }
+                    run.close()
                 }
+            } finally {
+                runCatching { cur?.close() }
+                transition?.release()
+                fbo?.forEach { it.release() }
             }
+            val timeline = totalOut
             overlay.release()
             if (cancelled) throw InterruptedException("İptal edildi")
 
@@ -317,6 +317,66 @@ class Exporter(
             runCatching { if (::encoder.isInitialized) { encoder.stop(); encoder.release() } }
             runCatching { egl?.release() }
             pfds.forEach { runCatching { it.close() } }
+        }
+    }
+
+    /** Parçaların çıktıdaki başlangıç kareleri, kare sayıları ve önceki parçayla örtüşmeleri. */
+    private class Plan(val start: LongArray, val frames: LongArray, val overlap: IntArray) {
+        val totalFrames: Long get() = if (start.isEmpty()) 0 else start.last() + frames.last()
+    }
+
+    private fun plan(frameDur: Long): Plan {
+        val frames = LongArray(jobs.size) { (jobs[it].outputDurationUs / frameDur).coerceAtLeast(1) }
+        val overlap = IntArray(jobs.size) { i ->
+            val j = jobs[i]
+            if (i == 0 || j.crossInUs <= 0 || j.reverse || jobs[i - 1].reverse) 0
+            else (j.crossInUs / frameDur).toInt().coerceIn(1, (minOf(frames[i - 1], frames[i]) / 2).toInt().coerceAtLeast(1))
+        }
+        val start = LongArray(jobs.size)
+        for (i in 1 until jobs.size) start[i] = start[i - 1] + frames[i - 1] - overlap[i]
+        return Plan(start, frames, overlap)
+    }
+
+    /** Bir parçanın kare kaynağı + çizim programı; kareleri istenen çıktı sırasına göre çizer. */
+    private inner class JobRun(val job: Job, private val frameDur: Long, private val overlay: com.mhmmtbg.x5reframe.gl.OverlayRenderer,
+                               pfds: MutableList<ParcelFileDescriptor>) : AutoCloseable {
+        val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(job.clip.uri, "r")!!.also { pfds += it }
+        val program = Sources.program(job.clip, highQuality = true).apply {
+            stitchInvDistance = job.stitchInv
+            color = job.color
+            look = job.look
+            dynamicStitch = context.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("dynamic_stitch", true)
+        }
+        val source: FrameSource = Sources.open(context, job.clip, pfd.fileDescriptor, realtime = false)
+        private var started = false
+        private var stitchPts = -1L
+        private val person = if (job.look.person != null && !job.clip.is360)
+            runCatching { com.mhmmtbg.x5reframe.person.PersonMask(job.clip.displayAspect, stream = true) }.getOrNull() else null
+
+        /** k. çıktı karesini o an bağlı çerçeve tamponuna çiz; kaynak bittiyse null. */
+        fun frame(k: Long): Long? {
+            val tSrc = job.sourceAt(k * frameDur)
+            if (!started) { if (source.seekAndShow(tSrc, frameDur) < 0) return null; started = true }
+            while (source.currentPts + frameDur <= tSrc) {
+                if (source.next { it + frameDur > tSrc } < 0) return null
+            }
+            val pts = source.currentPts
+            program.fade = fadeFactor(job, k * frameDur)
+            program.frameTime = k * frameDur / 1e6f
+            if (pts != stitchPts) {
+                program.updateStitch(source, 3, 0.5f)
+                person?.let { pm -> runCatching { pm.update(program, source) }; program.personMask = if (pm.valid) pm.texture else 0 }
+                stitchPts = pts
+            }
+            program.drawScene(output.width, output.height, job.layoutRects, job.sceneAt(pts), source, job.baseAt(pts))
+            overlay.draw(output.width, output.height, job.layers, pts)
+            return pts
+        }
+
+        override fun close() {
+            runCatching { person?.release() }
+            runCatching { source.release() }
+            runCatching { program.release() }
         }
     }
 

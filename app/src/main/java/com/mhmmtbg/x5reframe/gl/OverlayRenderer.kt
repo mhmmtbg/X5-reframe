@@ -23,6 +23,8 @@ class OverlayRenderer {
     private val uAspect: Int
     private val uMask: Int
     private val uFlip: Int
+    private val uKey: Int
+    private val uKeyP: Int
 
     private class Tex(val id: Int, val aspect: Float)
     private val cache = HashMap<String, Tex>()
@@ -36,6 +38,8 @@ class OverlayRenderer {
         uAspect = GLES30.glGetUniformLocation(program, "uAspect")
         uMask = GLES30.glGetUniformLocation(program, "uMask")
         uFlip = GLES30.glGetUniformLocation(program, "uFlip")
+        uKey = GLES30.glGetUniformLocation(program, "uKey")
+        uKeyP = GLES30.glGetUniformLocation(program, "uKeyP")
         val quad = floatArrayOf(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
         buf.position(0)
@@ -68,6 +72,9 @@ class OverlayRenderer {
             GLES30.glUniform1f(uRot, Math.toRadians(l.rotation.toDouble()).toFloat())
             GLES30.glUniform1i(uMask, l.mask.ordinal)
             GLES30.glUniform1f(uFlip, if (l.flipH) 1f else 0f)
+            val k = l.chroma
+            GLES30.glUniform4f(uKey, ((k.color shr 16) and 255) / 255f, ((k.color shr 8) and 255) / 255f, (k.color and 255) / 255f, if (k.on && l.kind == Layer.Kind.IMAGE) 1f else 0f)
+            GLES30.glUniform4f(uKeyP, k.similarity, k.smooth.coerceAtLeast(0.001f), k.spill, 0f)
             GLES30.glUniform1f(uAlpha, l.opacity)
             when (l.blend) {
                 Layer.Blend.NORMAL -> GLES30.glBlendFunc(GLES30.GL_ONE, GLES30.GL_ONE_MINUS_SRC_ALPHA)
@@ -163,7 +170,10 @@ in vec2 vUv;
 uniform sampler2D uTex;
 uniform float uAlpha;
 uniform int uMask;   // 0 yok, 1 yuvarlak köşe, 2 daire
+uniform vec4 uKey;   // renk anahtarı rgb, açık mı
+uniform vec4 uKeyP;  // benzerlik, yumuşaklık, taşma
 out vec4 outColor;
+vec2 cbcr(vec3 c) { return vec2(-0.1687 * c.r - 0.3313 * c.g + 0.5 * c.b, 0.5 * c.r - 0.4187 * c.g - 0.0813 * c.b); }
 void main() {
     float m = 1.0;
     vec2 d = abs(vUv - 0.5) * 2.0;
@@ -174,7 +184,16 @@ void main() {
         vec2 q = max(d - (1.0 - 0.24), 0.0) / 0.24;
         m = 1.0 - smoothstep(0.92, 1.0, length(q));
     }
-    outColor = texture(uTex, vUv) * uAlpha * m; // önceden çarpılmış alfa
+    vec4 t = texture(uTex, vUv);
+    if (uKey.w > 0.5 && t.a > 0.0) {
+        vec3 c = t.rgb / t.a;
+        float d = distance(cbcr(c), cbcr(uKey.rgb));
+        float a = smoothstep(uKeyP.x * 0.3, uKeyP.x * 0.3 + uKeyP.y * 0.3, d);
+        if (uKey.g >= uKey.r && uKey.g >= uKey.b) c.g = mix(c.g, min(c.g, (c.r + c.b) * 0.5 + 0.02), uKeyP.z);
+        else if (uKey.b >= uKey.r) c.b = mix(c.b, min(c.b, (c.r + c.g) * 0.5 + 0.02), uKeyP.z);
+        t = vec4(c * t.a * a, t.a * a);
+    }
+    outColor = t * uAlpha * m; // önceden çarpılmış alfa
 }
 """
     }

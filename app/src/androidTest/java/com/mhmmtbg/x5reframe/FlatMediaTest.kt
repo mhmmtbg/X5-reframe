@@ -44,7 +44,12 @@ class FlatMediaTest {
     private val ctx = inst.targetContext
 
     /** 320x240 kare, sol üst çeyrek kırmızı, gerisi gri; 90° döndürme ipucu, [seconds] sn, 30 fps. */
-    private fun makeVideo(file: File, seconds: Int = 2, rotation: Int = 90, ramp: Boolean = false) {
+    /**
+     * @param shake her karede desenin kaydırılacağı piksel (x, y); null = sabit
+     * @param solid düz renk (r, g, b); null = varsayılan desen
+     */
+    private fun makeVideo(file: File, seconds: Int = 2, rotation: Int = 90, ramp: Boolean = false,
+                          shake: ((Int) -> Pair<Int, Int>)? = null, solid: FloatArray? = null) {
         val w = 320; val h = 240; val fps = 30
         val fmt = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -80,13 +85,33 @@ class FlatMediaTest {
             GLES30.glViewport(0, 0, w, h)
             GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
             val g = if (ramp) 0.1f + 0.8f * k / (seconds * fps) else 0.5f
-            GLES30.glClearColor(g, g, g, 1f)
-            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-            GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
-            GLES30.glScissor(0, h / 2, w / 2, h / 2) // GL'de y aşağıdan: üst sol çeyrek
-            GLES30.glClearColor(1f, 0f, 0f, 1f)
-            GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
-            GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+            if (solid != null) {
+                GLES30.glClearColor(solid[0], solid[1], solid[2], 1f)
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+            } else if (shake != null) {
+                // Dokulu desen (blok eşleştirme için), karede (sx, sy) kaydırılmış
+                val (sx, sy) = shake(k)
+                GLES30.glClearColor(0.3f, 0.3f, 0.3f, 1f)
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
+                val rnd = java.util.Random(7)
+                for (q in 0 until 80) {
+                    val rx = rnd.nextInt(w + 40) - 20 + sx; val ry = rnd.nextInt(h + 40) - 20 - sy
+                    val v = rnd.nextFloat()
+                    GLES30.glScissor(rx, ry, 6 + rnd.nextInt(18), 6 + rnd.nextInt(18))
+                    GLES30.glClearColor(v, 1f - v, v * 0.5f, 1f)
+                    GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                }
+                GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+            } else {
+                GLES30.glClearColor(g, g, g, 1f)
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                GLES30.glEnable(GLES30.GL_SCISSOR_TEST)
+                GLES30.glScissor(0, h / 2, w / 2, h / 2) // GL'de y aşağıdan: üst sol çeyrek
+                GLES30.glClearColor(1f, 0f, 0f, 1f)
+                GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
+                GLES30.glDisable(GLES30.GL_SCISSOR_TEST)
+            }
             egl.setPresentationTime(win, k * 1_000_000_000L / fps)
             egl.swap(win)
             drain(false)
@@ -269,6 +294,90 @@ class FlatMediaTest {
         android.util.Log.i("FlatMediaTest", "reverse first=$first last=$last dur=$dur expected=$expected")
         assertTrue("ters oynatmada ilk kare daha parlak olmalı: $first / $last", first > last + 40)
         assertTrue("eğrili süre beklenenden farklı: $dur / $expected", kotlin.math.abs(dur - expected) < 250_000)
+    }
+
+    /** v3.6: çapraz geçiş parçaları üst üste bindirir (süre kısalır, ortadaki kare iki rengin karışımı). */
+    @Test
+    fun exportsDissolveTransition() {
+        val a = File(ctx.cacheDir, "red.mp4").also { makeVideo(it, 2, 0, solid = floatArrayOf(0.9f, 0.1f, 0.1f)) }
+        val b = File(ctx.cacheDir, "blue.mp4").also { makeVideo(it, 2, 0, solid = floatArrayOf(0.1f, 0.1f, 0.9f)) }
+        val ca = ClipInfo.load(ctx, Uri.fromFile(a)); val cb = ClipInfo.load(ctx, Uri.fromFile(b))
+        val jobs = listOf(
+            Exporter.Job(ca, 0, 1_500_000, { listOf(ViewParams()) }),
+            Exporter.Job(cb, 0, 1_500_000, { listOf(ViewParams()) }, crossIn = com.mhmmtbg.x5reframe.project.Transition.DISSOLVE, crossInUs = 600_000),
+        )
+        val done = CountDownLatch(1)
+        var outUri: Uri? = null; var error: String? = null
+        val ex = Exporter(ctx, Exporter.Output(320, 240, false, 2_000_000), jobs, object : Exporter.Listener {
+            override fun onProgress(fraction: Float, speed: Float) {}
+            override fun onDone(uri: Uri, seconds: Float) { outUri = uri; done.countDown() }
+            override fun onFailed(message: String) { error = message; done.countDown() }
+        })
+        Thread { ex.run() }.start()
+        assertTrue("zaman aşımı", done.await(10, TimeUnit.MINUTES))
+        assertTrue("dışa aktarım hatası: $error", error == null && outUri != null)
+        val r = android.media.MediaMetadataRetriever()
+        ctx.contentResolver.openFileDescriptor(outUri!!, "r")!!.use { r.setDataSource(it.fileDescriptor) }
+        val dur = r.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)!!.toLong() * 1000
+        val mid = r.getFrameAtTime(1_200_000, android.media.MediaMetadataRetriever.OPTION_CLOSEST)!!.let { it.getPixel(it.width / 2, it.height / 2) }
+        r.release()
+        android.util.Log.i("FlatMediaTest", "dissolve dur=$dur mid=${Integer.toHexString(mid)}")
+        assertTrue("örtüşmeli süre beklenenden farklı: $dur", kotlin.math.abs(dur - 2_400_000) < 150_000)
+        assertTrue("geçiş ortası karışım değil: ${Integer.toHexString(mid)}", Color.red(mid) in 70..190 && Color.blue(mid) in 70..190)
+    }
+
+    /** v3.6: yeşil ekran anahtarı yeşili siyaha çevirir, diğer renklere dokunmaz. */
+    @Test
+    fun keysGreenScreen() {
+        val f = File(ctx.cacheDir, "green.png")
+        val bm = Bitmap.createBitmap(400, 300, Bitmap.Config.ARGB_8888)
+        Canvas(bm).apply { drawColor(Color.rgb(0, 177, 64)); drawRect(150f, 100f, 250f, 200f, Paint().apply { color = Color.rgb(220, 40, 40) }) }
+        f.outputStream().use { bm.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        val ic = ClipInfo.load(ctx, Uri.fromFile(f))
+        val px = render(ic, 400, 300, FrameFit.FIT, look = com.mhmmtbg.x5reframe.model.FlatLook(chroma = com.mhmmtbg.x5reframe.model.ChromaKey(on = true)))
+        val bg = px[20 * 400 + 20]; val fg = px[150 * 400 + 200]
+        android.util.Log.i("FlatMediaTest", "chroma bg=${Integer.toHexString(bg)} fg=${Integer.toHexString(fg)}")
+        assertTrue("yeşil kaldırılmadı: ${Integer.toHexString(bg)}", Color.green(bg) < 40)
+        assertTrue("kırmızı bozuldu: ${Integer.toHexString(fg)}", Color.red(fg) > 180)
+    }
+
+    /** v3.6: görüntüden sabitleme, desene verilen sarsıntıyı ölçebiliyor mu. */
+    @Test
+    fun measuresShake() {
+        val offs = IntArray(60) { k -> if (k % 2 == 0) 0 else 6 }
+        val vid = File(ctx.cacheDir, "shake.mp4").also { makeVideo(it, 2, 0, shake = { k -> offs[k] to 0 }) }
+        val clip = ClipInfo.load(ctx, Uri.fromFile(vid))
+        val fs = com.mhmmtbg.x5reframe.stab.FlatStab.analyze(ctx, clip, { false }) {}
+        // 320 px genişlikte 6 px = 0,01875 genişlik; ardışık karelerde ±
+        var hits = 0
+        for (k in 1 until minOf(fs.size, 60)) {
+            val d = fs.x[k] - fs.x[k - 1]
+            val want = (offs[k] - offs[k - 1]) / 320f
+            if (kotlin.math.abs(d - want) < 0.008f) hits++
+        }
+        android.util.Log.i("FlatMediaTest", "shake frames=${fs.size} hits=$hits")
+        assertTrue("sarsıntı ölçülemedi: $hits / ${fs.size - 1}", hits >= (minOf(fs.size, 60) - 1) * 0.8)
+        // Düzeltme sarsıntıyı karşılar: tek karelerde (kaymış) düzeltme yaklaşık +3 px, çiftlerde -3 px
+        val c1 = fs.correction((1 * 1e6 / fs.fps).toLong(), 0.6f)!!; val c2 = fs.correction((2 * 1e6 / fs.fps).toLong(), 0.6f)!!
+        assertTrue("düzeltme yönü yanlış: ${c1[0]} ${c2[0]}", c1[0] > 0 && c2[0] < 0)
+    }
+
+    /** v3.6: kişi ayırma modeli cihazda çalışıyor (maske üretildi). */
+    @Test
+    fun personMaskRuns() {
+        val img = File(ctx.cacheDir, "photo_p.png").also { makeImage(it) }
+        val ic = ClipInfo.load(ctx, Uri.fromFile(img))
+        val egl = EglCore()
+        val pb = egl.createPbuffer(64, 64)
+        egl.makeCurrent(pb)
+        val pfd = ctx.contentResolver.openFileDescriptor(ic.uri, "r")!!
+        val program = Sources.program(ic)
+        val src = Sources.open(ctx, ic, pfd.fileDescriptor, realtime = false)
+        try {
+            val pm = com.mhmmtbg.x5reframe.person.PersonMask(ic.displayAspect, stream = false)
+            assertTrue("maske üretilemedi", pm.update(program, src))
+            pm.release()
+        } finally { src.release(); program.release(); pfd.close(); egl.releaseSurface(pb); egl.release() }
     }
 
     @Test
