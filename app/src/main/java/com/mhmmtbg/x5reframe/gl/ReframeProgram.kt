@@ -54,9 +54,9 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
     var dynamicStitch = true
     /** Önizleme: 48 bölge; dışa aktarım: 192 bölge x 3 kuşak (ince taneli). */
     /** Shader'ı derlenemeyen GPU'larda null: klasik dikişe düşülür, uygulama çökmez. */
-    val stitch: StitchEstimator? = if (rig == null) null else runCatching {
-        if (highQualityStitch) StitchEstimator(rig, 192, 5).apply { async = false } else StitchEstimator(rig, 48, 1)
-    }.onFailure { android.util.Log.w("ReframeProgram", "dinamik dikiş kapalı: ${it.message}") }.getOrNull()
+    val stitch: StitchEstimator? = rig?.let { r -> runCatching {
+        if (highQualityStitch) StitchEstimator(r, 192, 5).apply { async = false } else StitchEstimator(r, 48, 1)
+    }.onFailure { android.util.Log.w("ReframeProgram", "dinamik dikiş kapalı: ${it.message}") }.getOrNull() }
     private var framesSinceEstimate = Int.MAX_VALUE / 2
 
     /** Düz klip: görüntünün en/boy oranı (döndürme uygulanmış) ve çerçeveye yerleşimi. */
