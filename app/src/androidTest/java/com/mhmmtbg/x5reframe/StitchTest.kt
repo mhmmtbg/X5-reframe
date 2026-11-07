@@ -63,9 +63,9 @@ class StitchTest {
             program.dynamicStitch = true
             program.draw(w, h, view, source)
             val on = read(w, h)
-            val rep = program.stitch.lastReport
+            val rep = program.stitch!!.lastReport
             log.append("t=${t / 1000} ms $rep\n")
-            val st = program.stitch
+            val st = program.stitch!!
             // Orta kuşak, 4 hücrede bir
             val mid = (st.bands / 2) * st.bins
             log.append("delta=" + (0 until st.bins step 4).joinToString(",") { "%.1f".format(st.delta[mid + it]) } + "\n")

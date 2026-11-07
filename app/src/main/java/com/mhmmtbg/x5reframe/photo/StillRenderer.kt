@@ -35,7 +35,7 @@ object StillRenderer {
         try {
             program.dynamicStitch = dynamicStitch
             program.color = color
-            if (dynamicStitch) repeat(2) { program.stitch.estimate(src, 1f) }
+            if (dynamicStitch) repeat(2) { program.stitch?.estimate(src, 1f) }
             program.drawScene(w, h, rects, views, src, base)
             val buf = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
             GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)

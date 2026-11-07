@@ -237,7 +237,7 @@ class Player(
         if (t != stitchPts) {
             // Oynatırken birkaç karede bir, dururken her yeni karede ölç.
             // Oynarken GPU'yu bekletmeyen eşzamansız okuma; dururken bu karenin sonucu hemen gerekir.
-            program.stitch.async = playing
+            program.stitch?.async = playing
             program.updateStitch(source, if (playing) 10 else 1, if (playing) 0.4f else 0.7f)
             stitchPts = t
         }

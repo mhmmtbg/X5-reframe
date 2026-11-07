@@ -50,7 +50,10 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
     /** Bölgesel (dinamik) dikiş; kapalıyken klasik tek mesafeli dikiş. */
     var dynamicStitch = true
     /** Önizleme: 48 bölge; dışa aktarım: 192 bölge x 3 kuşak (ince taneli). */
-    val stitch = if (highQualityStitch) StitchEstimator(rig, 192, 5).apply { async = false } else StitchEstimator(rig, 48, 1)
+    /** Shader'ı derlenemeyen GPU'larda null: klasik dikişe düşülür, uygulama çökmez. */
+    val stitch: StitchEstimator? = runCatching {
+        if (highQualityStitch) StitchEstimator(rig, 192, 5).apply { async = false } else StitchEstimator(rig, 48, 1)
+    }.onFailure { android.util.Log.w("ReframeProgram", "dinamik dikiş kapalı: ${it.message}") }.getOrNull()
     private var framesSinceEstimate = Int.MAX_VALUE / 2
 
     init {
@@ -95,11 +98,11 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
         if (!dynamicStitch || !src.hasFrame) return
         if (++framesSinceEstimate < every) return
         framesSinceEstimate = 0
-        stitch.estimate(src, smoothing)
+        stitch?.estimate(src, smoothing)
     }
 
     /** Arama / klip değişimi: sonraki ölçüm doğrudan uygulanır. */
-    fun resetStitch() { stitch.reset(); framesSinceEstimate = Int.MAX_VALUE / 2 }
+    fun resetStitch() { stitch?.reset(); framesSinceEstimate = Int.MAX_VALUE / 2 }
 
     /** @param base sabitlemeden gelen rig_from_view temel dönüşü (yoksa kamera çerçevesi) */
     fun draw(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray? = null) =
@@ -169,11 +172,11 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
         GLES30.glUniform1f(uGradeOn, if (g != null) 1f else 0f)
         if (g != null) for (i in 0..3) GLES30.glUniform4f(uGrade[i], g[i * 4], g[i * 4 + 1], g[i * 4 + 2], g[i * 4 + 3])
         GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, stitch.seamTexture)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, stitch?.seamTexture ?: 0)
         GLES30.glUniform1i(uSeam, 2)
-        GLES30.glUniform1f(uSeamOn, if (dynamicStitch) 1f else 0f)
+        GLES30.glUniform1f(uSeamOn, if (dynamicStitch && stitch != null) 1f else 0f)
         GLES30.glUniform2f(uSeamRange, StitchEstimator.DELTA_MIN, StitchEstimator.DELTA_MAX)
-        GLES30.glUniform2f(uSeamBands, stitch.bands.toFloat(), StitchEstimator.BAND_SPAN)
+        GLES30.glUniform2f(uSeamBands, (stitch?.bands ?: 1).toFloat(), StitchEstimator.BAND_SPAN)
         for (i in 0..1) {
             val t = rig.lenses[i].translationRig
             GLES30.glUniform3f(uTrans[i], t[0].toFloat(), t[1].toFloat(), t[2].toFloat())
@@ -186,7 +189,7 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
     }
 
     fun release() {
-        stitch.release()
+        stitch?.release()
         GLES30.glDeleteProgram(program)
         GLES30.glDeleteBuffers(1, intArrayOf(vbo), 0)
     }

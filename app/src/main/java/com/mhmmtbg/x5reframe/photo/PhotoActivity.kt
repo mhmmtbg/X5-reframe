@@ -90,7 +90,7 @@ class PhotoActivity : AppCompatActivity() {
                 bmp.recycle()
                 program = ReframeProgram(pi.rig, highQualityStitch = true).also { p ->
                     p.dynamicStitch = getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("dynamic_stitch", true)
-                    if (p.dynamicStitch) repeat(2) { p.stitch.estimate(source!!, 1f) }
+                    if (p.dynamicStitch) repeat(2) { p.stitch?.estimate(source!!, 1f) }
                 }
                 runOnUiThread { ready = true }
                 draw()
