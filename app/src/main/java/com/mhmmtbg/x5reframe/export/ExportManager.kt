@@ -33,6 +33,7 @@ object ExportManager {
         val output: EditState,
         val audio: ProjectAudio,
         val bitrateFactor: Float,
+        val format: Exporter.Format = Exporter.Format.MP4,
     ) {
         val durationUs: Long get() = segments.sumOf { it.outputDurationUs }
     }
@@ -56,8 +57,9 @@ object ExportManager {
     val queuedCount: Int get() = queue.size
 
     @Synchronized
-    fun enqueue(context: Context, title: String, segments: List<Segment>, output: EditState, audio: ProjectAudio, bitrateFactor: Float): Request {
-        val r = Request(nextId++, title, segments, output, audio, bitrateFactor)
+    fun enqueue(context: Context, title: String, segments: List<Segment>, output: EditState, audio: ProjectAudio, bitrateFactor: Float,
+                format: Exporter.Format = Exporter.Format.MP4): Request {
+        val r = Request(nextId++, title, segments, output, audio, bitrateFactor, format)
         queue.put(r)
         val app = context.applicationContext
         val intent = Intent(app, ExportService::class.java)
@@ -92,7 +94,7 @@ object ExportManager {
 
     private fun run(context: Context, req: Request) {
         val o = req.output
-        val (w, h) = o.outputSize()
+        val (w, h) = if (req.format == Exporter.Format.GIF) o.copy(quality = com.mhmmtbg.x5reframe.model.Quality.GIF).outputSize() else o.outputSize()
         val baseMbps = if (o.hevc) o.quality.mbpsAvc * 0.7f else o.quality.mbpsAvc.toFloat()
         val bitrate = (baseMbps * req.bitrateFactor * 1_000_000).toInt()
         val spherical = req.segments.all { it.edit.copy(aspect = o.aspect).isSpherical }
@@ -103,7 +105,8 @@ object ExportManager {
             voices = au.voices.map { AudioMixer.VoiceSpec(it.uri, it.startUs, it.durationUs, it.volume) },
             duck = au.duck, denoise = au.denoise,
         ) else null
-        val output = Exporter.Output(w, h, o.hevc, bitrate, o.includeAudio, spherical, mix, o.fps.takeIf { it > 0 }?.toFloat())
+        val output = Exporter.Output(w, h, o.hevc, bitrate, o.includeAudio, spherical && req.format == Exporter.Format.MP4, mix,
+            if (req.format == Exporter.Format.GIF) 15f else o.fps.takeIf { it > 0 }?.toFloat(), req.format)
         _state.value = Status.Running(req, 0f, 0f, queue.size)
 
         val jobs = runCatching { buildJobs(context, req.segments) }.getOrElse {

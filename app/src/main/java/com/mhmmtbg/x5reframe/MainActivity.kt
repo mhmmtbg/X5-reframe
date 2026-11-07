@@ -46,6 +46,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -320,6 +321,14 @@ class MainActivity : AppCompatActivity() {
                     lrv = it; prefs.edit().putBoolean(KEY_PREFER_LRV, it).apply()
                 }
             }
+            item { SectionTitle("Depolama") }
+            item {
+                var size by remember { mutableStateOf(-1L) }
+                LaunchedEffect(Unit) { size = withContext(Dispatchers.IO) { cleanableBytes() } }
+                SettingRow("Önbelleği temizle", if (size < 0) "Hesaplanıyor…" else "Geçici dosyalar ve kullanılmayan kayıtlar: ${"%.1f".format(size / 1048576.0)} MB") {
+                    Thread { val freed = cleanCache(); runOnUiThread { size = 0; android.widget.Toast.makeText(this@MainActivity, "${"%.1f".format(freed / 1048576.0)} MB boşaltıldı", android.widget.Toast.LENGTH_SHORT).show() } }.start()
+                }
+            }
             item { SectionTitle("Dikiş") }
             item {
                 SwitchRow("Dinamik dikiş", "Dikiş çizgisini her bölgede yakındaki nesnelere göre hizalar ve iki lensin rengini eşitler.", dyn) {
@@ -550,6 +559,23 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             item { ExportBanner() }
+            val lastId = prefs.getString("last_project", null)
+            projects.firstOrNull { it.id == lastId }?.let { last ->
+                item {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.Surface)
+                            .border(1.dp, Palette.Outline, RoundedCornerShape(14.dp)).clickable { openProject(last) }.padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(Glyphs.Play, null, Modifier.size(22.dp), tint = Palette.AccentText)
+                        Spacer(Modifier.width(12.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Kaldığın yerden devam et", style = MaterialTheme.typography.titleSmall)
+                            Text(last.name, color = Palette.Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
+                }
+            }
             if (!tipHidden) item {
                 TipCard(TIPS[dayIndex() % TIPS.size]) { prefs.edit().putInt("tip_hidden_day", dayIndex()).apply(); tipHidden = true }
             }
@@ -567,6 +593,24 @@ class MainActivity : AppCompatActivity() {
             }
             items(projects, key = { it.id }) { p -> Box(Modifier.padding(horizontal = 16.dp)) { ProjectCard(p) } }
         }
+    }
+
+    /** Hiçbir projenin kullanmadığı dondurulmuş kare / seslendirme dosyaları ve önbellek. */
+    private fun orphanFiles(): List<java.io.File> {
+        val refs = store.list().joinToString("\n") { ProjectStore.toJson(it).toString() }
+        return listOf("freeze", "voice").flatMap { d -> java.io.File(filesDir, d).listFiles().orEmpty().toList() }
+            .filter { f -> !refs.contains(f.name) }
+    }
+
+    private fun dirSize(f: java.io.File): Long = if (f.isDirectory) f.listFiles().orEmpty().sumOf { dirSize(it) } else f.length()
+
+    private fun cleanableBytes(): Long = dirSize(cacheDir) + orphanFiles().sumOf { it.length() }
+
+    private fun cleanCache(): Long {
+        val before = cleanableBytes()
+        cacheDir.listFiles().orEmpty().forEach { it.deleteRecursively() }
+        orphanFiles().forEach { it.delete() }
+        return before - cleanableBytes()
     }
 
     private fun dayIndex() = (System.currentTimeMillis() / 86_400_000L).toInt()

@@ -776,6 +776,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 }.also { saveHandler.postDelayed({ captureThumb() }, 1500) }
             }
             project = proj
+            if (!store.readOnly) getSharedPreferences("prefs", MODE_PRIVATE).edit().putString("last_project", proj.id).apply()
             favorite = proj.segments.firstOrNull()?.clipUri?.toString()?.let {
                 getSharedPreferences("prefs", MODE_PRIVATE).getStringSet("favorites", emptySet()).orEmpty().contains(it)
             } ?: false
@@ -1270,17 +1271,17 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             if (p != null) { if (p.playing) p.pause() else { c.clearLive(); p.play() } }
         },
         seek = { us -> c.clearLive(); c.positionUs = us; player?.seekTo(us) },
-        startExport = { whole -> startExport(c, whole) },
+        startExport = { whole, format -> startExport(c, whole, format) },
         cancelExport = { com.mhmmtbg.x5reframe.export.ExportManager.cancelCurrent() },
         open = { uri ->
             runCatching {
-                startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+                startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, contentResolver.getType(uri) ?: "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
             }
         },
         share = { uri ->
             startActivity(
                 Intent.createChooser(
-                    Intent(Intent.ACTION_SEND).setType("video/mp4").putExtra(Intent.EXTRA_STREAM, uri)
+                    Intent(Intent.ACTION_SEND).setType(contentResolver.getType(uri) ?: "video/mp4").putExtra(Intent.EXTRA_STREAM, uri)
                         .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION), "Paylaş"
                 )
             )
@@ -1552,7 +1553,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private val notifPermission = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) {}
 
     /** Dışa aktarımı kuyruğa ekle; arka planda (ön plan hizmetinde) çalışır. */
-    private fun startExport(c: EditorController, whole: Boolean) {
+    private fun startExport(c: EditorController, whole: Boolean, format: com.mhmmtbg.x5reframe.media.Exporter.Format = com.mhmmtbg.x5reframe.media.Exporter.Format.MP4) {
         player?.pause()
         storeCurrentEdit()
         if (Build.VERSION.SDK_INT >= 33 &&
@@ -1562,7 +1563,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val cur = c.state
         val segs = if (whole) segments else listOf(segments[segIndex].copy(edit = cur))
         val title = project?.name ?: c.fileName
-        val req = com.mhmmtbg.x5reframe.export.ExportManager.enqueue(this, title, segs, cur, projectAudio, cur.bitrate.factor)
+        val req = com.mhmmtbg.x5reframe.export.ExportManager.enqueue(this, title, segs, cur, projectAudio, cur.bitrate.factor, format)
         if (com.mhmmtbg.x5reframe.export.ExportManager.queuedCount > 0 && req.id > 1) c.say("Sıraya eklendi")
     }
 

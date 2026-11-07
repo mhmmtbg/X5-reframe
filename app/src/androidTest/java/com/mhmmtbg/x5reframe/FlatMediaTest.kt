@@ -432,6 +432,46 @@ class FlatMediaTest {
         assertTrue("seslendirme duyulmuyor: $during", during > 2000)
     }
 
+    /** v3.10: GIF ve yalnız ses çıktısı. */
+    @Test
+    fun exportsGifAndAudioOnly() {
+        val vid = File(ctx.cacheDir, "gifsrc.mp4").also { makeVideo(it, 2, 0, ramp = true) }
+        val clip = ClipInfo.load(ctx, Uri.fromFile(vid))
+        fun export(o: Exporter.Output): Uri {
+            val done = CountDownLatch(1)
+            var outUri: Uri? = null; var error: String? = null
+            val ex = Exporter(ctx, o, listOf(Exporter.Job(clip, 0, 2_000_000, { listOf(ViewParams()) })), object : Exporter.Listener {
+                override fun onProgress(fraction: Float, speed: Float) {}
+                override fun onDone(uri: Uri, seconds: Float) { outUri = uri; done.countDown() }
+                override fun onFailed(message: String) { error = message; done.countDown() }
+            })
+            Thread { ex.run() }.start()
+            assertTrue("zaman aşımı", done.await(5, TimeUnit.MINUTES))
+            assertTrue("dışa aktarım hatası: $error", error == null && outUri != null)
+            return outUri!!
+        }
+        val gif = export(Exporter.Output(240, 180, false, 0, fps = 10f, format = Exporter.Format.GIF))
+        val bytes = ctx.contentResolver.openInputStream(gif)!!.use { it.readBytes() }
+        assertEquals("GIF89a", String(bytes, 0, 6))
+        val d = android.graphics.ImageDecoder.decodeDrawable(android.graphics.ImageDecoder.createSource(java.nio.ByteBuffer.wrap(bytes)))
+        android.util.Log.i("FlatMediaTest", "gif ${bytes.size} B ${d.intrinsicWidth}x${d.intrinsicHeight} ${d.javaClass.simpleName}")
+        assertEquals(240, d.intrinsicWidth)
+        assertTrue("animasyon değil", d is android.graphics.drawable.AnimatedImageDrawable)
+
+        val voice = File(ctx.cacheDir, "tone.wav")
+        wav(voice, 2.0) { i -> (6000 * kotlin.math.sin(2 * Math.PI * 330 * i / 48_000)).toInt().toShort() }
+        val aud = export(Exporter.Output(320, 240, false, 0, mix = Exporter.Mix(null, 1f, voices = listOf(com.mhmmtbg.x5reframe.media.AudioMixer.VoiceSpec(Uri.fromFile(voice), 0, 2_000_000, 1f))),
+            format = Exporter.Format.AUDIO))
+        val mx = MediaExtractor()
+        ctx.contentResolver.openFileDescriptor(aud, "r")!!.use { mx.setDataSource(it.fileDescriptor) }
+        assertEquals(1, mx.trackCount)
+        val f = mx.getTrackFormat(0)
+        mx.release()
+        android.util.Log.i("FlatMediaTest", "audio-only $f")
+        assertTrue(f.getString(MediaFormat.KEY_MIME)!!.startsWith("audio/"))
+        assertTrue(kotlin.math.abs(f.getLong(MediaFormat.KEY_DURATION) - 2_000_000) < 200_000)
+    }
+
     @Test
     fun editorOpensFlatClip() {
         val vid = File(ctx.cacheDir, "flat_ui.mp4").also { makeVideo(it, 3, 0) }

@@ -87,7 +87,9 @@ class Player(
                 program = Sources.program(clip).apply { dynamicStitch = prefs.getBoolean("dynamic_stitch", true) }
                 overlay = com.mhmmtbg.x5reframe.gl.OverlayRenderer()
                 source = Sources.open(appContext, clip, pfd.fileDescriptor, realtime = true, lrvFd = lrvPfd?.fileDescriptor)
+                android.util.Log.i("X5Player", "kaynak açıldı: ${source.javaClass.simpleName} ${clip.kind}")
                 source.seekAndShow(0, frameDurUs)
+                android.util.Log.i("X5Player", "ilk kare: ${source.currentPts}")
                 drawNow()
                 postPosition(source.currentPts)
             } catch (t: Throwable) {

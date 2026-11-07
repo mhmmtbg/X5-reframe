@@ -48,7 +48,11 @@ class Exporter(
         val mix: Mix? = null,
         /** Çıktı kare hızı; null = ilk klibin kare hızı. */
         val fps: Float? = null,
+        val format: Format = Format.MP4,
     )
+
+    /** Çıktı biçimi: video, hareketli GIF ya da yalnızca ses (M4A). */
+    enum class Format { MP4, GIF, AUDIO }
 
     data class Mix(
         val music: MusicSpec?, val originalVolume: Float,
@@ -123,6 +127,9 @@ class Exporter(
 
     @Volatile var cancelled = false
 
+    /** Kare çıkışı (video ya da GIF); [run] içinde kurulur. */
+    private var emitFrame: (Long) -> Unit = {}
+
     companion object {
         /** Geriye oynatmada bir blokta tutulan kare sayısı (çıktı çözünürlüğünde doku). */
         const val BLOCK = 8
@@ -173,17 +180,19 @@ class Exporter(
         var outUri: Uri? = null
         var egl: EglCore? = null
         val pfds = ArrayList<ParcelFileDescriptor>()
+        val gif = output.format == Format.GIF
+        val audioOnly = output.format == Format.AUDIO
         try {
             require(jobs.isNotEmpty()) { "Dışa aktarılacak parça yok" }
-            mixSpec = output.mix ?: if (output.includeAudio && !audioCopyable()) Mix(null, 1f) else null
+            mixSpec = if (gif) null else if (audioOnly) (output.mix ?: Mix(null, 1f)) else output.mix ?: if (output.includeAudio && !audioCopyable()) Mix(null, 1f) else null
             val mime = if (output.hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
-            checkSupported(mime, output.width, output.height)
+            if (!gif && !audioOnly) checkSupported(mime, output.width, output.height)
 
             outUri = createOutput()
             val outPfd = context.contentResolver.openFileDescriptor(outUri, "rw")!!
             // 360° çıktıda önce geçici dosyaya yazılır (moov kutusu düzenlenebilsin diye).
-            val tmp = if (output.spherical) java.io.File(context.cacheDir, "export360.mp4").also { it.delete() } else null
-            muxer = if (tmp != null) MediaMuxer(tmp.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            val tmp = if (output.spherical && !gif && !audioOnly) java.io.File(context.cacheDir, "export360.mp4").also { it.delete() } else null
+            if (!gif) muxer = if (tmp != null) MediaMuxer(tmp.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
             else MediaMuxer(outPfd.fileDescriptor, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
             val fpsHint = output.fps ?: jobs.first().clip.frameRate
@@ -203,7 +212,7 @@ class Exporter(
                 var guard = 0
                 while (aac!!.outputFormat == null && guard++ < 50) produceAudio(minOf(totalOutUs, (guard + 1) * 21_333L))
                 audioFormat = aac!!.outputFormat
-            } else if (output.includeAudio) {
+            } else if (output.includeAudio && !gif) {
                 for (j in jobs) {
                     val a = j.clip.audioTrack ?: continue
                     context.contentResolver.openFileDescriptor(j.clip.uri, "r")!!.use { pfd ->
@@ -214,16 +223,67 @@ class Exporter(
                 }
             }
 
+            if (audioOnly) {
+                // Yalnızca ses: karışım zaman çizelgesi boyunca üretilip M4A'ya yazılır
+                val af = audioFormat ?: throw IllegalStateException("Projede ses yok")
+                audioTrack = muxer.addTrack(af)
+                muxer.start(); muxerStarted = true
+                pending.forEach { (b, i) -> muxer.writeSampleData(audioTrack, b, i); audioWritten++ }
+                pending.clear()
+                var tUs = 0L
+                var last = 0L
+                while (tUs < totalOutUs && !cancelled) {
+                    tUs = minOf(totalOutUs, tUs + 200_000)
+                    produceAudio(tUs)
+                    val now = SystemClock.elapsedRealtime()
+                    if (now - last > 250) { last = now; listener.onProgress(tUs.toFloat() / totalOutUs, (tUs / 1e6f) / ((now - t0) / 1000f).coerceAtLeast(0.01f)) }
+                }
+                if (cancelled) throw InterruptedException("İptal edildi")
+                aac!!.finish(::onAacOutput)
+                muxer.stop(); muxer.release()
+                outPfd.close()
+                publish(outUri)
+                listener.onProgress(1f, 0f)
+                listener.onDone(outUri, (SystemClock.elapsedRealtime() - t0) / 1000f)
+                return
+            }
+
             val fps = output.fps ?: jobs.first().clip.frameRate
             val frameDur = (1_000_000 / fps).toLong()
-            encoder = createEncoder(mime, fps)
-            val inputSurface = encoder.createInputSurface()
-            encoder.start()
+            val inputSurface = if (gif) null else {
+                encoder = createEncoder(mime, fps)
+                encoder.createInputSurface().also { encoder.start() }
+            }
 
-            egl = EglCore()
-            val win = egl.createWindowSurface(inputSurface)
-            egl.makeCurrent(win)
+            val gl = EglCore()
+            egl = gl
+            val win = if (inputSurface != null) gl.createWindowSurface(inputSurface) else gl.createPbuffer(output.width, output.height)
+            gl.makeCurrent(win)
             val overlay = com.mhmmtbg.x5reframe.gl.OverlayRenderer()
+            // GIF: kareler okunup palete indirilir (en fazla ~15 kare/sn)
+            val gifOut = if (gif) java.io.BufferedOutputStream(java.io.FileOutputStream(outPfd.fileDescriptor), 1 shl 16) else null
+            val gifStepUs = (1_000_000 / (output.fps ?: 15f).coerceAtMost(25f)).toLong()
+            val gifEnc = gifOut?.let { GifEncoder(it, output.width, output.height, (gifStepUs / 10_000).toInt().coerceAtLeast(2)) }
+            val gifPix = if (gif) java.nio.ByteBuffer.allocateDirect(output.width * output.height * 4).order(java.nio.ByteOrder.nativeOrder()) else null
+            val gifRow = ByteArray(if (gif) output.width * output.height * 4 else 0)
+            var nextGifUs = 0L
+            /** Çizilen kareyi çıktıya ver (video kodlayıcıya ya da GIF'e). */
+            emitFrame = { tOutUs ->
+                if (gifEnc != null) {
+                    if (tOutUs >= nextGifUs) {
+                        nextGifUs += gifStepUs
+                        gifPix!!.rewind()
+                        GLES30.glReadPixels(0, 0, output.width, output.height, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, gifPix)
+                        val rowB = output.width * 4
+                        for (y in 0 until output.height) { gifPix.position((output.height - 1 - y) * rowB); gifPix.get(gifRow, y * rowB, rowB) }
+                        gifEnc.addFrame(gifRow)
+                    }
+                } else {
+                    gl.setPresentationTime(win, tOutUs * 1000)
+                    gl.swap(win)
+                    drain(false)
+                }
+            }
 
             val totalOut = (plan.totalFrames * frameDur).coerceAtLeast(1)
             val progress = Progress(t0, totalOut) { 0L }
@@ -239,7 +299,7 @@ class Exporter(
                     val start = plan.start[i] * frameDur
                     val n = plan.overlap.getOrElse(i + 1) { 0 }
                     if (job.reverse) {
-                        renderReverse(job, run.source, run.program, overlay, win, egl, frameDur, plan.frames[i], start, Progress(t0, totalOut) { start })
+                        renderReverse(job, run.source, run.program, overlay, win, gl, frameDur, plan.frames[i], start, Progress(t0, totalOut) { start })
                         run.close()
                         continue
                     }
@@ -249,9 +309,7 @@ class Exporter(
                     for (k in k0 until plan.frames[i] - n) {
                         if (cancelled) break
                         val pts = run.frame(k) ?: break
-                        egl.setPresentationTime(win, (start + k * frameDur) * 1000)
-                        egl.swap(win)
-                        drain(false)
+                        emitFrame(start + k * frameDur)
                         audio?.writeUpTo(pts, start)
                         if (mixer != null) produceAudio(start + k * frameDur)
                         progress.report(start + k * frameDur)
@@ -268,9 +326,7 @@ class Exporter(
                             com.mhmmtbg.x5reframe.gl.Fbo.unbind()
                             transition!!.draw(fbo[0].tex, fbo[1].tex, output.width, output.height, (q + 0.5f) / n, type)
                             val tOut = start + ka * frameDur
-                            egl.setPresentationTime(win, tOut * 1000)
-                            egl.swap(win)
-                            drain(false)
+                            emitFrame(tOut)
                             if (pa != null) audio?.writeUpTo(pa, start)
                             if (mixer != null) produceAudio(tOut)
                             progress.report(tOut)
@@ -289,6 +345,15 @@ class Exporter(
             val timeline = totalOut
             overlay.release()
             if (cancelled) throw InterruptedException("İptal edildi")
+            if (gifEnc != null) {
+                gifEnc.finish(); gifOut.close()
+                outPfd.close()
+                egl.releaseSurface(win)
+                publish(outUri)
+                listener.onProgress(1f, 0f)
+                listener.onDone(outUri, (SystemClock.elapsedRealtime() - t0) / 1000f)
+                return
+            }
 
             encoder.signalEndOfInputStream()
             drain(true)
@@ -311,7 +376,7 @@ class Exporter(
             }
             outPfd.close()
             egl.releaseSurface(win)
-            inputSurface.release()
+            inputSurface?.release()
             publish(outUri)
             listener.onProgress(1f, 0f)
             listener.onDone(outUri, (SystemClock.elapsedRealtime() - t0) / 1000f)
@@ -447,9 +512,7 @@ class Exporter(
                     val tOut = k * frameDur
                     blit.draw(texs[idx], w, h, fadeFactor(job, tOut))
                     overlay.draw(w, h, job.layers, pts[idx], job.effEndUs)
-                    egl.setPresentationTime(win, (timeline + tOut) * 1000)
-                    egl.swap(win)
-                    drain(false)
+                    emitFrame(timeline + tOut)
                     if (mixer != null) produceAudio(timeline + tOut)
                     progress.report(tOut)
                 }
@@ -613,24 +676,22 @@ class Exporter(
     }
 
     private fun createOutput(): Uri {
-        val name = "X5_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".mp4"
-        val values = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, name)
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            if (Build.VERSION.SDK_INT >= 29) {
-                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/X5Reframe")
-                put(MediaStore.Video.Media.IS_PENDING, 1)
-            }
+        val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val (name, mimeType, dir, collection) = when (output.format) {
+            Format.MP4 -> listOf("X5_$stamp.mp4", "video/mp4", Environment.DIRECTORY_MOVIES, MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY))
+            Format.GIF -> listOf("X5_$stamp.gif", "image/gif", Environment.DIRECTORY_PICTURES, MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY))
+            Format.AUDIO -> listOf("X5_$stamp.m4a", "audio/mp4", Environment.DIRECTORY_MUSIC, MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY))
         }
-        val collection = if (Build.VERSION.SDK_INT >= 29)
-            MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        else MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        return context.contentResolver.insert(collection, values) ?: throw IllegalStateException("Çıktı dosyası oluşturulamadı")
+        val values = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, name as String)
+            put(MediaStore.MediaColumns.MIME_TYPE, mimeType as String)
+            put(MediaStore.MediaColumns.RELATIVE_PATH, "$dir/X5Reframe")
+            put(MediaStore.MediaColumns.IS_PENDING, 1)
+        }
+        return context.contentResolver.insert(collection as Uri, values) ?: throw IllegalStateException("Çıktı dosyası oluşturulamadı")
     }
 
     private fun publish(uri: Uri) {
-        if (Build.VERSION.SDK_INT >= 29) {
-            context.contentResolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
-        }
+        context.contentResolver.update(uri, ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }, null, null)
     }
 }

@@ -5,7 +5,11 @@ enum class Aspect(val label: String, val w: Int, val h: Int) {
 }
 
 enum class Quality(val label: String, val longSide: Int, val mbpsAvc: Int) {
-    FHD("1080p", 1920, 18), QHD("2.7K", 2704, 32), UHD("4K", 3840, 55)
+    HD("720p", 1280, 8), FHD("1080p", 1920, 18), QHD("2.7K", 2704, 32), UHD("4K", 3840, 55),
+    /** Yalnızca GIF çıktısı için (seçim listesinde gösterilmez). */
+    GIF("GIF", 480, 0);
+
+    companion object { val selectable get() = values().filter { it != GIF } }
 }
 
 /** Çoklu açı düzeni: bölmelerin normalize dikdörtgenleri (x, y, w, h; sol üst köşe). */

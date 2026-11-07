@@ -78,7 +78,7 @@ class EditorActions(
     val back: () -> Unit,
     val playPause: () -> Unit,
     val seek: (Long) -> Unit,
-    val startExport: (whole: Boolean) -> Unit,
+    val startExport: (whole: Boolean, format: com.mhmmtbg.x5reframe.media.Exporter.Format) -> Unit,
     val cancelExport: () -> Unit,
     val open: (Uri) -> Unit,
     val share: (Uri) -> Unit,
@@ -1522,11 +1522,25 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
     }
 }
 
+private class ExportPreset(val label: String, val aspect: Aspect, val quality: Quality, val fps: Int,
+                           val bitrate: com.mhmmtbg.x5reframe.model.BitrateLevel = com.mhmmtbg.x5reframe.model.BitrateLevel.STANDARD, val only360: Boolean = false)
+
+private val EXPORT_PRESETS = listOf(
+    ExportPreset("Reels · TikTok", Aspect.PORTRAIT, Quality.FHD, 30, com.mhmmtbg.x5reframe.model.BitrateLevel.HIGH),
+    ExportPreset("YouTube", Aspect.LANDSCAPE, Quality.FHD, 0, com.mhmmtbg.x5reframe.model.BitrateLevel.HIGH),
+    ExportPreset("YouTube 4K", Aspect.LANDSCAPE, Quality.UHD, 0, com.mhmmtbg.x5reframe.model.BitrateLevel.HIGH),
+    ExportPreset("Instagram kare", Aspect.SQUARE, Quality.FHD, 30),
+    ExportPreset("Instagram 4:5", Aspect.FOUR_FIVE, Quality.FHD, 30),
+    ExportPreset("WhatsApp", Aspect.LANDSCAPE, Quality.HD, 30),
+    ExportPreset("YouTube 360°", Aspect.PANO, Quality.UHD, 0, com.mhmmtbg.x5reframe.model.BitrateLevel.HIGH, only360 = true),
+)
+
 @Composable
 internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi) {
     val s = c.state
     val (w, h) = s.outputSize()
     var whole by remember { mutableStateOf(seq.segments.size > 1) }
+    var format by remember { mutableStateOf(com.mhmmtbg.x5reframe.media.Exporter.Format.MP4) }
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Dışa aktar", style = MaterialTheme.typography.titleMedium)
         Text(
@@ -1549,7 +1563,7 @@ internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi)
             }
             is EditorController.ExportUi.Done -> {
                 Text(
-                    "Kaydedildi: Filmler/X5Reframe\n${"%.1f".format(ex.videoSec)} sn video ${"%.1f".format(ex.tookSec)} sn'de hazırlandı (${"%.1f".format(ex.videoSec / ex.tookSec.coerceAtLeast(0.1f))}×)",
+                    "Kaydedildi (X5Reframe klasörü)\n${"%.1f".format(ex.videoSec)} sn ${"%.1f".format(ex.tookSec)} sn'de hazırlandı (${"%.1f".format(ex.videoSec / ex.tookSec.coerceAtLeast(0.1f))}×)",
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1562,17 +1576,39 @@ internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi)
                 if (c.exportUi is EditorController.ExportUi.Failed) {
                     Text("Olmadı: ${(c.exportUi as EditorController.ExportUi.Failed).message}", color = Palette.Error, style = MaterialTheme.typography.bodyMedium)
                 }
-                LabeledRow("Oran") {
+                LabeledRow("Biçim") {
+                    Segmented(com.mhmmtbg.x5reframe.media.Exporter.Format.values().toList(), format,
+                        { when (it) { com.mhmmtbg.x5reframe.media.Exporter.Format.MP4 -> "Video"; com.mhmmtbg.x5reframe.media.Exporter.Format.GIF -> "GIF"; else -> "Yalnız ses" } },
+                        { format = it }, Modifier.weight(1f))
+                }
+                if (format == com.mhmmtbg.x5reframe.media.Exporter.Format.MP4) {
+                    Text("Hazır ayarlar", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        EXPORT_PRESETS.filter { !it.only360 || c.clip.is360 }.forEach { p ->
+                            Chip(p.label, s.aspect == p.aspect && s.quality == p.quality && s.fps == p.fps) {
+                                c.commit(s.copy(aspect = p.aspect, quality = p.quality, fps = p.fps, hevc = false, bitrate = p.bitrate)); c.say(p.label)
+                            }
+                        }
+                    }
+                }
+                if (format != com.mhmmtbg.x5reframe.media.Exporter.Format.AUDIO) LabeledRow("Oran") {
                     Segmented(Aspect.values().toList(), s.aspect, { it.label }, { c.commit(s.copy(aspect = it)) }, Modifier.weight(1f))
                 }
-                LabeledRow("Çözünürlük") {
-                    Segmented(Quality.values().toList(), s.quality, { it.label }, { c.commit(s.copy(quality = it)) }, Modifier.weight(1f))
+                if (format == com.mhmmtbg.x5reframe.media.Exporter.Format.MP4) LabeledRow("Çözünürlük") {
+                    Segmented(Quality.selectable, s.quality, { it.label }, { c.commit(s.copy(quality = it)) }, Modifier.weight(1f))
                 }
-                LabeledRow("Kare hızı") {
+                if (format == com.mhmmtbg.x5reframe.media.Exporter.Format.MP4) LabeledRow("Kare hızı") {
                     val src = c.clip.frameRate.roundToInt()
-                    Segmented(listOf(0, 24, 25, 30).filter { it == 0 || it < src || it == src }.distinct(), s.fps,
+                    Segmented(listOf(0, 24, 25, 30, 50, 60).filter { it == 0 || it <= src + 1 }.distinct(), s.fps,
                         { if (it == 0) "Orijinal ($src)" else "$it" }, { c.commit(s.copy(fps = it)) }, Modifier.weight(1f))
                 }
+                if (format == com.mhmmtbg.x5reframe.media.Exporter.Format.GIF)
+                    Text("GIF: uzun kenar 480 px, 15 kare/sn, sessiz. Kısa anlar (≤ 15 sn) için uygundur; dosya Resimler/X5Reframe'e kaydedilir.",
+                        color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+                if (format == com.mhmmtbg.x5reframe.media.Exporter.Format.AUDIO)
+                    Text("Yalnız ses: orijinal ses, müzik ve seslendirmeler karıştırılıp M4A (AAC) olarak Müzik/X5Reframe'e kaydedilir.",
+                        color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+                if (format == com.mhmmtbg.x5reframe.media.Exporter.Format.MP4) {
                 LabeledRow("Bit hızı") {
                     Segmented(com.mhmmtbg.x5reframe.model.BitrateLevel.values().toList(), s.bitrate, { it.label }, { c.commit(s.copy(bitrate = it)) }, Modifier.weight(1f))
                 }
@@ -1587,13 +1623,14 @@ internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi)
                 val mbps = (if (s.hevc) s.quality.mbpsAvc * 0.7f else s.quality.mbpsAvc.toFloat()) * s.bitrate.factor
                 Text("Tahmini boyut: ~${(mbps * durSec / 8).roundToInt()} MB · ${"%.0f".format(durSec)} sn",
                     color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+                }
                 if (seq.segments.size > 1) {
                     LabeledRow("Kapsam") {
                         Segmented(listOf(true, false), whole, { if (it) "Tüm proje (${seq.segments.size})" else "Bu parça" }, { whole = it }, Modifier.weight(1f))
                     }
                 }
                 Button(
-                    onClick = { a.startExport(whole) }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), elevation = null,
+                    onClick = { a.startExport(whole, format) }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), elevation = null,
                     shape = RoundedCornerShape(10.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Palette.Accent, contentColor = Palette.OnAccent),
                 ) { Text("Başlat") }

@@ -54,7 +54,14 @@ class TrackDecoder(fd: FileDescriptor, track: Int, private val surface: Surface,
     fun nextOutput(): Int {
         if (outputEos) return -1
         var idle = 0
+        val t0 = System.nanoTime()
+        var waits = 0
         while (true) {
+            // Kod çözücü uzun süre hiç çıktı vermiyorsa (kaynak tükenmiş / takılmış) sonsuza dek bekleme
+            if (++waits % 500 == 0 && System.nanoTime() - t0 > 12_000_000_000L) {
+                android.util.Log.e("TrackDecoder", "12 sn çıktı yok (giriş bitti=$inputEos, son pts=$lastPts)")
+                throw IllegalStateException("Video çözücü yanıt vermiyor")
+            }
             if (!inputEos) {
                 val ii = codec.dequeueInputBuffer(1000)
                 if (ii >= 0) {
