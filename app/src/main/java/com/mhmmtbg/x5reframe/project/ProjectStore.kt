@@ -81,10 +81,10 @@ class ProjectStore(context: Context) {
     fun newSegment(clipUri: Uri, clipName: String, durationUs: Long, lrvUri: Uri?, edit: EditState? = null) =
         Segment(UUID.randomUUID().toString(), clipUri, clipName, durationUs, edit ?: EditState(outUs = durationUs), lrvUri)
 
-    @Synchronized
     /** Kablosuz önizlemede hiçbir şey diske yazılmaz (projeler listesine düşmez). */
     var readOnly = false
 
+    @Synchronized
     fun save(p: Project) {
         if (readOnly) return
         val tmp = File(dir, "${p.id}.json.tmp")
