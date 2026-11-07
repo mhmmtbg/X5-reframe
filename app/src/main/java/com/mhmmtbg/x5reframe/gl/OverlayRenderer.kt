@@ -129,10 +129,10 @@ class OverlayRenderer {
 
     companion object {
         /** Metni önceden çarpılmış alfa ile bir bitmap'e çizer (çok satır destekli). */
-        fun renderText(text: String, style: Layer.TextStyle, font: Layer.Font = Layer.Font.SANS_BOLD, color: Int = 0, align: Layer.Align = Layer.Align.CENTER): Bitmap {
+        fun renderText(text: String, style: Layer.TextStyle, font: Layer.Font = Layer.Font.SANS_BOLD, textColor: Int = 0, align: Layer.Align = Layer.Align.CENTER): Bitmap {
             val lines = text.ifEmpty { " " }.split('\n')
             val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                this.color = if (color != 0) color else style.fg; textSize = 96f
+                this.color = if (textColor != 0) textColor else style.fg; textSize = 96f
                 typeface = Typeface.create(Typeface.create(font.family, Typeface.NORMAL), if (font.bold) Typeface.BOLD else Typeface.NORMAL)
             }
             val lineH = p.fontSpacing
