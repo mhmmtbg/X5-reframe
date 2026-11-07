@@ -16,13 +16,26 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Sabit imza: her CI derlemesi aynı anahtarla imzalanır, böylece telefonda güncelleme kurulabilir.
+    // (Varsayılan debug anahtarı her GitHub Actions makinesinde yeniden üretiliyordu.)
+    signingConfigs {
+        create("stable") {
+            storeFile = rootProject.file("keystore/release.jks")
+            storePassword = "x5reframe-ks"
+            keyAlias = "x5reframe"
+            keyPassword = "x5reframe-ks"
+        }
+    }
+
     buildTypes {
+        debug {
+            signingConfig = signingConfigs.getByName("stable")
+        }
         release {
             isMinifyEnabled = false
             // Telefonlar 64 bit ARM: diğer mimarilerin yerel kütüphaneleri APK'yı gereksiz büyütüyor.
             ndk { abiFilters += listOf("arm64-v8a") }
-            // Kişisel kullanım: release de debug anahtarıyla imzalanır, doğrudan kurulabilir.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("stable")
         }
     }
 
