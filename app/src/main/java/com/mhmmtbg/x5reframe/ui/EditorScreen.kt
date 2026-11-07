@@ -111,6 +111,9 @@ class EditorActions(
     val analyzeFlatStab: () -> Unit = {},
     /** Otomatik altyazı: kullanılabilir yöntemler (kimlik, açıklama) ve başlatma. */
     val captionModes: () -> List<Pair<String, String>> = { emptyList() },
+    /** Ses: seslendirme kaydını başlat / durdur, ritme göre böl. */
+    val toggleVoice: () -> Unit = {},
+    val splitOnBeats: (Int) -> Unit = {},
     val autoCaptions: (String) -> Unit = {},
 )
 
@@ -199,6 +202,7 @@ fun EditorScreen(
                 t.keyframes = c.activeKeyframes.map { it.timeUs }
                 t.trackRanges = s.tracks
                 t.waveform = c.waveform
+                t.beats = c.beatMarks
                 t.layerBars = s.layers.map { l ->
                     TimelineView.LayerBar(
                         l.id, if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) l.content else "Görsel",
@@ -1414,7 +1418,45 @@ private fun AudioPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
             SwitchRow("Döngü (müzik kısaysa başa sar)", au.loop) { seq.updateAudio(au.copy(loop = it)) }
             SwitchRow("Başta yükselsin, sonda azalsın", au.fade) { seq.updateAudio(au.copy(fade = it)) }
         }
+        if (au.musicUri != null) {
+            SwitchRow("Konuşmada müziği kıs", au.duck) { seq.updateAudio(au.copy(duck = it)) }
+            if (c.beatMarks.isNotEmpty()) {
+                Text("Ritim: ${c.beatMarks.size} vuruş bu parçada (çizelgede mavi noktalar, tutamaklar yapışır)", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Ritme göre böl", style = MaterialTheme.typography.labelMedium, modifier = Modifier.align(Alignment.CenterVertically))
+                    listOf(1, 2, 4).forEach { n -> Chip(if (n == 1) "Her vuruş" else "$n vuruşta bir", false) { a.splitOnBeats(n) } }
+                }
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
+        // Bu parça
+        val segI = seq.current
+        seq.segments.getOrNull(segI)?.let { sg ->
+            Text("Bu parça", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+            VolumeRow("Parça sesi", sg.volume) { v -> seq.updateSegment(segI) { it.copy(volume = v) } }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Yükselme", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(72.dp))
+                listOf(0L, 500_000L, 1_000_000L, 2_000_000L).forEach { us -> Chip(if (us == 0L) "Yok" else "${us / 1e6} sn", sg.audioFadeInUs == us) { seq.updateSegment(segI) { it.copy(audioFadeInUs = us) } } }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Alçalma", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(72.dp))
+                listOf(0L, 500_000L, 1_000_000L, 2_000_000L).forEach { us -> Chip(if (us == 0L) "Yok" else "${us / 1e6} sn", sg.audioFadeOutUs == us) { seq.updateSegment(segI) { it.copy(audioFadeOutUs = us) } } }
+            }
+        }
+        SwitchRow("Gürültü azaltma (rüzgâr, uğultu)", au.denoise) { seq.updateAudio(au.copy(denoise = it)) }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
+        // Seslendirme
+        ActionButton(if (c.voiceRecording) "■ Kaydı durdur" else "● Seslendirme kaydet", Modifier.fillMaxWidth(), primary = !c.voiceRecording) { a.toggleVoice() }
+        Text("Oynatma çizgisinden başlar; kayıt sırasında video sessiz oynar.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        au.voices.forEachIndexed { vi, v ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("🎙 ${"%.1f".format(v.startUs / 1e6)} sn · ${"%.1f".format(v.durationUs / 1e6)} sn", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                Text("Sil", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.clickable { seq.updateAudio(au.copy(voices = au.voices.filterIndexed { k, _ -> k != vi })); c.say("Seslendirme silindi") }.padding(8.dp))
+            }
+        }
         SwitchRow("Önizlemede sesi kapat", c.previewMuted) { c.previewMuted = it; a.setMuted(it) }
+        if (au.duck || au.denoise) Text("Kısma ve gürültü azaltma dışa aktarımda uygulanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
         if (au.needsMix) Text("Ses karıştırılacağı için dışa aktarımda AAC olarak yeniden kodlanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
         if (seq.segments.any { it.reverse || it.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE || !com.mhmmtbg.x5reframe.media.AudioMixer.hasAudioAt(it.speed) })
             Text("Ters, hız eğrili ya da 0,25×–4× dışındaki parçalarda orijinal ses kapanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)

@@ -676,12 +676,16 @@ void main() {
     if (c0.z < COS_LIMIT) w0 = 0.0;
     if (c1.z < COS_LIMIT) w0 = 1.0;
 
-    vec2 tc0 = texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20));
-    vec2 tc1 = texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21));
     vec3 col = vec3(0.0);
-    if (w0 > 0.0) col += w0 * g0 * texture(uTex0, tc0).rgb;
-    if (w0 < 1.0) col += (1.0 - w0) * g1 * texture(uTex1, tc1).rgb;
-    if (uFx.z > 0.0) {
+    if (uFx.z <= 0.0) {
+        // Olağan yol: yalnızca görünen lensin izdüşümü hesaplanır
+        if (w0 > 0.0) col += w0 * g0 * texture(uTex0, texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20))).rgb;
+        if (w0 < 1.0) col += (1.0 - w0) * g1 * texture(uTex1, texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21))).rgb;
+    } else {
+        vec2 tc0 = texCoord(uTexMat0, uSub0, project(c0, uIntr0, uDist0, uDist20));
+        vec2 tc1 = texCoord(uTexMat1, uSub1, project(c1, uIntr1, uDist1, uDist21));
+        if (w0 > 0.0) col += w0 * g0 * texture(uTex0, tc0).rgb;
+        if (w0 < 1.0) col += (1.0 - w0) * g1 * texture(uTex1, tc1).rgb;
         // Keskinlik: baskın lensin dokusunda çıktı pikseli kadar komşularla (laplace)
         vec2 dx0 = dFdx(tc0), dy0 = dFdy(tc0), dx1 = dFdx(tc1), dy1 = dFdy(tc1);
         vec3 nb;

@@ -41,6 +41,10 @@ data class Segment(
     /** Geriye oynat. */
     val reverse: Boolean = false,
     val curve: com.mhmmtbg.x5reframe.model.SpeedCurve = com.mhmmtbg.x5reframe.model.SpeedCurve.NONE,
+    /** Bu parçanın orijinal ses seviyesi (0..2) ve ses yükselme / alçalma süreleri. */
+    val volume: Float = 1f,
+    val audioFadeInUs: Long = 0,
+    val audioFadeOutUs: Long = 0,
 ) {
     val outputDurationUs: Long get() = com.mhmmtbg.x5reframe.model.SpeedMap(edit.outUs - edit.inUs, speed, curve).outputUs
 }
@@ -53,10 +57,19 @@ data class ProjectAudio(
     val musicVolume: Float = 0.6f,
     val loop: Boolean = true,
     val fade: Boolean = true,
+    /** Konuşma / orijinal ses varken müziği kıs. */
+    val duck: Boolean = false,
+    /** Orijinal seste uğultu ve arka plan gürültüsünü azalt. */
+    val denoise: Boolean = false,
+    /** Seslendirmeler (proje zamanında). */
+    val voices: List<VoiceClip> = emptyList(),
 ) {
-    /** Ses yeniden kodlanmalı mı (müzik var ya da orijinal seviye değişmiş). */
-    val needsMix: Boolean get() = musicUri != null || originalVolume != 1f
+    /** Ses yeniden kodlanmalı mı (müzik, seslendirme, işleme ya da seviye değişikliği). */
+    val needsMix: Boolean get() = musicUri != null || originalVolume != 1f || voices.isNotEmpty() || denoise
 }
+
+/** Mikrofonla kaydedilmiş seslendirme: proje zaman çizelgesinde [startUs]'de başlar. */
+data class VoiceClip(val uri: Uri, val startUs: Long, val durationUs: Long, val volume: Float = 1f)
 
 /** Kaydedilmiş bir düzenleme projesi: sıralı parçalar. */
 data class Project(
@@ -141,6 +154,10 @@ class ProjectStore(context: Context) {
                 p.audio.musicUri?.let { put("musicUri", it.toString()) }
                 put("musicName", p.audio.musicName); put("musicVolume", p.audio.musicVolume.toDouble())
                 put("loop", p.audio.loop); put("fade", p.audio.fade)
+                put("duck", p.audio.duck); put("denoise", p.audio.denoise)
+                put("voices", JSONArray().apply { p.audio.voices.forEach { v ->
+                    put(JSONObject().put("uri", v.uri.toString()).put("startUs", v.startUs).put("durationUs", v.durationUs).put("volume", v.volume.toDouble()))
+                } })
             })
         }
 
@@ -153,6 +170,9 @@ class ProjectStore(context: Context) {
             put("speed", s.speed); put("transitionOut", s.transitionOut.name)
             if (s.reverse) put("reverse", true)
             if (s.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) put("curve", s.curve.name)
+            if (s.volume != 1f) put("volume", s.volume.toDouble())
+            if (s.audioFadeInUs > 0) put("audioFadeInUs", s.audioFadeInUs)
+            if (s.audioFadeOutUs > 0) put("audioFadeOutUs", s.audioFadeOutUs)
         }
 
         private fun segmentFromJson(o: JSONObject) = Segment(
@@ -164,6 +184,7 @@ class ProjectStore(context: Context) {
             runCatching { Transition.valueOf(o.optString("transitionOut")) }.getOrDefault(Transition.CUT),
             o.optBoolean("reverse", false),
             runCatching { com.mhmmtbg.x5reframe.model.SpeedCurve.valueOf(o.optString("curve", "NONE")) }.getOrDefault(com.mhmmtbg.x5reframe.model.SpeedCurve.NONE),
+            o.optDouble("volume", 1.0).toFloat(), o.optLong("audioFadeInUs", 0), o.optLong("audioFadeOutUs", 0),
         )
 
         fun fromJson(o: JSONObject): Project {
@@ -176,6 +197,11 @@ class ProjectStore(context: Context) {
                 a.optString("musicUri").takeIf { it.isNotEmpty() }?.let(Uri::parse),
                 a.optString("musicName"), a.optDouble("musicVolume", 0.6).toFloat(),
                 a.optBoolean("loop", true), a.optBoolean("fade", true),
+                a.optBoolean("duck", false), a.optBoolean("denoise", false),
+                a.optJSONArray("voices")?.let { arr -> (0 until arr.length()).mapNotNull { i ->
+                    val v = arr.getJSONObject(i)
+                    runCatching { VoiceClip(Uri.parse(v.getString("uri")), v.getLong("startUs"), v.getLong("durationUs"), v.optDouble("volume", 1.0).toFloat()) }.getOrNull()
+                } } ?: emptyList(),
             )
             return Project(o.getString("id"), o.getString("name"), o.getLong("createdAt"), o.getLong("updatedAt"), segs, audio)
         }

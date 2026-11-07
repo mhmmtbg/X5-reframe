@@ -7,6 +7,7 @@ import android.os.Build
 import com.mhmmtbg.x5reframe.insv.ClipInfo
 import com.mhmmtbg.x5reframe.media.Exporter
 import com.mhmmtbg.x5reframe.media.MusicSpec
+import com.mhmmtbg.x5reframe.media.AudioMixer
 import com.mhmmtbg.x5reframe.model.EditState
 import com.mhmmtbg.x5reframe.project.ProjectAudio
 import com.mhmmtbg.x5reframe.project.Segment
@@ -99,6 +100,8 @@ object ExportManager {
         val mix = if (au.needsMix) Exporter.Mix(
             au.musicUri?.let { MusicSpec(it, au.musicVolume, au.loop, if (au.fade) 1_500_000 else 0, if (au.fade) 2_000_000 else 0) },
             au.originalVolume,
+            voices = au.voices.map { AudioMixer.VoiceSpec(it.uri, it.startUs, it.durationUs, it.volume) },
+            duck = au.duck, denoise = au.denoise,
         ) else null
         val output = Exporter.Output(w, h, o.hevc, bitrate, o.includeAudio, spherical, mix, o.fps.takeIf { it > 0 }?.toFloat())
         _state.value = Status.Running(req, 0f, 0f, queue.size)
@@ -147,6 +150,7 @@ object ExportManager {
                 look = e.flatLook,
                 fadeInUs = if (i > 0 && segs[i - 1].transitionOut == Transition.FADE) fade else 0,
                 crossIn = if (i > 0) segs[i - 1].transitionOut else Transition.CUT,
+                volume = seg.volume, audioFadeInUs = seg.audioFadeInUs, audioFadeOutUs = seg.audioFadeOutUs,
                 crossInUs = if (i > 0 && segs[i - 1].transitionOut.overlaps) Transition.OVERLAP_US else 0,
                 fadeOutUs = if (i < segs.size - 1 && seg.transitionOut == Transition.FADE) fade else 0,
             )

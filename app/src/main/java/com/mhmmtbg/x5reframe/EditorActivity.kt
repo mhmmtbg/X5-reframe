@@ -106,11 +106,157 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     }
 
     private fun setAudio(a: com.mhmmtbg.x5reframe.project.ProjectAudio) {
+        val musicChanged = a.musicUri != projectAudio.musicUri
         projectAudio = a
         project = project?.copy(audio = a, updatedAt = System.currentTimeMillis())
         project?.let { p -> Thread { runCatching { store.save(p) } }.start() }
-        player?.setVolume(a.originalVolume)
+        applySegmentVolume()
         setupMusicPreview()
+        setupVoicePreview()
+        if (musicChanged) computeBeats()
+    }
+
+    /** Önizlemede parça sesi = proje seviyesi × parça seviyesi. */
+    private fun applySegmentVolume() {
+        val v = projectAudio.originalVolume * (segments.getOrNull(segIndex)?.volume ?: 1f)
+        player?.setVolume(v)
+    }
+
+    // ---- Müzik vuruşları ----
+    private var beatTimes: List<Long> = emptyList()
+
+    private fun computeBeats() {
+        val uri = projectAudio.musicUri
+        if (uri == null) { beatTimes = emptyList(); updateBeatMarks(); return }
+        Thread {
+            val b = runCatching { com.mhmmtbg.x5reframe.media.Beats.detect(this, uri) }.getOrDefault(emptyList())
+            runOnUiThread { if (projectAudio.musicUri == uri) { beatTimes = b; updateBeatMarks() } }
+        }.start()
+    }
+
+    /** Proje zamanındaki vuruşları seçili parçanın kaynak zamanına çevir. */
+    private fun updateBeatMarks() {
+        val c = controller ?: return
+        val seg = segments.getOrNull(segIndex) ?: return
+        var off = 0L
+        for (i in 0 until segIndex) off += segments[i].outputDurationUs
+        val dur = seg.outputDurationUs
+        val musicLen = beatTimes.lastOrNull() ?: 0L
+        val list = ArrayList<Long>()
+        if (beatTimes.isNotEmpty()) {
+            // Döngüdeki müzik: vuruşlar şarkı boyunca tekrar eder
+            var base = 0L
+            while (base <= off + dur && list.size < 2000) {
+                for (b in beatTimes) {
+                    val pt = base + b
+                    if (pt in off..(off + dur)) list += seg.edit.inUs + ((pt - off) * seg.speed).toLong()
+                }
+                if (!projectAudio.loop || musicLen <= 0) break
+                base += musicLen + (beatTimes.zipWithNext { a, b -> b - a }.average().toLong())
+            }
+        }
+        c.beatMarks = list
+    }
+
+    /** Parçayı müzik vuruşlarından böl (her [every] vuruşta bir). */
+    private fun splitOnBeats(every: Int) {
+        val c = controller ?: return
+        storeCurrentEdit()
+        val seg = segments.getOrNull(segIndex) ?: return
+        val cuts = c.beatMarks.filter { it > seg.edit.inUs + 300_000 && it < seg.edit.outUs - 300_000 }.filterIndexed { i, _ -> i % every == every - 1 }
+        if (cuts.isEmpty()) { c.say("Bu parçada bölünecek vuruş yok", false); return }
+        val bounds = listOf(seg.edit.inUs) + cuts + seg.edit.outUs
+        val parts = bounds.zipWithNext().mapIndexed { k, (a, b) ->
+            val e = seg.edit.copy(inUs = a, outUs = b)
+            if (k == 0) seg.copy(edit = e, transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT)
+            else store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, e)
+                .copy(speed = seg.speed, volume = seg.volume, transitionOut = if (k == bounds.size - 2) seg.transitionOut else com.mhmmtbg.x5reframe.project.Transition.CUT)
+        }
+        val list = segments.toMutableList().apply { removeAt(segIndex); addAll(segIndex, parts) }
+        updateSegments(list, segIndex, reopen = true)
+        c.say("Ritme göre ${parts.size} parçaya bölündü")
+    }
+
+    // ---- Seslendirme ----
+    private var recorder: android.media.MediaRecorder? = null
+    private var voiceFile: java.io.File? = null
+    private var voiceStartUs = 0L
+    private var voiceT0 = 0L
+    private val micPermission = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) startVoice() else controller?.say("Mikrofon izni verilmedi", false)
+    }
+
+    private fun toggleVoice() {
+        if (recorder != null) { stopVoice(); return }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) startVoice()
+        else micPermission.launch(android.Manifest.permission.RECORD_AUDIO)
+    }
+
+    private fun startVoice() {
+        val c = controller ?: return
+        val dir = java.io.File(filesDir, "voice").apply { mkdirs() }
+        val f = java.io.File(dir, "voice_${System.currentTimeMillis()}.m4a")
+        val r = runCatching {
+            (if (Build.VERSION.SDK_INT >= 31) android.media.MediaRecorder(this) else @Suppress("DEPRECATION") android.media.MediaRecorder()).apply {
+                setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+                setAudioSamplingRate(48_000); setAudioEncodingBitRate(128_000); setAudioChannels(1)
+                setOutputFile(f.absolutePath)
+                prepare(); start()
+            }
+        }.getOrElse { c.say("Kayıt başlatılamadı: ${it.message}", false); return }
+        recorder = r; voiceFile = f
+        voiceStartUs = timelinePosition()
+        voiceT0 = android.os.SystemClock.elapsedRealtime()
+        player?.setMuted(true)
+        player?.play()
+        c.voiceRecording = true
+        c.say("Kayıt başladı")
+    }
+
+    private fun stopVoice() {
+        val c = controller
+        val r = recorder ?: return
+        recorder = null
+        val dur = (android.os.SystemClock.elapsedRealtime() - voiceT0) * 1000
+        runCatching { r.stop() }
+        r.release()
+        player?.pause()
+        player?.setMuted(c?.previewMuted == true)
+        c?.voiceRecording = false
+        val f = voiceFile ?: return
+        if (dur < 300_000 || !f.exists()) { f.delete(); c?.say("Kayıt çok kısa", false); return }
+        setAudio(projectAudio.copy(voices = projectAudio.voices + com.mhmmtbg.x5reframe.project.VoiceClip(android.net.Uri.fromFile(f), voiceStartUs, dur)))
+        c?.say("Seslendirme eklendi · ${"%.1f".format(dur / 1e6)} sn")
+    }
+
+    // Önizlemede seslendirmeler
+    private val voicePlayers = ArrayList<Pair<com.mhmmtbg.x5reframe.project.VoiceClip, android.media.MediaPlayer>>()
+    private val voiceHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
+    private fun setupVoicePreview() {
+        voiceHandler.removeCallbacksAndMessages(null)
+        voicePlayers.forEach { runCatching { it.second.release() } }
+        voicePlayers.clear()
+        projectAudio.voices.forEach { v ->
+            runCatching {
+                android.media.MediaPlayer().apply { setDataSource(this@EditorActivity, v.uri); setVolume(v.volume.coerceAtMost(1f), v.volume.coerceAtMost(1f)); prepare() }
+            }.getOrNull()?.let { voicePlayers += v to it }
+        }
+    }
+
+    private fun syncVoices(playing: Boolean) {
+        voiceHandler.removeCallbacksAndMessages(null)
+        if (!playing || controller?.previewMuted == true || recorder != null) { voicePlayers.forEach { if (it.second.isPlaying) it.second.pause() }; return }
+        val pos = timelinePosition()
+        voicePlayers.forEach { (v, mp) ->
+            val d = v.startUs - pos
+            when {
+                d <= 0 && pos < v.startUs + v.durationUs -> { mp.seekTo((-d / 1000).toInt()); mp.start() }
+                d > 0 -> voiceHandler.postDelayed({ mp.seekTo(0); mp.start() }, d / 1000)
+            }
+        }
     }
 
     /** Önizlemede müzik: MediaPlayer, zaman çizelgesi konumuna göre başlatılır. */
@@ -137,6 +283,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     }
 
     private fun syncMusic(playing: Boolean) {
+        syncVoices(playing)
         val mp = musicPreview ?: return
         if (playing && controller?.previewMuted != true) {
             val ms = (timelinePosition() / 1000).toInt()
@@ -553,6 +700,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             segments = proj.segments
             projectAudio = proj.audio
             setupMusicPreview()
+            setupVoicePreview()
+            computeBeats()
             openSegment(0)
             if (intent.getBooleanExtra(EXTRA_AUTO, false)) {
                 intent.removeExtra(EXTRA_AUTO)
@@ -598,7 +747,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.lookProvider = { c.snapshotState.flatLook }
             p.outProvider = { c.snapshotState.outUs }
             p.layersProvider = { c.snapshotState.layers }
-            p.setVolume(projectAudio.originalVolume)
+            p.setVolume(projectAudio.originalVolume * seg.volume)
             p.setStitchInv(c.state.stitchInv)
             c.onChanged = {
                 p.setStitchInv(c.state.stitchInv)
@@ -615,6 +764,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             refreshAiState(c)
             controller = c
             player = p
+            updateBeatMarks()
             surface?.let { sf -> if (sf.isValid) p.attachSurface(sf, surfW, surfH) }
             // Parça giriş noktasından başlar; proje oynatılıyorsa kesintisiz devam eder.
             if (seg.edit.inUs > 0) { c.positionUs = seg.edit.inUs; timelineView?.positionUs = seg.edit.inUs; p.seekTo(seg.edit.inUs) }
@@ -747,6 +897,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             storeCurrentEdit()
             val list = segments.toMutableList().apply { set(i, f(get(i))) }
             updateSegments(list, segIndex, reopen = false)
+            applySegmentVolume()
+            updateBeatMarks()
         },
         freeze = { t -> freezeFrame(t) },
         applyColorToAll = { g ->
@@ -1119,6 +1271,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         deepTrack = { c.trackTarget?.let { startDeepTrack(c, c.positionUs, c.currentView, it) } },
         resumeTrack = { c.trackResume?.let { (t, box) -> c.positionUs = t; player?.seekTo(t); startDeepTrack(c, t, c.activeViewAt(t), box) } },
         requestHistogram = { player?.requestHistogram { h -> controller?.histogram = h } },
+        toggleVoice = { toggleVoice() },
+        splitOnBeats = { n -> splitOnBeats(n) },
         captionModes = {
             if (c.clip.audioTrack == null) emptyList() else buildList {
                 if (com.mhmmtbg.x5reframe.captions.Captions.onDeviceAvailable(this@EditorActivity))
@@ -1504,6 +1658,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         autoEditor?.cancelled = true
         player?.release()
         musicPreview?.release()
+        runCatching { recorder?.release() }
+        voicePlayers.forEach { runCatching { it.second.release() } }
     }
 
     companion object {

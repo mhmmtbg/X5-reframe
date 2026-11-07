@@ -50,7 +50,10 @@ class Exporter(
         val fps: Float? = null,
     )
 
-    data class Mix(val music: MusicSpec?, val originalVolume: Float)
+    data class Mix(
+        val music: MusicSpec?, val originalVolume: Float,
+        val voices: List<AudioMixer.VoiceSpec> = emptyList(), val duck: Boolean = false, val denoise: Boolean = false,
+    )
 
     /** Tek bir klip parçası. */
     class Job(
@@ -75,6 +78,10 @@ class Exporter(
         /** Önceki parçadan bu parçaya örtüşmeli geçiş (çapraz geçiş, kaydırma…): tür ve süre. */
         val crossIn: com.mhmmtbg.x5reframe.project.Transition = com.mhmmtbg.x5reframe.project.Transition.CUT,
         val crossInUs: Long = 0,
+        /** Parçanın orijinal ses seviyesi ve yükselme / alçalma. */
+        val volume: Float = 1f,
+        val audioFadeInUs: Long = 0,
+        val audioFadeOutUs: Long = 0,
     ) {
         val effEndUs: Long get() = endUs.coerceAtMost(clip.durationUs)
         val map: com.mhmmtbg.x5reframe.model.SpeedMap by lazy { com.mhmmtbg.x5reframe.model.SpeedMap(effEndUs - startUs, speed, curve) }
@@ -129,7 +136,8 @@ class Exporter(
 
     private fun audioCopyable(): Boolean {
         val fmts = jobs.map { j ->
-            if (j.speed != 1.0 || j.reverse || j.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE || j.crossInUs > 0) return false
+            if (j.speed != 1.0 || j.reverse || j.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE || j.crossInUs > 0 ||
+                j.volume != 1f || j.audioFadeInUs > 0 || j.audioFadeOutUs > 0) return false
             val a = j.clip.audioTrack ?: return jobs.none { it.clip.audioTrack != null }
             runCatching {
                 context.contentResolver.openFileDescriptor(j.clip.uri, "r")!!.use { pfd ->
@@ -186,10 +194,10 @@ class Exporter(
                 // Karışım yolu: AAC kodlayıcının biçimini almak için ilk sesi önceden üret.
                 val segs = jobs.mapIndexed { i, j ->
                     AudioMixer.Seg(j.clip.uri, if (output.includeAudio && j.audible) j.clip.audioTrack else null, j.startUs,
-                        plan.start[i] * frameDurHint, plan.frames[i] * frameDurHint, j.speed)
+                        plan.start[i] * frameDurHint, plan.frames[i] * frameDurHint, j.speed, j.volume, j.audioFadeInUs, j.audioFadeOutUs)
                 }
                 val ms = mixSpec!!
-                mixer = AudioMixer(context, segs, ms.music, if (output.includeAudio) ms.originalVolume else 0f, totalOutUs)
+                mixer = AudioMixer(context, segs, ms.music, if (output.includeAudio) ms.originalVolume else 0f, totalOutUs, ms.voices, ms.duck, ms.denoise)
                 aac = AacEncoder()
                 mixTotalUs = totalOutUs
                 var guard = 0

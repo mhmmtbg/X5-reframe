@@ -63,6 +63,9 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
     var waveform: FloatArray? = null
         set(v) { field = v; requestLayout(); invalidate() }
     var waveBinUs = 50_000L
+    /** Müzik vuruşları (bu parçanın kaynak zamanında); cetvelde nokta, yapışma noktası. */
+    var beats: List<Long> = emptyList()
+        set(v) { if (field != v) { field = v; invalidate() } }
     var layerBars: List<LayerBar> = emptyList()
         set(v) {
             if (field == v) return
@@ -176,6 +179,12 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
                 c.drawText(label(t), x + 3 * dp, top - 10 * dp, pText)
             }
             t += stepUs
+        }
+        // Müzik vuruşları
+        for (b in beats) {
+            val x = xOf(b)
+            if (x < -4 * dp || x > width + 4 * dp) continue
+            c.drawCircle(x, top - 2.5f * dp, 1.6f * dp, pKey)
         }
         // Şerit
         rect.set(maxOf(x0, 0f), top, minOf(x1, width.toFloat()), bottom)
@@ -293,6 +302,7 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
         add(positionUs); add(inUs); add(outUs); add(0L); add(durationUs)
         addAll(keyframes)
         layerBars.forEach { if (it.id != exclude) { add(it.startUs); add(it.endUs) } }
+        addAll(beats)
     }
 
     /** [us]'ya 10 dp içindeki en yakın yapışma noktası (yan etkisiz). */

@@ -380,6 +380,58 @@ class FlatMediaTest {
         } finally { src.release(); program.release(); pfd.close(); egl.releaseSurface(pb); egl.release() }
     }
 
+    /** 48 kHz stereo WAV: [gen] her örnek için değer üretir. */
+    private fun wav(file: File, seconds: Double, gen: (Int) -> Short) {
+        val n = (seconds * 48_000).toInt()
+        val bb = java.nio.ByteBuffer.allocate(44 + n * 4).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        bb.put("RIFF".toByteArray()); bb.putInt(36 + n * 4); bb.put("WAVE".toByteArray())
+        bb.put("fmt ".toByteArray()); bb.putInt(16); bb.putShort(1); bb.putShort(2); bb.putInt(48_000); bb.putInt(48_000 * 4); bb.putShort(4); bb.putShort(16)
+        bb.put("data".toByteArray()); bb.putInt(n * 4)
+        for (i in 0 until n) { val v = gen(i); bb.putShort(v); bb.putShort(v) }
+        file.writeBytes(bb.array())
+    }
+
+    /** v3.8: 120 BPM tıklama izinde vuruş aralığı ≈ 0,5 sn. */
+    @Test
+    fun detectsBeats() {
+        val f = File(ctx.cacheDir, "click.wav")
+        wav(f, 20.0) { i -> val ph = i % 24_000; if (ph < 600) (12_000 * kotlin.math.sin(ph * 0.3) * (1 - ph / 600.0)).toInt().toShort() else 0 }
+        val beats = com.mhmmtbg.x5reframe.media.Beats.detect(ctx, Uri.fromFile(f))
+        val gaps = beats.zipWithNext { x, y -> y - x }
+        android.util.Log.i("FlatMediaTest", "beats=${beats.size} gap=${gaps.average()} first=${beats.firstOrNull()}")
+        assertTrue("vuruş bulunamadı", beats.size >= 30)
+        assertTrue("tempo yanlış: ${gaps.average()}", kotlin.math.abs(gaps.average() - 500_000) < 25_000)
+    }
+
+    /** v3.8: seslendirme kendi zamanında karışıma girer; öncesi sessiz. */
+    @Test
+    fun mixesVoiceover() {
+        val vid = File(ctx.cacheDir, "silent.mp4").also { makeVideo(it, 2, 0, solid = floatArrayOf(0.2f, 0.2f, 0.2f)) }
+        val voice = File(ctx.cacheDir, "voice.wav")
+        wav(voice, 1.0) { i -> (8000 * kotlin.math.sin(2 * Math.PI * 440 * i / 48_000)).toInt().toShort() }
+        val clip = ClipInfo.load(ctx, Uri.fromFile(vid))
+        val mix = Exporter.Mix(null, 1f, voices = listOf(com.mhmmtbg.x5reframe.media.AudioMixer.VoiceSpec(Uri.fromFile(voice), 800_000, 1_000_000, 1f)))
+        val done = CountDownLatch(1)
+        var outUri: Uri? = null; var error: String? = null
+        val ex = Exporter(ctx, Exporter.Output(320, 240, false, 1_000_000, mix = mix), listOf(Exporter.Job(clip, 0, 2_000_000, { listOf(ViewParams()) })), object : Exporter.Listener {
+            override fun onProgress(fraction: Float, speed: Float) {}
+            override fun onDone(uri: Uri, seconds: Float) { outUri = uri; done.countDown() }
+            override fun onFailed(message: String) { error = message; done.countDown() }
+        })
+        Thread { ex.run() }.start()
+        assertTrue("zaman aşımı", done.await(10, TimeUnit.MINUTES))
+        assertTrue("dışa aktarım hatası: $error", error == null && outUri != null)
+        val r = com.mhmmtbg.x5reframe.media.PcmReader(ctx, outUri!!)
+        val buf = ShortArray(48_000 * 2 * 2)
+        r.read(48_000 * 2, buf, 1f, false)
+        r.close()
+        fun rms(a: Int, b: Int): Double { var e = 0.0; for (i in a until b) { val v = buf[i * 2].toDouble(); e += v * v }; return kotlin.math.sqrt(e / (b - a)) }
+        val before = rms(10_000, 30_000); val during = rms(48_000, 72_000)
+        android.util.Log.i("FlatMediaTest", "voice rms before=$before during=$during")
+        assertTrue("seslendirme öncesi sessiz olmalı: $before", before < 300)
+        assertTrue("seslendirme duyulmuyor: $during", during > 2000)
+    }
+
     @Test
     fun editorOpensFlatClip() {
         val vid = File(ctx.cacheDir, "flat_ui.mp4").also { makeVideo(it, 3, 0) }

@@ -457,6 +457,10 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         say("${news.size} altyazı satırı eklendi")
     }
 
+    /** Müzik vuruşları (parçanın kaynak zamanında) ve seslendirme kaydı durumu. */
+    var beatMarks by mutableStateOf<List<Long>>(emptyList())
+    var voiceRecording by mutableStateOf(false)
+
     /** Altyazı oluşturma ilerlemesi (null = çalışmıyor). */
     var captionProgress by mutableStateOf<Float?>(null)
 

@@ -143,8 +143,27 @@ class AudioMixer(
     private val music: MusicSpec?,
     private val originalVolume: Float,
     private val totalUs: Long,
+    private val voices: List<VoiceSpec> = emptyList(),
+    /** Konuşma / orijinal ses varken müziği kıs. */
+    private val duck: Boolean = false,
+    /** Orijinal seste uğultu ve gürültü azaltma. */
+    private val denoise: Boolean = false,
 ) {
-    class Seg(val uri: Uri, val audioTrack: Int?, val startUs: Long, val offsetUs: Long, val durationUs: Long, val speed: Double)
+    class Seg(
+        val uri: Uri, val audioTrack: Int?, val startUs: Long, val offsetUs: Long, val durationUs: Long, val speed: Double,
+        val volume: Float = 1f, val fadeInUs: Long = 0, val fadeOutUs: Long = 0,
+    )
+
+    /** Seslendirme kaydı: zaman çizelgesinde [offsetUs]'de başlar. */
+    class VoiceSpec(val uri: Uri, val offsetUs: Long, val durationUs: Long, val volume: Float)
+
+    private val voiceReaders = HashMap<Int, PcmReader>()
+    private val voiceTmp = ShortArray(2048 * 2)
+    private var duckGain = 1f
+    // Gürültü azaltma durumu: kanal başına yüksek geçiren süzgeç + gürültü tabanı izleme
+    private val hp = Array(2) { FloatArray(4) }
+    private var noiseFloor = 300f
+    private var gateGain = 1f
 
     private var producedFrames = 0L
     private var segIdx = -1
@@ -181,11 +200,53 @@ class AudioMixer(
                 }
                 val st = stretch
                 if (st != null) st.read(chunk, tmp, originalVolume) else segReader!!.read(chunk, tmp, originalVolume, false)
+                if (denoise) denoiseBlock(tmp, chunk)
+                // Parça seviyesi ve ses yükselme / alçalma
+                val segFrame0 = (producedFrames + i) - seg.offsetUs * MIX_RATE / 1_000_000
+                val durF = seg.durationUs * MIX_RATE / 1_000_000
+                val inF = seg.fadeInUs * MIX_RATE / 1_000_000; val outF = seg.fadeOutUs * MIX_RATE / 1_000_000
+                for (k in 0 until chunk) {
+                    val f = segFrame0 + k
+                    var g = seg.volume
+                    if (inF > 0 && f < inF) g *= f.toFloat() / inF
+                    if (outF > 0 && durF - f < outF) g *= ((durF - f).toFloat() / outF).coerceAtLeast(0f)
+                    if (g != 1f) {
+                        tmp[k * 2] = (tmp[k * 2] * g).coerceIn(-32768f, 32767f).toInt().toShort()
+                        tmp[k * 2 + 1] = (tmp[k * 2 + 1] * g).coerceIn(-32768f, 32767f).toInt().toShort()
+                    }
+                }
                 System.arraycopy(tmp, 0, out, i * 2, chunk * 2)
             } else if (segIdx != s) {
                 segReader?.close(); segReader = null; stretch = null; segIdx = s
             }
             i += chunk
+        }
+        // Seslendirmeler
+        val t0 = producedFrames * 1_000_000 / MIX_RATE
+        val t1 = (producedFrames + n) * 1_000_000 / MIX_RATE
+        voices.forEachIndexed { vi, v ->
+            if (t1 <= v.offsetUs || t0 >= v.offsetUs + v.durationUs) {
+                if (t0 >= v.offsetUs + v.durationUs) voiceReaders.remove(vi)?.close()
+                return@forEachIndexed
+            }
+            val r = voiceReaders.getOrPut(vi) { PcmReader(context, v.uri, null, ((t0 - v.offsetUs).coerceAtLeast(0))) }
+            // Bloğun içinde başlıyorsa baştaki kareleri atla
+            val skip = ((v.offsetUs - t0).coerceAtLeast(0) * MIX_RATE / 1_000_000).toInt().coerceAtMost(n)
+            val m = n - skip
+            r.read(m, voiceTmp, v.volume, false)
+            for (k in 0 until m) {
+                out[(skip + k) * 2] = (out[(skip + k) * 2] + voiceTmp[k * 2]).coerceIn(-32768, 32767).toShort()
+                out[(skip + k) * 2 + 1] = (out[(skip + k) * 2 + 1] + voiceTmp[k * 2 + 1]).coerceIn(-32768, 32767).toShort()
+            }
+        }
+        // Kısma: orijinal + seslendirme seviyesine göre müzik kazancı (hızlı iniş, yavaş çıkış)
+        if (duck) {
+            var e = 0.0
+            for (k in 0 until n) { val v = (out[k * 2] + out[k * 2 + 1]) * 0.5; e += v * v }
+            val rms = kotlin.math.sqrt(e / n.coerceAtLeast(1)).toFloat()
+            val target = if (rms > 900f) 0.3f else 1f
+            val coef = if (target < duckGain) 0.35f else 0.04f
+            duckGain += (target - duckGain) * coef
         }
         // Müzik
         if (music != null && music.volume > 0f) {
@@ -197,7 +258,7 @@ class AudioMixer(
                 r.read(chunk, tmp, 1f, false)
                 for (k in 0 until chunk) {
                     val f = producedFrames + done + k
-                    val g = music.volume * envelope(f * 1_000_000 / MIX_RATE)
+                    val g = music.volume * envelope(f * 1_000_000 / MIX_RATE) * (if (duck) duckGain else 1f)
                     out[(done + k) * 2] = (out[(done + k) * 2] + tmp[k * 2] * g).coerceIn(-32768f, 32767f).toInt().toShort()
                     out[(done + k) * 2 + 1] = (out[(done + k) * 2 + 1] + tmp[k * 2 + 1] * g).coerceIn(-32768f, 32767f).toInt().toShort()
                 }
@@ -206,6 +267,41 @@ class AudioMixer(
             }
         }
         producedFrames += n
+    }
+
+    /**
+     * Basit gürültü azaltma: 90 Hz yüksek geçiren (rüzgâr, uğultu) + aşağı yönlü genişletici
+     * (sesin gürültü tabanına yakın olduğu yerlerde seviye düşer, konuşma etkilenmez).
+     */
+    private fun denoiseBlock(buf: ShortArray, n: Int) {
+        // Biquad yüksek geçiren, 90 Hz, Q 0,707
+        val w0 = 2 * Math.PI * 90 / MIX_RATE
+        val alpha = kotlin.math.sin(w0) / (2 * 0.707)
+        val cs = kotlin.math.cos(w0)
+        val a0 = 1 + alpha
+        val b0 = ((1 + cs) / 2 / a0).toFloat(); val b1 = (-(1 + cs) / a0).toFloat(); val b2 = b0
+        val a1 = (-2 * cs / a0).toFloat(); val a2 = ((1 - alpha) / a0).toFloat()
+        var e = 0.0
+        for (k in 0 until n) for (ch in 0..1) {
+            val st = hp[ch]
+            val x = buf[k * 2 + ch].toFloat()
+            val y = b0 * x + b1 * st[0] + b2 * st[1] - a1 * st[2] - a2 * st[3]
+            st[1] = st[0]; st[0] = x; st[3] = st[2]; st[2] = y
+            buf[k * 2 + ch] = y.coerceIn(-32768f, 32767f).toInt().toShort()
+            e += y * y
+        }
+        val rms = kotlin.math.sqrt(e / (2 * n).coerceAtLeast(1)).toFloat()
+        // Gürültü tabanı: yavaşça yükselir, hızla iner
+        noiseFloor = if (rms < noiseFloor) noiseFloor * 0.9f + rms * 0.1f else noiseFloor * 1.0015f
+        noiseFloor = noiseFloor.coerceIn(30f, 3000f)
+        val ratio = rms / (noiseFloor * 2.5f)
+        val target = (ratio * ratio).coerceIn(0.12f, 1f)
+        val start = gateGain
+        gateGain += (target - gateGain) * (if (target > gateGain) 0.6f else 0.15f)
+        for (k in 0 until n) {
+            val g = start + (gateGain - start) * k / n
+            buf[k * 2] = (buf[k * 2] * g).toInt().toShort(); buf[k * 2 + 1] = (buf[k * 2 + 1] * g).toInt().toShort()
+        }
     }
 
     private fun envelope(tUs: Long): Float {
@@ -217,6 +313,7 @@ class AudioMixer(
     }
 
     fun close() {
+        voiceReaders.values.forEach { runCatching { it.close() } }; voiceReaders.clear()
         segReader?.close(); segReader = null
         musicReader?.close(); musicReader = null
     }
