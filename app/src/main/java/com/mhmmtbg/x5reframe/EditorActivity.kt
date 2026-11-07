@@ -274,13 +274,30 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         }.getOrNull()
     }
 
+    private var previewMapKey: Any? = null
+    private var previewMapVal: com.mhmmtbg.x5reframe.model.SpeedMap? = null
+
+    /** Seçili parçanın hız eşlemesi (önbellekli; oynatıcı iş parçacığından her karede çağrılır). */
+    @Synchronized private fun previewMap(inUs: Long, outUs: Long): com.mhmmtbg.x5reframe.model.SpeedMap? {
+        val seg = segments.getOrNull(segIndex) ?: return null
+        val key = listOf(inUs, outUs, seg.speed, seg.curve, seg.curvePoints)
+        if (key != previewMapKey) {
+            previewMapKey = key
+            previewMapVal = com.mhmmtbg.x5reframe.model.SpeedMap(outUs - inUs, seg.speed, seg.curve, seg.curvePoints)
+        }
+        return previewMapVal
+    }
+
     /** Seçili parçadaki konumun proje zaman çizelgesindeki karşılığı (µs). */
     private fun timelinePosition(): Long {
         val c = controller ?: return 0
         var off = 0L
         for (i in 0 until segIndex) off += segments[i].outputDurationUs
         val seg = segments.getOrNull(segIndex) ?: return off
-        return off + ((c.positionUs - seg.edit.inUs).coerceAtLeast(0) / seg.speed).toLong()
+        val st = c.snapshotState
+        val m = previewMap(st.inUs, st.outUs) ?: return off
+        val src = (c.positionUs - st.inUs).coerceIn(0, st.outUs - st.inUs)
+        return off + m.outputAt(if (seg.reverse) st.outUs - st.inUs - src else src)
     }
 
     private fun syncMusic(playing: Boolean) {
@@ -862,6 +879,11 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.aspectProvider = { c.snapshotState.aspect.let { it.w.toFloat() / it.h } }
             p.canvasProvider = { c.canvasMode }
             p.outProvider = { c.snapshotState.outUs }
+            // Önizleme hızı: parçanın güncel hız / eğri / yön ayarı (panelden değişince anında uygulanır)
+            p.rateProvider = { t -> val st = c.snapshotState; previewMap(st.inUs, st.outUs)?.rateAt(t - st.inUs) ?: 1.0 }
+            p.curvedProvider = { segments.getOrNull(segIndex)?.curve?.let { it != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE } ?: false }
+            p.reverseProvider = { segments.getOrNull(segIndex)?.reverse == true }
+            p.rangeProvider = { c.snapshotState.let { it.inUs..it.outUs } }
             p.layersProvider = { c.snapshotState.layers }
             p.setVolume(projectAudio.originalVolume * seg.volume)
             p.setStitchInv(c.state.stitchInv)
@@ -1258,7 +1280,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                     com.mhmmtbg.x5reframe.model.EditState(outUs = 2_000_000, aspect = st.aspect, quality = st.quality, hevc = st.hevc, bitrate = st.bitrate,
                         stabMode = com.mhmmtbg.x5reframe.stab.StabMode.OFF, fit = com.mhmmtbg.x5reframe.model.FrameFit.FILL))
                 val b = store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, seg.edit.copy(inUs = t))
-                    .copy(speed = seg.speed, transitionOut = seg.transitionOut, reverse = seg.reverse, curve = seg.curve)
+                    .copy(speed = seg.speed, transitionOut = seg.transitionOut, reverse = seg.reverse, curve = seg.curve, curvePoints = seg.curvePoints)
                 val list = segments.toMutableList().apply { set(i, a); add(i + 1, still); add(i + 2, b) }
                 updateSegments(list, i + 1, reopen = true)
                 controller?.say("Kare donduruldu · 2 sn")
@@ -1655,7 +1677,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private fun maybeAdvance(c: EditorController, us: Long) {
         val p = player ?: return
         if (!p.playing || autoAdvancing || viewer || c.recording || c.tracking) return
-        if (us >= c.state.outUs - 20_000 && us >= c.state.inUs && segIndex < segments.size - 1) {
+        val rev = segments.getOrNull(segIndex)?.reverse == true
+        val atEnd = if (rev) us <= c.state.inUs + 40_000 else us >= c.state.outUs - 20_000 && us >= c.state.inUs
+        if (atEnd && segIndex < segments.size - 1) {
             autoAdvancing = true
             autoPlayNext = true
             p.pause()

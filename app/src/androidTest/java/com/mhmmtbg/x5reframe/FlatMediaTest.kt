@@ -160,6 +160,52 @@ class FlatMediaTest {
     private fun isBlack(c: Int) = Color.red(c) < 25 && Color.green(c) < 25 && Color.blue(c) < 25
     private fun isGreen(c: Int) = Color.green(c) > 170 && Color.red(c) < 90 && Color.blue(c) < 90
 
+    /** Önizleme hızı: 2× parçada konum ~2 kat hızlı ilerler, 0,5×'te yarı hızda, ters parçada geriye gider. */
+    @Test
+    fun previewHonorsSpeedAndReverse() {
+        val vid = File(ctx.cacheDir, "flat_speed.mp4").also { makeVideo(it, seconds = 6, rotation = 0) }
+        val clip = ClipInfo.load(ctx, Uri.fromFile(vid))
+        fun run(rate: Double, reverse: Boolean, startUs: Long, ms: Long): Pair<Long, Long> {
+            val rt = android.os.HandlerThread("rd").apply { start() }
+            val reader = android.media.ImageReader.newInstance(320, 240, android.graphics.PixelFormat.RGBA_8888, 3)
+            reader.setOnImageAvailableListener({ r -> r.acquireLatestImage()?.close() }, android.os.Handler(rt.looper))
+            val pos = java.util.concurrent.atomic.AtomicLong(-1)
+            var errors = ""
+            val p = com.mhmmtbg.x5reframe.media.Player(ctx, clip, object : com.mhmmtbg.x5reframe.media.Player.Listener {
+                override fun onPosition(us: Long) { pos.set(us) }
+                override fun onPlayingChanged(playing: Boolean) {}
+                override fun onError(message: String) { errors += message }
+            })
+            p.setMuted(true)
+            p.rateProvider = { rate }
+            p.reverseProvider = { reverse }
+            p.rangeProvider = { 0L..clip.durationUs }
+            p.attachSurface(reader.surface, 320, 240)
+            Thread.sleep(800)
+            p.seekTo(startUs)
+            Thread.sleep(700)
+            val a = pos.get()
+            p.play()
+            Thread.sleep(ms)
+            p.pause()
+            Thread.sleep(200)
+            val b = pos.get()
+            p.release(); Thread.sleep(200); reader.close(); rt.quitSafely()
+            assertTrue("oynatıcı hatası: $errors", errors.isEmpty())
+            return a to b
+        }
+        val (a2, b2) = run(2.0, false, 0, 1500)
+        val (a1, b1) = run(0.5, false, 0, 1500)
+        val (ar, br) = run(1.0, true, 5_000_000, 1500)
+        android.util.Log.i("FlatMediaTest", "hız önizleme: 2x ${a2}->${b2}  0.5x ${a1}->${b1}  ters ${ar}->${br}")
+        val d2 = b2 - a2; val d1 = b1 - a1
+        // 1,5 sn'de 2× ≈ 3 sn, 0,5× ≈ 0,75 sn ilerlemeli (emülatör gecikmeleri için geniş pay)
+        assertTrue("2× ilerleme $d2", d2 in 2_200_000..3_400_000)
+        assertTrue("0,5× ilerleme $d1", d1 in 450_000..1_000_000)
+        assertTrue("2× / 0,5× oranı ${d2.toDouble() / d1}", d2.toDouble() / d1 > 2.5)
+        assertTrue("ters oynatma geri gitmedi: $ar -> $br", br < ar - 500_000)
+    }
+
     @Test
     fun opensRotatedVideoAndPhoto() {
         val vid = File(ctx.cacheDir, "flat_rot90.mp4").also { makeVideo(it) }

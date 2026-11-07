@@ -52,6 +52,19 @@ class Player(
     /** Parçanın çıkış noktası (sona kadar süren katmanların çıkış animasyonu için). */
     @Volatile var outProvider: () -> Long = { Long.MAX_VALUE }
 
+    /**
+     * Önizleme hızı: kaynak zamanındaki hız çarpanı (sabit hız veya hız eğrisi) ve parçanın yönü.
+     * Eğrili parçalarda ses dışa aktarımdaki gibi kapalıdır; sabit hızda perde korunarak hızlanır.
+     */
+    @Volatile var rateProvider: (Long) -> Double = { 1.0 }
+    @Volatile var curvedProvider: () -> Boolean = { false }
+    @Volatile var reverseProvider: () -> Boolean = { false }
+    /** Parçanın kaynak aralığı (ters oynatmada başa / sona gelince durmak için). */
+    @Volatile var rangeProvider: () -> LongRange = { 0L..Long.MAX_VALUE }
+    private var rate = 1.0
+    /** Ters oynatmada son gösterilen hedef. */
+    private var revTarget = -1L
+
     /** Düz klip yerleşimi. */
     @Volatile var lookProvider: () -> com.mhmmtbg.x5reframe.model.FlatLook = { com.mhmmtbg.x5reframe.model.FlatLook() }
     private val appContext = context.applicationContext
@@ -152,14 +165,28 @@ class Player(
 
     fun play() = handler.post {
         if (playing || released || !::source.isInitialized) return@post
+        val range = rangeProvider()
+        if (reverseProvider() && source.currentPts <= range.first + frameDurUs * 2) {
+            // Ters parçada baştaysak sondan başla
+            runCatching { source.seekAndShow((range.last - frameDurUs).coerceAtLeast(0), frameDurUs); drawNow(); postPosition(source.currentPts) }
+        }
         playing = true
-        playStartNs = System.nanoTime()
-        playStartPts = source.currentPts
+        rate = rateProvider(source.currentPts).coerceIn(0.05, 16.0)
+        anchor(source.currentPts)
+        revTarget = -1
         stats.pause()
-        audio?.start(source.currentPts)
         main.post { listener.onPlayingChanged(true) }
         handler.post(loop)
     }
+
+    /** Saati [pts]'ye bağla ve sesi o andaki hıza göre (yeniden) başlat. */
+    private fun anchor(pts: Long) {
+        playStartNs = System.nanoTime()
+        playStartPts = pts
+        audioActive = !reverseProvider() && !curvedProvider() && rate in 0.25..4.0
+        if (audioActive) audio?.start(pts, rate.toFloat()) else audio?.stop()
+    }
+    private var audioActive = false
 
     fun pause() {
         playing = false
@@ -199,9 +226,10 @@ class Player(
             drawNow()
             if (pts >= 0) postPosition(pts)
             if (playing) {
-                playStartNs = System.nanoTime(); playStartPts = source.currentPts
+                rate = rateProvider(source.currentPts).coerceIn(0.05, 16.0)
+                revTarget = -1
+                anchor(source.currentPts)
                 stats.pause()
-                audio?.start(source.currentPts)
             }
         } catch (t: Throwable) { error(t) }
     }
@@ -210,13 +238,54 @@ class Player(
      * Oynatma saati (µs, klip zamanı). Ses çalıyorsa donanım zaman damgasından ara değerlenmiş
      * ses konumu; yoksa duvar saati. Her ikisi de sürekli ilerler, sıçramaz.
      */
-    private fun clockUs(): Long =
-        audio?.positionUs() ?: (playStartPts + (System.nanoTime() - playStartNs) / 1000)
+    private fun clockUs(): Long {
+        if (audioActive && rate == 1.0) audio?.positionUs()?.let { return it }
+        val el = (System.nanoTime() - playStartNs) / 1000
+        return if (reverseProvider()) playStartPts - (el * rate).toLong() else playStartPts + (el * rate).toLong()
+    }
+
+    /** Hız eğrisinde hız değiştikçe saati yeni hıza bağla (sıçrama olmadan). */
+    private fun updateRate(pts: Long) {
+        val r = rateProvider(pts).coerceIn(0.05, 16.0)
+        if (kotlin.math.abs(r - rate) < 0.02 * rate) return
+        val now = clockUs()
+        rate = r
+        playStartNs = System.nanoTime(); playStartPts = now
+        // Sabit hızlı parçada hız değiştiyse sesi yeni hızla sürdür
+        if (audioActive && !curvedProvider()) audio?.start(now, rate.toFloat())
+    }
+
+    private fun stopAtEnd() {
+        playing = false
+        audio?.stop()
+        stats.pause()
+        main.post { listener.onPlayingChanged(false) }
+    }
+
+    /** Ters oynatma: her adımda saatin gösterdiği (geriye akan) konuma atlanır. */
+    private fun reverseStep() {
+        val range = rangeProvider()
+        val target = clockUs()
+        if (target <= range.first) { stopAtEnd(); return }
+        // Aynı kareyi yeniden çözme
+        if (revTarget >= 0 && revTarget - target < frameDurUs) {
+            Thread.sleep(4); handler.post(loop); return
+        }
+        val pts = source.seekAndShow(target, frameDurUs)
+        if (pts < 0) { stopAtEnd(); return }
+        revTarget = target
+        drawNow()
+        stats.frameShown()
+        postPosition(pts)
+        updateRate(pts)
+        handler.post(loop)
+    }
 
     private val loop = object : Runnable {
         override fun run() {
             if (!playing || released) return
             try {
+                if (reverseProvider()) { reverseStep(); return }
                 // Geç kalan kareleri göstermeden atla (en fazla 6 art arda), böylece görüntü saati yakalar.
                 var pts: Long
                 var skipped = 0
@@ -226,19 +295,14 @@ class Player(
                     skipped++
                     stats.frameDropped()
                 }
-                if (pts < 0) {
-                    playing = false
-                    audio?.stop()
-                    stats.pause()
-                    main.post { listener.onPlayingChanged(false) }
-                    return
-                }
+                if (pts < 0) { stopAtEnd(); return }
                 // Karenin zamanı gelene kadar bekle (erken çözüldüyse).
                 val waitUs = pts - clockUs()
                 if (waitUs > 1000) Thread.sleep((waitUs / 1000).coerceAtMost(100), ((waitUs % 1000) * 1000).toInt())
                 drawNow()
                 stats.frameShown()
                 postPosition(pts)
+                updateRate(pts)
                 handler.post(this)
             } catch (t: Throwable) { error(t) }
         }

@@ -43,8 +43,12 @@ class AudioPreview(private val fd: FileDescriptor, private val track: Int) {
         return startUs + frames * 1_000_000 / sampleRate
     }
 
-    fun start(fromUs: Long) {
+    /** Çalma hızı (perde korunur; AudioTrack zaman esnetmesi). */
+    @Volatile private var speed = 1f
+
+    fun start(fromUs: Long, speed: Float = 1f) {
         stop()
+        this.speed = speed
         startUs = fromUs
         running = true
         thread = Thread({ runDecode(fromUs) }, "audio-preview").also { it.start() }
@@ -83,6 +87,11 @@ class AudioPreview(private val fd: FileDescriptor, private val track: Int) {
                 .setTransferMode(AudioTrack.MODE_STREAM)
                 .build()
             at.setVolume(if (muted) 0f else volume.coerceIn(0f, 1f))
+            if (speed != 1f) {
+                // Desteklenmezse sessiz kal (görüntü duvar saatiyle yine doğru hızda akar)
+                val ok = runCatching { at.playbackParams = android.media.PlaybackParams().setSpeed(speed).setPitch(1f) }.isSuccess
+                if (!ok) at.setVolume(0f)
+            }
             audioTrack = at
             at.play()
 

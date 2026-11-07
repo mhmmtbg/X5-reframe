@@ -150,7 +150,7 @@ object ExportManager {
                     else stab?.base(t / 1e6, e.stabMode, e.stabStrength, e.inUs / 1e6)
                 },
                 e.layout.rects, e.stitchInv, seg.speed,
-                reverse = seg.reverse, curve = seg.curve,
+                reverse = seg.reverse, curve = seg.curve, curvePoints = seg.curvePoints,
                 layers = e.layers,
                 color = if (e.color.isIdentity) null else e.color.uniforms(),
                 look = e.flatLook,

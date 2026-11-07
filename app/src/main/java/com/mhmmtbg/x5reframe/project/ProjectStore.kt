@@ -45,8 +45,11 @@ data class Segment(
     val volume: Float = 1f,
     val audioFadeInUs: Long = 0,
     val audioFadeOutUs: Long = 0,
+    /** Özel hız eğrisinin noktaları (eşit aralıklı, çarpan). */
+    val curvePoints: List<Double>? = null,
 ) {
-    val outputDurationUs: Long get() = com.mhmmtbg.x5reframe.model.SpeedMap(edit.outUs - edit.inUs, speed, curve).outputUs
+    val speedMap: com.mhmmtbg.x5reframe.model.SpeedMap get() = com.mhmmtbg.x5reframe.model.SpeedMap(edit.outUs - edit.inUs, speed, curve, curvePoints)
+    val outputDurationUs: Long get() = speedMap.outputUs
 }
 
 /** Projenin ses ayarları: orijinal ses seviyesi ve arka plan müziği. */
@@ -170,6 +173,7 @@ class ProjectStore(context: Context) {
             put("speed", s.speed); put("transitionOut", s.transitionOut.name)
             if (s.reverse) put("reverse", true)
             if (s.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) put("curve", s.curve.name)
+            s.curvePoints?.let { pts -> put("curvePoints", org.json.JSONArray().apply { pts.forEach { put(it) } }) }
             if (s.volume != 1f) put("volume", s.volume.toDouble())
             if (s.audioFadeInUs > 0) put("audioFadeInUs", s.audioFadeInUs)
             if (s.audioFadeOutUs > 0) put("audioFadeOutUs", s.audioFadeOutUs)
@@ -185,6 +189,7 @@ class ProjectStore(context: Context) {
             o.optBoolean("reverse", false),
             runCatching { com.mhmmtbg.x5reframe.model.SpeedCurve.valueOf(o.optString("curve", "NONE")) }.getOrDefault(com.mhmmtbg.x5reframe.model.SpeedCurve.NONE),
             o.optDouble("volume", 1.0).toFloat(), o.optLong("audioFadeInUs", 0), o.optLong("audioFadeOutUs", 0),
+            o.optJSONArray("curvePoints")?.let { a -> (0 until a.length()).map { a.getDouble(it) } },
         )
 
         fun fromJson(o: JSONObject): Project {

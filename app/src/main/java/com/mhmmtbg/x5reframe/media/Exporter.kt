@@ -81,6 +81,7 @@ class Exporter(
         /** Geriye oynat (kare blokları ileri çözülüp ters sırayla yazılır). */
         val reverse: Boolean = false,
         val curve: com.mhmmtbg.x5reframe.model.SpeedCurve = com.mhmmtbg.x5reframe.model.SpeedCurve.NONE,
+        val curvePoints: List<Double>? = null,
         /** Önceki parçadan bu parçaya örtüşmeli geçiş (çapraz geçiş, kaydırma…): tür ve süre. */
         val crossIn: com.mhmmtbg.x5reframe.project.Transition = com.mhmmtbg.x5reframe.project.Transition.CUT,
         val crossInUs: Long = 0,
@@ -90,7 +91,7 @@ class Exporter(
         val audioFadeOutUs: Long = 0,
     ) {
         val effEndUs: Long get() = endUs.coerceAtMost(clip.durationUs)
-        val map: com.mhmmtbg.x5reframe.model.SpeedMap by lazy { com.mhmmtbg.x5reframe.model.SpeedMap(effEndUs - startUs, speed, curve) }
+        val map: com.mhmmtbg.x5reframe.model.SpeedMap by lazy { com.mhmmtbg.x5reframe.model.SpeedMap(effEndUs - startUs, speed, curve, curvePoints) }
         val outputDurationUs: Long get() = map.outputUs
         /** Orijinal ses perde korunarak verilebilir mi. */
         val audible: Boolean get() = !reverse && curve == com.mhmmtbg.x5reframe.model.SpeedCurve.NONE && AudioMixer.hasAudioAt(speed)

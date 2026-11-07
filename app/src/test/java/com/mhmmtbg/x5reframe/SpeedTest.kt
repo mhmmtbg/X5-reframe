@@ -34,6 +34,27 @@ class SpeedTest {
         assertTrue(mt.sourceAt(mt.outputUs / 4) < 6_000_000 / 4)
     }
 
+    @Test
+    fun customCurveAndInverse() {
+        // Özel: ilk yarı 2×, ikinci yarı 0,5× → çıktı = 1,5 sn + 6 sn (smoothstep geçişiyle yakın)
+        val m = SpeedMap(6_000_000, 1.0, SpeedCurve.CUSTOM, listOf(2.0, 2.0, 0.5, 0.5))
+        assertTrue(m.curved)
+        assertTrue("çıktı ${m.outputUs}", m.outputUs in 4_500_000..7_000_000)
+        assertEquals(2.0, m.rateAt(0), 0.01)
+        assertEquals(0.5, m.rateAt(6_000_000), 0.01)
+        // outputAt ↔ sourceAt tutarlı
+        for (src in listOf(0L, 1_000_000L, 3_000_000L, 5_500_000L)) {
+            val back = m.sourceAt(m.outputAt(src))
+            assertTrue("$src → $back", kotlin.math.abs(back - src) < 40_000)
+        }
+        // Sınırların dışındaki noktalar kırpılır
+        val clamp = SpeedMap(1_000_000, 1.0, SpeedCurve.CUSTOM, listOf(50.0, 50.0))
+        assertTrue("kırpma ${clamp.outputUs}", clamp.outputUs in 98_000L..102_000L)
+        // Sabit hız: rateAt temel hız
+        assertEquals(2.0, SpeedMap(1_000_000, 2.0, SpeedCurve.NONE).rateAt(500_000), 1e-9)
+        assertEquals(500_000L, SpeedMap(1_000_000, 2.0, SpeedCurve.NONE).outputAt(1_000_000))
+    }
+
     /** Sinüs: hızlandırılınca süre kısalır, perde (sıfır geçiş sıklığı) korunur. */
     @Test
     fun timeStretchKeepsPitch() {

@@ -956,10 +956,36 @@ private fun SpeedPanel(c: EditorController, seq: SequenceUi) {
             }
         }
         Text("Hız eğrisi", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             com.mhmmtbg.x5reframe.model.SpeedCurve.values().forEach { cv ->
-                Chip(cv.label, seg.curve == cv) { seq.updateSegment(i) { it.copy(curve = cv) }; c.say("Hız eğrisi: ${cv.label}") }
+                val pts = com.mhmmtbg.x5reframe.model.SpeedPoints.of(cv, if (cv == com.mhmmtbg.x5reframe.model.SpeedCurve.CUSTOM) seg.curvePoints else null) ?: cv.points
+                CurveThumb(cv, pts, seg.curve == cv) {
+                    seq.updateSegment(i) { s ->
+                        // Özel eğri: hazır bir eğriden geçiliyorsa onun noktalarıyla başlar, böylece düzenlenebilir
+                        if (cv == com.mhmmtbg.x5reframe.model.SpeedCurve.CUSTOM && s.curvePoints == null)
+                            s.copy(curve = cv, curvePoints = resample(s.curve.points, com.mhmmtbg.x5reframe.model.SpeedCurve.CUSTOM_POINTS))
+                        else s.copy(curve = cv)
+                    }
+                    c.say("Hız eğrisi: ${cv.label} — ${cv.hint}")
+                }
             }
+        }
+        if (seg.curve == com.mhmmtbg.x5reframe.model.SpeedCurve.CUSTOM) {
+            val pts = seg.curvePoints ?: com.mhmmtbg.x5reframe.model.SpeedCurve.CUSTOM.points.toList()
+            val st = c.state
+            val playU = ((c.positionUs - st.inUs).toFloat() / (st.outUs - st.inUs).coerceAtLeast(1)).coerceIn(0f, 1f)
+            CurveEditor(pts, playU, onChange = {}, onCommit = { np -> seq.updateSegment(i) { it.copy(curvePoints = np) } })
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Chip("Nokta ekle", false) {
+                    if (pts.size < 9) seq.updateSegment(i) { it.copy(curvePoints = resample(pts.toDoubleArray(), pts.size + 1)) }
+                }
+                Chip("Nokta sil", false) {
+                    if (pts.size > 3) seq.updateSegment(i) { it.copy(curvePoints = resample(pts.toDoubleArray(), pts.size - 1)) }
+                }
+                Chip("Sıfırla", false) { seq.updateSegment(i) { it.copy(curvePoints = List(pts.size) { 1.0 }) } }
+            }
+        } else if (seg.curve != com.mhmmtbg.x5reframe.model.SpeedCurve.NONE) {
+            Text(seg.curve.hint, color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ActionButton(if (seg.reverse) "Ters: açık" else "Ters oynat", Modifier.weight(1f), primary = seg.reverse) {
@@ -969,11 +995,15 @@ private fun SpeedPanel(c: EditorController, seq: SequenceUi) {
         }
         Text(
             "Çıktı süresi ${"%.1f".format(seg.outputDurationUs / 1e6)} sn. Ses 0,25×–4× arasında perdesi korunarak hızlanır; ters ve eğrili parçalarda orijinal ses kapanır. " +
-                "Hız, eğri ve ters oynatma dışa aktarımda uygulanır; önizleme 1× oynar.",
+                "Hız, eğri ve ters oynatma önizlemede de uygulanır.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
         )
     }
 }
+
+/** Eğri noktalarını [n] eşit aralıklı noktaya yeniden örnekle (şekil korunur). */
+private fun resample(points: DoubleArray, n: Int): List<Double> =
+    List(n) { k -> Math.round(com.mhmmtbg.x5reframe.model.SpeedPoints.mult(points, k / (n - 1.0)) * 100) / 100.0 }
 
 private fun roundSpeed(s: Double): Double = when {
     s < 1 -> Math.round(s * 20) / 20.0
