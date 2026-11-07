@@ -44,7 +44,7 @@ class ExportTest {
         assertEquals("Insta360 X5", clip.cameraType)
         assertEquals(2, clip.videoTracks.size)
         // X5 + Track0Stream10: iz 0 = lens 1
-        assertEquals(1, clip.rig.lenses[0].videoTrackOrder)
+        assertEquals(1, clip.rig!!.lenses[0].videoTrackOrder)
         assertTrue(clip.audioTrack != null)
     }
 
