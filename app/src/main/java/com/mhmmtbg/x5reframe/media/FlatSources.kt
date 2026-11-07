@@ -102,16 +102,19 @@ class ImageFrameSource(bitmap: Bitmap, private val durationUs: Long, private val
 
     init {
         st.setDefaultBufferSize(bitmap.width, bitmap.height)
+        // Kare yüzeye gerçekten ulaşınca dokuya al (donanım tuvali eşzamansız çizer).
+        val cb = HandlerThread("st-image").apply { start() }
+        val ready = CountDownLatch(1)
+        st.setOnFrameAvailableListener({ ready.countDown() }, Handler(cb.looper))
         val surface = Surface(st)
         val canvas = surface.lockHardwareCanvas()
         canvas.drawBitmap(bitmap, 0f, 0f, null)
         surface.unlockCanvasAndPost(canvas)
-        var tries = 0
-        while (tries++ < 100) {
-            try { st.updateTexImage(); break } catch (e: Exception) { Thread.sleep(10) }
-        }
+        ready.await(2, TimeUnit.SECONDS)
+        st.updateTexImage()
         st.getTransformMatrix(texMatrix)
         surface.release()
+        cb.quitSafely()
     }
 
     override fun lensTexture(lens: Int) = texture

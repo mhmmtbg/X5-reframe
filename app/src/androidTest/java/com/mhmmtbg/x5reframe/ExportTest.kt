@@ -150,8 +150,8 @@ class ExportTest {
         assertTrue("sekans dışa aktarım hatası: $error", error == null)
         // 1 sn (30 kare) + 2 sn kaynak 2× hızda (30 kare)
         assertTrue("kare sayısı beklenmedik: ${ex.videoWritten}", ex.videoWritten in 55..62)
-        // Ses yalnızca 1× parçada: ~1 sn AAC (~47 örnek)
-        assertTrue("ses örneği sayısı beklenmedik: ${ex.audioWritten}", ex.audioWritten in 35..60)
+        // v3.0: hızlı parçanın sesi de karıştırılır → ~2 sn AAC (~94 örnek)
+        assertTrue("ses örneği sayısı beklenmedik: ${ex.audioWritten}", ex.audioWritten in 80..110)
     }
 
     @Test

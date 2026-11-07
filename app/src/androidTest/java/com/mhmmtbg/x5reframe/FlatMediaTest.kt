@@ -172,8 +172,10 @@ class FlatMediaTest {
         assertEquals(ClipKind.IMAGE, ic.kind)
         assertEquals(400, ic.width)
         val ip = render(ic, 400, 300, FrameFit.FIT)
-        assertTrue("fotoğraf sol üst yeşil olmalı", isGreen(ip[75 * 400 + 100]))
-        assertTrue("fotoğraf sağ alt mavi olmalı", Color.blue(ip[225 * 400 + 300]) > 150)
+        val g = ip[75 * 400 + 100]; val bl = ip[225 * 400 + 300]
+        android.util.Log.i("FlatMediaTest", "photo tl=${Integer.toHexString(g)} br=${Integer.toHexString(bl)}")
+        assertTrue("fotoğraf sol üst yeşil olmalı: ${Integer.toHexString(g)} / sağ alt ${Integer.toHexString(bl)}", isGreen(g))
+        assertTrue("fotoğraf sağ alt mavi olmalı: ${Integer.toHexString(bl)}", Color.blue(bl) > 150)
     }
 
     @Test
