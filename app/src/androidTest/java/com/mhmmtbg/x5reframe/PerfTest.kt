@@ -18,7 +18,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /**
- * Performans ölçümleri (CI'da eğilim izlemek için): 1080p normal video dışa aktarımı (düz ve renk + keskinlik ile),
+ * Performans ölçümleri (CI'da eğilim izlemek için): 720p normal video dışa aktarımı (düz ve renk + keskinlik ile),
  * örnek 360° klip varsa onun dışa aktarımı. Sonuçlar İndirilenler/x5test/perf.txt'ye yazılır.
  */
 @RunWith(AndroidJUnit4::class)
