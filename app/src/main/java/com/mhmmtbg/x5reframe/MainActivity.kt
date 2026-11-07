@@ -12,6 +12,9 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -169,7 +172,7 @@ class MainActivity : AppCompatActivity() {
     @Composable
     private fun Home() {
         // Insta360 düzeni: alt gezinme çubuğu, açılışta Albüm.
-        var tab by remember { mutableStateOf(prefs.getInt("tab", 0)) }
+        var tab by remember { mutableStateOf(intent.getIntExtra(EXTRA_TAB, prefs.getInt("tab", 0))) }
         var about by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize().background(Palette.Background)) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
@@ -244,6 +247,8 @@ class MainActivity : AppCompatActivity() {
                         color = Palette.Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
                 }
             }
+            item { SectionTitle("Yapay zekâ") }
+            item { AiSettingsBlock() }
             item { SectionTitle("Medya") }
             item {
                 SettingRow("Kamera klasörü", folder?.let { DocumentFile.fromTreeUri(this@MainActivity, it)?.name } ?: "Seçilmedi") { folderPicker.launch(null) }
@@ -265,6 +270,93 @@ class MainActivity : AppCompatActivity() {
                 runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(UPDATE_URL))) }
             } }
             item { SettingRow("Hakkında", "Lisanslar ve teşekkürler", onAbout) }
+        }
+    }
+
+    /** Sağlayıcı seçimi, API anahtarı (şifreli saklanır), model ve bağlantı testi. */
+    @Composable
+    private fun AiSettingsBlock() {
+        val ctx = this@MainActivity
+        var provider by remember { mutableStateOf(com.mhmmtbg.x5reframe.ai.AiSettings.provider(ctx)) }
+        var keyInput by remember(provider) { mutableStateOf("") }
+        var hasKey by remember(provider) { mutableStateOf(com.mhmmtbg.x5reframe.ai.AiSettings.hasKey(ctx, provider)) }
+        var model by remember(provider) { mutableStateOf(com.mhmmtbg.x5reframe.ai.AiSettings.model(ctx, provider)) }
+        var review by remember { mutableStateOf(com.mhmmtbg.x5reframe.ai.AiSettings.review(ctx)) }
+        var status by remember(provider) { mutableStateOf<Pair<String, Boolean>?>(null) }
+        var testing by remember { mutableStateOf(false) }
+        val fieldColors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = Palette.Accent, unfocusedBorderColor = Palette.Outline,
+            focusedTextColor = Palette.Text, unfocusedTextColor = Palette.Text, cursorColor = Palette.Accent,
+            focusedLabelColor = Palette.Accent, unfocusedLabelColor = Palette.Muted,
+        )
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Düzenleyicideki \"Yapay zekâ\" aracı isteğini seçtiğin modele gönderir; model kurguyu planlar, uygulama uygular. Anahtar yalnızca bu telefonda, şifreli saklanır.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            Row(Modifier.fillMaxWidth().background(Palette.SurfaceHigh, RoundedCornerShape(10.dp)).padding(3.dp)) {
+                com.mhmmtbg.x5reframe.ai.AiProvider.values().forEach { p ->
+                    val on = p == provider
+                    Box(
+                        Modifier.weight(1f).clip(RoundedCornerShape(8.dp)).background(if (on) Palette.Accent else Palette.SurfaceHigh)
+                            .clickable { provider = p; com.mhmmtbg.x5reframe.ai.AiSettings.setProvider(ctx, p) }.padding(vertical = 9.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(p.label, color = if (on) Palette.OnAccent else Palette.Text, style = MaterialTheme.typography.labelLarge) }
+                }
+            }
+            androidx.compose.material3.OutlinedTextField(
+                value = keyInput, onValueChange = { keyInput = it }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                label = { Text(if (hasKey) "API anahtarı kayıtlı · değiştirmek için yaz" else "${provider.label} API anahtarı") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(), colors = fieldColors,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Kaydet", color = Palette.OnAccent, style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (keyInput.isNotBlank()) Palette.Accent else Palette.SurfaceHigh)
+                        .clickable(enabled = keyInput.isNotBlank()) {
+                            com.mhmmtbg.x5reframe.ai.AiSettings.setKey(ctx, provider, keyInput); keyInput = ""; hasKey = true
+                            status = "Anahtar kaydedildi" to true
+                        }.padding(horizontal = 14.dp, vertical = 8.dp))
+                if (hasKey) Text("Sil", color = Palette.Error, style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.clickable { com.mhmmtbg.x5reframe.ai.AiSettings.setKey(ctx, provider, null); hasKey = false; status = "Anahtar silindi" to true }
+                        .padding(horizontal = 8.dp, vertical = 8.dp))
+                Spacer(Modifier.weight(1f))
+                Text("Anahtar al", color = Palette.Accent, style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.clickable { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.keyUrl))) } }.padding(8.dp))
+            }
+            androidx.compose.material3.OutlinedTextField(
+                value = model, onValueChange = { model = it; com.mhmmtbg.x5reframe.ai.AiSettings.setModel(ctx, provider, it) },
+                singleLine = true, modifier = Modifier.fillMaxWidth(), label = { Text("Model") }, colors = fieldColors,
+            )
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                provider.models.forEach { m ->
+                    val on = m == model
+                    Text(m, color = if (on) Palette.OnAccent else Palette.Text, style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(if (on) Palette.Accent else Palette.SurfaceHigh)
+                            .clickable { model = m; com.mhmmtbg.x5reframe.ai.AiSettings.setModel(ctx, provider, m) }
+                            .padding(horizontal = 10.dp, vertical = 7.dp))
+                }
+            }
+            Text("İlk öneri hızlı ve uygun fiyatlıdır; diğerleri daha güçlü ya da daha ucuzdur. Model adı sağlayıcı yeni sürüm çıkardığında elle değiştirilebilir.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(if (testing) "Deneniyor…" else "Bağlantıyı test et", color = Palette.Text, style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).border(1.dp, Palette.Outline, RoundedCornerShape(8.dp))
+                        .clickable(enabled = hasKey && !testing) {
+                            testing = true; status = null
+                            val p = provider; val m = model
+                            Thread {
+                                val r = runCatching {
+                                    com.mhmmtbg.x5reframe.ai.AiClient.test(p, com.mhmmtbg.x5reframe.ai.AiSettings.key(ctx, p) ?: error("anahtar okunamadı"), m)
+                                }
+                                runOnUiThread {
+                                    testing = false
+                                    status = r.fold({ "Çalışıyor: $it" to true }, { "Hata: ${it.message}" to false })
+                                }
+                            }.start()
+                        }.padding(horizontal = 14.dp, vertical = 8.dp))
+            }
+            status?.let { (t, ok) -> Text(t, color = if (ok) Palette.Muted else Palette.Error, style = MaterialTheme.typography.bodySmall) }
+        }
+        SwitchRow("Sonucu görerek düzelt", "Model, uyguladığı kurgudan kareleri görüp bir kez düzeltir. Daha iyi sonuç; iki kat istek.", review) {
+            review = it; com.mhmmtbg.x5reframe.ai.AiSettings.setReview(ctx, it)
         }
     }
 
@@ -299,6 +391,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     companion object {
+        const val EXTRA_TAB = "tab"
         const val KEY_DYNAMIC_STITCH = "dynamic_stitch"
         const val KEY_PREFER_LRV = "prefer_lrv"
         const val UPDATE_URL = "https://github.com/mhmmtbg/X5-reframe/raw/builds/x5-reframe.apk"

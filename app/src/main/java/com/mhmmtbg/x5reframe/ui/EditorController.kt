@@ -241,6 +241,25 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     fun setColor(g: com.mhmmtbg.x5reframe.model.ColorGrade) { commit(state.copy(color = g)) }
 
+    // ---- Yapay zekâ ile düzenleme ----
+
+    class AiMessage(val fromUser: Boolean, val text: String, val error: Boolean = false)
+
+    /** Sohbet geçmişi; etkinlik tarafından parçalar arasında paylaşılır. */
+    var aiLogState: androidx.compose.runtime.MutableState<List<AiMessage>> = mutableStateOf(emptyList())
+    var aiLog: List<AiMessage>
+        get() = aiLogState.value
+        set(v) { aiLogState.value = v }
+    /** Çalışan istek: durum metni (null = boşta). */
+    var aiBusy by mutableStateOf<String?>(null)
+    var aiCanUndo by mutableStateOf(false)
+    /** Seçili sağlayıcı ve model (ayarlardan). */
+    var aiProvider by mutableStateOf("")
+    var aiReady by mutableStateOf(false)
+    var aiNeedsConsent by mutableStateOf(false)
+
+    fun aiAppend(m: AiMessage) { aiLog = (aiLog + m).takeLast(30) }
+
     // ---- Derin takip ----
 
     /** Önizlemede hedef seçimi açık mı. */

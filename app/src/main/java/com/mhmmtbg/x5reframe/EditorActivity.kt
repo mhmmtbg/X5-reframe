@@ -167,6 +167,173 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
      * Oto Düzenle: projedeki her çekimi çözümle, kişileri takip eden kadraj ve en iyi anları seç,
      * hepsini geçişlerle tek kurguda birleştir (toplam ~[targetSec] sn).
      */
+    // ---- Yapay zekâ ile düzenleme ----
+
+    /** Klip başına tarama önbelleği (takip isteklerinde yeniden taranmaz). */
+    private val aiLogState = mutableStateOf<List<EditorController.AiMessage>>(emptyList())
+    private val aiScans = HashMap<String, com.mhmmtbg.x5reframe.ai.SceneContext.ClipScan>()
+    private var aiUndo: Pair<List<com.mhmmtbg.x5reframe.project.Segment>, com.mhmmtbg.x5reframe.project.ProjectAudio>? = null
+    @Volatile private var aiCancelled = false
+    /** Son istekler (bağlam için). */
+    private val aiHistory = ArrayList<Pair<String, String>>()
+
+    private fun refreshAiState(c: EditorController) {
+        val p = com.mhmmtbg.x5reframe.ai.AiSettings.provider(this)
+        c.aiProvider = "${p.label} · ${com.mhmmtbg.x5reframe.ai.AiSettings.model(this, p)}"
+        c.aiReady = com.mhmmtbg.x5reframe.ai.AiSettings.hasKey(this, p)
+        c.aiNeedsConsent = !com.mhmmtbg.x5reframe.ai.AiSettings.consented(this, p)
+        c.aiCanUndo = aiUndo != null
+    }
+
+    private fun aiSend(c: EditorController, request: String) {
+        if (c.aiBusy != null || request.isBlank()) return
+        val provider = com.mhmmtbg.x5reframe.ai.AiSettings.provider(this)
+        val key = com.mhmmtbg.x5reframe.ai.AiSettings.key(this, provider)
+        if (key == null) { c.aiAppend(EditorController.AiMessage(false, "Önce Ayarlar > Yapay zekâ bölümünden ${provider.label} API anahtarını ekle.", true)); return }
+        val model = com.mhmmtbg.x5reframe.ai.AiSettings.model(this, provider)
+        val review = com.mhmmtbg.x5reframe.ai.AiSettings.review(this)
+        storeCurrentEdit()
+        player?.pause()
+        val segs = segments.toList()
+        if (segs.isEmpty()) return
+        // Kaynak klipler (proje sırasıyla, tekrarsız)
+        val srcSegs = segs.distinctBy { it.clipUri.toString() }
+        val srcIndex = srcSegs.withIndex().associate { (i, sg) -> sg.clipUri.toString() to i }
+        val firstEdit = srcSegs.map { sg -> sg.edit }
+        val audio = projectAudio
+        c.aiAppend(EditorController.AiMessage(true, request))
+        c.aiBusy = "Sahne hazırlanıyor…"
+        aiCancelled = false
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        Thread({
+            try {
+                // 1) Tarama + kareler (önbellekli)
+                val rowsPer = (20 / srcSegs.size).coerceIn(3, 10)
+                val scans = srcSegs.mapIndexed { i, sg ->
+                    aiScans.getOrPut(sg.clipUri.toString()) {
+                        val clip = clipCache[sg.clipUri.toString()] ?: ClipInfo.load(this, sg.clipUri, sg.lrvUri).also { clipCache[sg.clipUri.toString()] = it }
+                        val ed = com.mhmmtbg.x5reframe.auto.AutoEditor(applicationContext, clip, autoStab(clip, 0) ?: { null })
+                        autoEditor = ed
+                        val samples = ed.scan(0, clip.durationUs, stepUs = 1_000_000L) { p ->
+                            runOnUiThread { c.aiBusy = "Klip ${i + 1}/${srcSegs.size} çözümleniyor… %${(p * 100).toInt()}" }
+                        }
+                        val times = com.mhmmtbg.x5reframe.ai.SceneContext.timesFor(0, clip.durationUs, rowsPer)
+                        val frames = ed.renderViews(times, com.mhmmtbg.x5reframe.ai.SceneContext.views(),
+                            com.mhmmtbg.x5reframe.ai.SceneContext.TILE_W, com.mhmmtbg.x5reframe.ai.SceneContext.TILE_H)
+                        autoEditor = null
+                        if (ed.cancelled || aiCancelled) throw InterruptedException()
+                        com.mhmmtbg.x5reframe.ai.SceneContext.ClipScan(i, sg.clipName, clip.durationUs, samples, times.zip(frames).filter { it.second.isNotEmpty() })
+                    }.let { com.mhmmtbg.x5reframe.ai.SceneContext.ClipScan(i, it.name, it.durationUs, it.samples, it.frames) }
+                }
+                val current = com.mhmmtbg.x5reframe.ai.PlanApplier.describe(segs.map { Triple(srcIndex[it.clipUri.toString()] ?: 0, it.edit, it.speed) })
+                val ctx = com.mhmmtbg.x5reframe.ai.SceneContext.build(scans, current, audio.musicUri != null)
+                val user = buildString {
+                    if (aiHistory.isNotEmpty()) {
+                        append("Önceki istekler ve yanıtların:\n")
+                        aiHistory.takeLast(4).forEach { (q, a) -> append("- İstek: ").append(q).append("\n  Yanıt: ").append(a).append("\n") }
+                        append("\n")
+                    }
+                    append("Kullanıcının isteği: ").append(request).append("\n\n")
+                    append("Mevcut oran: ").append(firstEdit.first().aspect.label).append("\n")
+                    append("Sahne verisi (JSON):\n").append(ctx.json.toString())
+                }
+                if (aiCancelled) throw InterruptedException()
+                runOnUiThread { c.aiBusy = "${provider.label} kurguyu planlıyor… (${ctx.images.size} görsel)" }
+                // 2) Plan
+                var reply = com.mhmmtbg.x5reframe.ai.AiClient.request(provider, key, model, com.mhmmtbg.x5reframe.ai.Prompt.SYSTEM, user, ctx.images)
+                var plan = com.mhmmtbg.x5reframe.ai.EditPlan.parse(reply.json)
+                var usage = reply.usage
+                val sources = srcSegs.mapIndexed { i, sg ->
+                    com.mhmmtbg.x5reframe.ai.PlanSource(sg.durationUs, firstEdit[i].copy(inUs = 0, outUs = sg.durationUs), clipCache[sg.clipUri.toString()]?.imu != null)
+                }
+                var (applied, warns) = com.mhmmtbg.x5reframe.ai.PlanApplier.apply(plan, sources)
+                if (applied.isEmpty()) throw com.mhmmtbg.x5reframe.ai.AiException(warns.joinToString("; ").ifBlank { plan.explanation.ifBlank { "plan boş" } })
+                // 3) Kontrol turu: planlanan görünümlerle kareler alıp modele göster
+                if (review && !aiCancelled) {
+                    runOnUiThread { c.aiBusy = "${provider.label} sonucu kontrol ediyor…" }
+                    val tiles = ArrayList<Pair<String, android.graphics.Bitmap>>()
+                    applied.withIndex().groupBy { it.value.source }.forEach { (src, list) ->
+                        val sg = srcSegs[src]
+                        val clip = clipCache[sg.clipUri.toString()] ?: return@forEach
+                        val ed = com.mhmmtbg.x5reframe.auto.AutoEditor(applicationContext, clip, autoStab(clip, 0) ?: { null })
+                        autoEditor = ed
+                        for ((k, a) in list) {
+                            val t = (a.edit.inUs + a.edit.outUs) / 2
+                            val v = a.edit.viewAt(t).let { if (it.projection == com.mhmmtbg.x5reframe.model.Projection.EQUIRECT) it.copy(projection = com.mhmmtbg.x5reframe.model.Projection.WIDE, fov = 200.0) else it }
+                            val bm = ed.renderViews(listOf(t), listOf(v), 320, 240).firstOrNull()?.firstOrNull() ?: continue
+                            tiles += "#${k + 1} t=${"%.1f".format(t / 1e6)}" to bm
+                        }
+                        autoEditor = null
+                    }
+                    if (tiles.isNotEmpty() && !aiCancelled) {
+                        val sorted = tiles.sortedBy { it.first.substringAfter('#').substringBefore(' ').toIntOrNull() ?: 0 }
+                        val sheet = com.mhmmtbg.x5reframe.ai.SceneContext.reviewSheet(sorted)
+                        val reviewUser = com.mhmmtbg.x5reframe.ai.Prompt.REVIEW + "\n\nKullanıcının isteği: " + request +
+                            "\n\nUyguladığın plan:\n" + plan.toJson().toString() + "\n\nSahne verisi (JSON):\n" + ctx.json.toString()
+                        runCatching {
+                            val r2 = com.mhmmtbg.x5reframe.ai.AiClient.request(provider, key, model, com.mhmmtbg.x5reframe.ai.Prompt.SYSTEM, reviewUser, listOf(sheet))
+                            val p2 = com.mhmmtbg.x5reframe.ai.EditPlan.parse(r2.json)
+                            val (a2, w2) = com.mhmmtbg.x5reframe.ai.PlanApplier.apply(p2, sources)
+                            if (a2.isNotEmpty()) { plan = p2; applied = a2; warns = w2 }
+                            usage = "$usage; kontrol: ${r2.usage}"
+                        }
+                    }
+                }
+                if (aiCancelled) throw InterruptedException()
+                val newSegs = applied.map { a ->
+                    val sg = srcSegs[a.source]
+                    store.newSegment(sg.clipUri, sg.clipName, sg.durationUs, sg.lrvUri, a.edit).copy(
+                        speed = a.speed,
+                        transitionOut = if (a.fade) com.mhmmtbg.x5reframe.project.Transition.FADE else com.mhmmtbg.x5reframe.project.Transition.CUT,
+                    )
+                }
+                val newAudio = audio.copy(
+                    originalVolume = plan.originalVolume?.toFloat()?.coerceIn(0f, 1.5f) ?: audio.originalVolume,
+                    musicVolume = plan.musicVolume?.toFloat()?.coerceIn(0f, 1.5f) ?: audio.musicVolume,
+                )
+                runOnUiThread {
+                    aiUndo = segs to audio
+                    if (newAudio != audio) setAudio(newAudio)
+                    viewer = false
+                    updateSegments(newSegs, 0, reopen = true)
+                    val total = newSegs.sumOf { it.outputDurationUs } / 1e6
+                    val note = buildString {
+                        append(plan.explanation.ifBlank { "Kurgu uygulandı." })
+                        append("\n${newSegs.size} çekim · ${"%.0f".format(total)} sn")
+                        if (warns.isNotEmpty()) append("\nUyarı: ").append(warns.joinToString("; "))
+                        if (usage.isNotBlank()) append("\n").append(usage)
+                    }
+                    aiHistory += request to plan.explanation
+                    controller?.let { nc ->
+                        nc.aiAppend(EditorController.AiMessage(false, note))
+                        nc.aiBusy = null
+                        refreshAiState(nc)
+                        nc.say("Yapay zekâ kurgusu uygulandı")
+                    }
+                    c.aiBusy = null
+                }
+            } catch (e: InterruptedException) {
+                runOnUiThread { c.aiBusy = null; c.aiAppend(EditorController.AiMessage(false, "Durduruldu", true)) }
+            } catch (e: Throwable) {
+                runOnUiThread {
+                    c.aiBusy = null
+                    c.aiAppend(EditorController.AiMessage(false, "Hata: ${e.message ?: e.javaClass.simpleName}", true))
+                }
+            } finally {
+                autoEditor = null
+                runOnUiThread { window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) }
+            }
+        }, "ai-edit").start()
+    }
+
+    private fun aiUndoLast() {
+        val (segs, audio) = aiUndo ?: return
+        aiUndo = null
+        if (audio != projectAudio) setAudio(audio)
+        updateSegments(segs, 0, reopen = true)
+        controller?.let { it.aiAppend(EditorController.AiMessage(false, "Önceki kurguya dönüldü")); refreshAiState(it) }
+    }
+
     /** Oto düzenleme ve akıllı kadrajda kullanılan sabitleme: ufuk düz, yön kameranın gidişini izler. */
     private fun autoStab(clip: ClipInfo, inUs: Long): ((Long) -> DoubleArray?)? {
         val imu = clip.imu ?: return null
@@ -405,6 +572,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             timelineView?.filmstrip = emptyList()
             buildFilmstrip(clip)
             segIndex = i
+            c.aiLogState = aiLogState
+            refreshAiState(c)
             controller = c
             player = p
             surface?.let { sf -> if (sf.isValid) p.attachSurface(sf, surfW, surfH) }
@@ -768,6 +937,16 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         cancelAuto = { autoEditor?.cancelled = true },
         step = { fwd -> c.clearLive(); player?.step(fwd) },
         snapshot = { snapshot(c) },
+        aiSend = { text -> aiSend(c, text) },
+        aiUndo = { aiUndoLast() },
+        aiCancel = { aiCancelled = true; autoEditor?.cancelled = true },
+        aiConsent = {
+            com.mhmmtbg.x5reframe.ai.AiSettings.setConsented(this, com.mhmmtbg.x5reframe.ai.AiSettings.provider(this))
+            refreshAiState(c)
+        },
+        aiSettings = {
+            startActivity(Intent(this, MainActivity::class.java).putExtra(MainActivity.EXTRA_TAB, 2).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP))
+        },
         suggestTargets = {
             c.trackTarget = null
             runAuto(c) { ed ->
@@ -1007,6 +1186,11 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private fun captureThumb() {
         val p = project ?: return
         player?.captureThumbnail(384, 216) { bmp -> runCatching { store.saveThumbnail(p.id, bmp) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        controller?.let { refreshAiState(it) }
     }
 
     override fun onPause() {

@@ -31,6 +31,8 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.draw.clip
@@ -87,6 +89,12 @@ class EditorActions(
     val cancelAuto: () -> Unit,
     val step: (Boolean) -> Unit,
     val snapshot: () -> Unit = {},
+    /** Yapay zekâ ile düzenleme */
+    val aiSend: (String) -> Unit = {},
+    val aiUndo: () -> Unit = {},
+    val aiCancel: () -> Unit = {},
+    val aiConsent: () -> Unit = {},
+    val aiSettings: () -> Unit = {},
     /** Derin takip: hedef öner, başlat, devam et. */
     val suggestTargets: () -> Unit = {},
     val deepTrack: () -> Unit = {},
@@ -97,11 +105,11 @@ class EditorActions(
 
 /** Düzenleyici araç çubuğu (yatay kaydırılır). Paneli olmayanlar (Anlık görüntü) doğrudan çalışır. */
 private enum class Tool(val label: String) {
-    TRIM("Kes"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), COLOR("Renk"), MULTI("Çoklu açı"),
+    AI("Yapay zekâ"), TRIM("Kes"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), COLOR("Renk"), MULTI("Çoklu açı"),
     STAB("Sabitleme"), AUDIO("Ses"), LAYER("Metin"), SNAPSHOT("Anlık görüntü"), STITCH("Dikiş");
 
     val icon: androidx.compose.ui.graphics.vector.ImageVector get() = when (this) {
-        TRIM -> Glyphs.Cut; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe; COLOR -> Glyphs.Palette
+        AI -> Glyphs.Chat; TRIM -> Glyphs.Cut; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe; COLOR -> Glyphs.Palette
         MULTI -> Glyphs.Album; STAB -> Glyphs.Horizon; AUDIO -> Glyphs.VolumeOn; LAYER -> Glyphs.Text
         SNAPSHOT -> Glyphs.Camera; STITCH -> Glyphs.Stitch
     }
@@ -194,6 +202,7 @@ fun EditorScreen(
                     Tool.KEYFRAME -> KeyframePanel(c, actions)
                     Tool.STITCH -> StitchPanel(c, actions)
                     Tool.COLOR -> ColorPanel(c)
+                    Tool.AI -> AiPanel(c, actions)
                     Tool.SNAPSHOT -> {}
                 }
             }
@@ -389,6 +398,74 @@ private fun KeyframePanel(c: EditorController, a: EditorActions) {
         if (c.activeKeyframes.isNotEmpty()) {
             Text("Tüm anahtar kareleri temizle", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.clickable { c.clearKeyframes() }.padding(vertical = 6.dp))
+        }
+    }
+}
+
+/** Yapay zekâ ile düzenleme: istek yaz, plan uygulanır, geri alınabilir, sohbetle değiştirilir. */
+@Composable
+private fun AiPanel(c: EditorController, a: EditorActions) {
+    var text by rememberSaveable { mutableStateOf("") }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(c.aiProvider, color = Palette.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
+            Text("Ayarlar", color = Palette.Accent, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.clickable(onClick = a.aiSettings).padding(4.dp))
+        }
+        if (!c.aiReady) {
+            Text("API anahtarı yok. Claude, Gemini ya da ChatGPT anahtarını Ayarlar > Yapay zekâ bölümüne ekle.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            ActionButton("Ayarlara git", Modifier.fillMaxWidth(), primary = true) { a.aiSettings() }
+            return
+        }
+        if (c.aiNeedsConsent) {
+            Text("Gönderilecekler: kliplerden birkaç saniyede bir alınan küçük kareler (dört yönden), yüz konumları, ses/hareket düzeyleri ve isteğin. " +
+                "Video dosyası gönderilmez. Kareler, içindeki kişilerle birlikte seçtiğin sağlayıcının sunucularına gider ve kullanım API hesabına yazılır.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            ActionButton("Anladım, devam", Modifier.fillMaxWidth(), primary = true) { a.aiConsent() }
+            return
+        }
+        // Sohbet
+        c.aiLog.takeLast(6).forEach { m ->
+            Text(
+                m.text, style = MaterialTheme.typography.bodySmall,
+                color = when { m.error -> Palette.Error; m.fromUser -> Palette.Text; else -> Palette.Muted },
+                modifier = Modifier.fillMaxWidth()
+                    .background(if (m.fromUser) Palette.SurfaceHigh else Color.Transparent, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
+            )
+        }
+        val busy = c.aiBusy
+        if (busy != null) {
+            Text(busy, style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(4.dp), color = Palette.Accent, trackColor = Palette.SurfaceHigh)
+            ActionButton("Durdur", Modifier.fillMaxWidth()) { a.aiCancel() }
+            return
+        }
+        if (c.aiLog.isEmpty()) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf(
+                    "30 sn'lik hareketli bir kurgu yap, en iyi anları seç",
+                    "Beni takip et, yürüdüğüm yönü de göster",
+                    "Dikey (9:16) sosyal medya videosu yap",
+                    "Sinematik renk ver, küçük gezegenle aç",
+                ).forEach { sug ->
+                    Text(sug, color = Palette.Text, style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Palette.SurfaceHigh).clickable { text = sug }
+                            .padding(horizontal = 10.dp, vertical = 8.dp))
+                }
+            }
+        }
+        OutlinedTextField(
+            value = text, onValueChange = { text = it }, modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text(if (c.aiLog.isEmpty()) "Ne yapılsın? Örn. bisiklet turundan 30 sn'lik video" else "Değişiklik iste: ikinci çekimi kısalt…", color = Palette.Muted) },
+            minLines = 2, maxLines = 4, textStyle = MaterialTheme.typography.bodyMedium,
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Palette.Accent, unfocusedBorderColor = Palette.Outline,
+                focusedTextColor = Palette.Text, unfocusedTextColor = Palette.Text, cursorColor = Palette.Accent),
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("Gönder", Modifier.weight(1.4f), primary = true, enabled = text.isNotBlank()) { a.aiSend(text.trim()); text = "" }
+            ActionButton("Geri al", Modifier.weight(1f), enabled = c.aiCanUndo) { a.aiUndo() }
         }
     }
 }

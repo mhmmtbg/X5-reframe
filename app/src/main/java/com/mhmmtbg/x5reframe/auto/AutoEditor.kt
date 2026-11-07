@@ -245,6 +245,22 @@ class AutoEditor(
         return keys
     }
 
+    /**
+     * Verilen zamanlarda verilen görünümlerden küçük kareler çiz (yapay zekâya gönderilecek bağlam).
+     * @return her zaman için görünüm sırasıyla bitmap listesi (kare alınamazsa boş liste)
+     */
+    fun renderViews(times: List<Long>, views: List<ViewParams>, w: Int, h: Int, progress: (Float) -> Unit = {}): List<List<Bitmap>> {
+        val out = ArrayList<List<Bitmap>>()
+        Gl(w, h).use { gl ->
+            for ((i, t) in times.withIndex()) {
+                if (cancelled) break
+                out += if (gl.moveTo(t)) views.map { gl.render(it) } else emptyList()
+                progress((i + 1f) / times.size)
+            }
+        }
+        return out
+    }
+
     // ---- Derin takip v2: hedef önerisi + şablon eşleştirme + nesne algılayıcıyla yeniden bulma ----
 
     /** Önizleme karesinde normalize (0..1) kutu. */
