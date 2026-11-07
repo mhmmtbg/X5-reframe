@@ -24,13 +24,14 @@ import java.util.Locale
 object StillRenderer {
 
     fun render(
-        rig: Rig, w: Int, h: Int, rects: List<FloatArray>, views: List<ViewParams>, base: DoubleArray?, color: FloatArray?,
-        dynamicStitch: Boolean, openSource: () -> FrameSource,
+        rig: Rig?, w: Int, h: Int, rects: List<FloatArray>, views: List<ViewParams>, base: DoubleArray?, color: FloatArray?,
+        dynamicStitch: Boolean, flatAspect: Float = 1f, fit: com.mhmmtbg.x5reframe.model.FrameFit = com.mhmmtbg.x5reframe.model.FrameFit.FIT,
+        openSource: () -> FrameSource,
     ): Bitmap {
         val egl = EglCore()
         val pb = egl.createPbuffer(w, h)
         egl.makeCurrent(pb)
-        val program = ReframeProgram(rig, highQualityStitch = true)
+        val program = ReframeProgram(rig, highQualityStitch = true).apply { this.flatAspect = flatAspect; this.fit = fit }
         val src = openSource()
         try {
             program.dynamicStitch = dynamicStitch

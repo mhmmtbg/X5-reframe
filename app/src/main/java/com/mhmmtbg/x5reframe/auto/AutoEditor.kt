@@ -55,8 +55,9 @@ class AutoEditor(
         val egl = EglCore()
         val pb = egl.createPbuffer(w, h).also { egl.makeCurrent(it) }
         val pfd = context.contentResolver.openFileDescriptor(clip.lrv?.uri ?: clip.uri, "r")!!
-        val program = ReframeProgram(clip.rig)
-        val source: FrameSource = clip.lrv?.let { SideBySideFrameSource(pfd.fileDescriptor, it.videoTrack, it.width, it.height) }
+        val program = com.mhmmtbg.x5reframe.media.Sources.program(clip)
+        val source: FrameSource = if (!clip.is360) com.mhmmtbg.x5reframe.media.Sources.open(context, clip, pfd.fileDescriptor, realtime = false)
+            else clip.lrv?.let { SideBySideFrameSource(pfd.fileDescriptor, it.videoTrack, it.width, it.height) }
             ?: DualFrameSource(pfd.fileDescriptor, clip, realtime = false)
         val buf: ByteBuffer = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
         val frameDur = (1_000_000 / clip.frameRate).toLong()

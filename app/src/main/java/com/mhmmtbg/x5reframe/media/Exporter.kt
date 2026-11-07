@@ -67,6 +67,7 @@ class Exporter(
         val fadeOutUs: Long = 0,
         val layers: List<com.mhmmtbg.x5reframe.model.Layer> = emptyList(),
         val color: FloatArray? = null,
+        val fit: com.mhmmtbg.x5reframe.model.FrameFit = com.mhmmtbg.x5reframe.model.FrameFit.FIT,
     ) {
         val outputDurationUs: Long get() = ((endUs - startUs) / speed).toLong()
     }
@@ -102,6 +103,29 @@ class Exporter(
 
     @Volatile var cancelled = false
 
+    /**
+     * Karışım yolu: istenmişse ya da sesler olduğu gibi kopyalanamıyorsa (farklı biçim, AAC olmayan ses,
+     * sessiz klip / fotoğraf, hız değişimi) ses çözülüp tek AAC ize karıştırılır.
+     */
+    private var mixSpec: Mix? = null
+
+    private fun audioCopyable(): Boolean {
+        val fmts = jobs.map { j ->
+            if (j.speed != 1.0) return false
+            val a = j.clip.audioTrack ?: return jobs.none { it.clip.audioTrack != null }
+            runCatching {
+                context.contentResolver.openFileDescriptor(j.clip.uri, "r")!!.use { pfd ->
+                    val ex = MediaExtractor()
+                    try { ex.setDataSource(pfd.fileDescriptor); ex.getTrackFormat(a) } finally { ex.release() }
+                }
+            }.getOrNull() ?: return false
+        }
+        if (fmts.isEmpty()) return true
+        fun key(f: MediaFormat) = Triple(f.getString(MediaFormat.KEY_MIME), f.getInteger(MediaFormat.KEY_SAMPLE_RATE), f.getInteger(MediaFormat.KEY_CHANNEL_COUNT))
+        val k0 = runCatching { key(fmts[0]) }.getOrNull() ?: return false
+        return k0.first == MediaFormat.MIMETYPE_AUDIO_AAC && fmts.all { runCatching { key(it) }.getOrNull() == k0 }
+    }
+
     private val info = MediaCodec.BufferInfo()
     private lateinit var encoder: MediaCodec
     private lateinit var muxer: MediaMuxer
@@ -125,6 +149,7 @@ class Exporter(
         val pfds = ArrayList<ParcelFileDescriptor>()
         try {
             require(jobs.isNotEmpty()) { "Dışa aktarılacak parça yok" }
+            mixSpec = output.mix ?: if (output.includeAudio && !audioCopyable()) Mix(null, 1f) else null
             val mime = if (output.hevc) MediaFormat.MIMETYPE_VIDEO_HEVC else MediaFormat.MIMETYPE_VIDEO_AVC
             checkSupported(mime, output.width, output.height)
 
@@ -138,14 +163,15 @@ class Exporter(
             val fpsHint = output.fps ?: jobs.first().clip.frameRate
             val frameDurHint = (1_000_000 / fpsHint).toLong()
             val totalOutUs = jobs.sumOf { (((it.endUs.coerceAtMost(it.clip.durationUs) - it.startUs) / it.speed) / frameDurHint).toLong().coerceAtLeast(1) * frameDurHint }
-            if (output.mix != null) {
+            if (mixSpec != null) {
                 // Karışım yolu: AAC kodlayıcının biçimini almak için ilk sesi önceden üret.
                 var off = 0L
                 val segs = jobs.map { j ->
                     val d = (((j.endUs.coerceAtMost(j.clip.durationUs) - j.startUs) / j.speed) / frameDurHint).toLong().coerceAtLeast(1) * frameDurHint
                     AudioMixer.Seg(j.clip.uri, if (output.includeAudio) j.clip.audioTrack else null, j.startUs, off, d, j.speed).also { off += d }
                 }
-                mixer = AudioMixer(context, segs, output.mix.music, if (output.includeAudio) output.mix.originalVolume else 0f, totalOutUs)
+                val ms = mixSpec!!
+                mixer = AudioMixer(context, segs, ms.music, if (output.includeAudio) ms.originalVolume else 0f, totalOutUs)
                 aac = AacEncoder()
                 mixTotalUs = totalOutUs
                 var guard = 0
@@ -181,14 +207,15 @@ class Exporter(
                 if (cancelled) break
                 val pfd = context.contentResolver.openFileDescriptor(job.clip.uri, "r")!!
                 pfds += pfd
-                val program = ReframeProgram(job.clip.rig, highQualityStitch = true).apply {
+                val program = Sources.program(job.clip, highQuality = true).apply {
                     stitchInvDistance = job.stitchInv
                     color = job.color
+                    fit = job.fit
                     dynamicStitch = context.getSharedPreferences("prefs", Context.MODE_PRIVATE).getBoolean("dynamic_stitch", true)
                 }
-                val source = DualFrameSource(pfd.fileDescriptor, job.clip, realtime = false)
+                val source = Sources.open(context, job.clip, pfd.fileDescriptor, realtime = false)
                 try {
-                    val audio = if (output.mix == null && output.includeAudio && job.speed == 1.0) openAudio(pfd, job) else null
+                    val audio = if (mixSpec == null && output.includeAudio && job.speed == 1.0) openAudio(pfd, job) else null
                     val end = job.endUs.coerceAtMost(job.clip.durationUs)
                     val nFrames = (((end - job.startUs) / job.speed) / frameDur).toLong().coerceAtLeast(1)
                     if (source.seekAndShow(job.startUs, frameDur) < 0) continue

@@ -13,8 +13,11 @@ import kotlin.math.tan
 /**
  * İki fisheye izi doğrudan düz kadraja çizer: çıktı pikseli → ışın → lens → doku.
  * Ara 360 (equirect) görüntü üretilmez; dışa aktarımı hızlı yapan budur.
+ *
+ * [rig] null ise düz klip (normal video / fotoğraf): kadraj kaydırma-yakınlaştırma olarak yorumlanır
+ * (yaw/pitch = kaydırma, fov = yakınlaştırma, roll = döndürme); renk, geçiş ve katmanlar aynı yoldan geçer.
  */
-class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
+class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) {
 
     private val program: Int
     private val vbo: Int
@@ -51,10 +54,20 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
     var dynamicStitch = true
     /** Önizleme: 48 bölge; dışa aktarım: 192 bölge x 3 kuşak (ince taneli). */
     /** Shader'ı derlenemeyen GPU'larda null: klasik dikişe düşülür, uygulama çökmez. */
-    val stitch: StitchEstimator? = runCatching {
+    val stitch: StitchEstimator? = if (rig == null) null else runCatching {
         if (highQualityStitch) StitchEstimator(rig, 192, 5).apply { async = false } else StitchEstimator(rig, 48, 1)
     }.onFailure { android.util.Log.w("ReframeProgram", "dinamik dikiş kapalı: ${it.message}") }.getOrNull()
     private var framesSinceEstimate = Int.MAX_VALUE / 2
+
+    /** Düz klip: görüntünün en/boy oranı (döndürme uygulanmış) ve çerçeveye yerleşimi. */
+    var flatAspect = 1f
+    var fit: com.mhmmtbg.x5reframe.model.FrameFit = com.mhmmtbg.x5reframe.model.FrameFit.FIT
+    private val uFlat: Int
+    private val uFlatHalf: Int
+    private val uFillHalf: Int
+    private val uFlatXf: Int
+    private val uFlatBlur: Int
+    private val uHdr: Int
 
     init {
         program = link(VS, FS)
@@ -79,6 +92,12 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
         uSeamOn = GLES30.glGetUniformLocation(program, "uSeamOn")
         uSeamRange = GLES30.glGetUniformLocation(program, "uSeamRange")
         uSeamBands = GLES30.glGetUniformLocation(program, "uSeamBands")
+        uFlat = GLES30.glGetUniformLocation(program, "uFlat")
+        uFlatHalf = GLES30.glGetUniformLocation(program, "uFlatHalf")
+        uFillHalf = GLES30.glGetUniformLocation(program, "uFillHalf")
+        uFlatXf = GLES30.glGetUniformLocation(program, "uFlatXf")
+        uFlatBlur = GLES30.glGetUniformLocation(program, "uFlatBlur")
+        uHdr = GLES30.glGetUniformLocation(program, "uHdr")
 
         val quad = floatArrayOf(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         val buf = ByteBuffer.allocateDirect(quad.size * 4).order(ByteOrder.nativeOrder()).asFloatBuffer().put(quad)
@@ -135,6 +154,8 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
     fun drawPane(x: Int, y: Int, width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource, base: DoubleArray?) {
         GLES30.glViewport(x, y, width, height)
         GLES30.glUseProgram(program)
+        if (rig == null) { drawFlat(width, height, view, src); return }
+        GLES30.glUniform1i(uFlat, 0)
         for (i in 0..1) {
             val lens: Lens = rig.lenses[i]
             GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + i)
@@ -188,6 +209,43 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
     }
 
+    /** Düz klip: sığdır / doldur / bulanık arka plan + kaydırma, yakınlaştırma, döndürme. */
+    private fun drawFlat(width: Int, height: Int, view: ViewParams, src: com.mhmmtbg.x5reframe.media.FrameSource) {
+        GLES30.glUniform1i(uFlat, 1)
+        for (i in 0..1) {
+            GLES30.glActiveTexture(GLES30.GL_TEXTURE0 + i)
+            GLES30.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, src.lensTexture(0))
+            GLES30.glUniform1i(uTex[i], i)
+            GLES30.glUniformMatrix4fv(uTexMat[i], 1, false, src.lensTexMatrix(0), 0)
+            val sub = src.lensSubRect(0)
+            GLES30.glUniform4f(uSub[i], sub[0], sub[1], sub[2], sub[3])
+        }
+        val sx: Float; val sy: Float
+        if (width >= height) { sx = 1f; sy = height.toFloat() / width } else { sx = width.toFloat() / height; sy = 1f }
+        GLES30.glUniform2f(uScale, sx, sy)
+        val a = flatAspect.coerceAtLeast(0.01f)
+        val fitHy = minOf(sy, sx / a)
+        val fillHy = maxOf(sy, sx / a)
+        val hy = if (fit == com.mhmmtbg.x5reframe.model.FrameFit.FILL) fillHy else fitHy
+        GLES30.glUniform2f(uFlatHalf, a * hy, hy)
+        GLES30.glUniform2f(uFillHalf, a * fillHy, fillHy)
+        GLES30.glUniform1f(uFlatBlur, if (fit == com.mhmmtbg.x5reframe.model.FrameFit.BLUR) 1f else 0f)
+        GLES30.glUniform4f(uFlatXf, flatZoom(view), (view.yaw / 45.0).toFloat(), (view.pitch / 45.0).toFloat(), Math.toRadians(view.roll).toFloat())
+        GLES30.glUniform1i(uHdr, src.hdrTransfer)
+        GLES30.glUniform1f(uFade, fade)
+        val g = color
+        GLES30.glUniform1f(uGradeOn, if (g != null) 1f else 0f)
+        if (g != null) for (i in 0..3) GLES30.glUniform4f(uGrade[i], g[i * 4], g[i * 4 + 1], g[i * 4 + 2], g[i * 4 + 3])
+        GLES30.glUniform1f(uSeamOn, 0f)
+        GLES30.glActiveTexture(GLES30.GL_TEXTURE2)
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        GLES30.glUniform1i(uSeam, 2)
+        GLES30.glBindBuffer(GLES30.GL_ARRAY_BUFFER, vbo)
+        GLES30.glEnableVertexAttribArray(0)
+        GLES30.glVertexAttribPointer(0, 2, GLES30.GL_FLOAT, false, 8, 0)
+        GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+    }
+
     fun release() {
         stitch?.release()
         GLES30.glDeleteProgram(program)
@@ -197,6 +255,9 @@ class ReframeProgram(private val rig: Rig, highQualityStitch: Boolean = false) {
     private fun DoubleArray.toFloats() = FloatArray(size) { this[it].toFloat() }
 
     companion object {
+        /** Düz klipte görüş açısı → yakınlaştırma (90° = 1×). */
+        fun flatZoom(view: ViewParams): Float = (90.0 / view.fov.coerceAtLeast(1.0)).toFloat()
+
         fun createOesTexture(): Int {
             val t = IntArray(1)
             GLES30.glGenTextures(1, t, 0)
@@ -279,6 +340,12 @@ uniform vec4 uGrade0;   // pozlama, kontrast, doygunluk, canlılık
 uniform vec4 uGrade1;   // sıcaklık, ton, parlak alanlar, gölgeler
 uniform vec4 uGrade2;   // soldurma, bölünmüş ton, gölge r, gölge g
 uniform vec4 uGrade3;   // gölge b, parlak r, parlak g, parlak b
+uniform int uFlat;      // 1 = düz klip
+uniform vec2 uFlatHalf; // görüntünün yarı boyu (uzun kenar = 1 birimlik çıktı uzayında)
+uniform vec2 uFillHalf; // doldurma yerleşiminde yarı boy (bulanık arka plan için)
+uniform vec4 uFlatXf;   // yakınlaştırma, merkez x, merkez y, döndürme (radyan)
+uniform float uFlatBlur;
+uniform int uHdr;       // 6 = PQ (HDR10), 7 = HLG; 0 = SDR
 
 vec3 grade(vec3 c) {
     c *= exp2(uGrade0.x);
@@ -298,8 +365,52 @@ vec3 grade(vec3 c) {
 
 const float COS_LIMIT = -0.17365; // lens alanı ~100 derece
 
+// HDR → SDR: eğriyi doğrusallaştır, BT.2020 → BT.709, yumuşak ton eşleme, ekran gaması.
+vec3 hdrToSdr(vec3 e) {
+    vec3 lin;
+    if (uHdr == 6) {
+        vec3 p = pow(max(e, 0.0), vec3(1.0 / 78.84375));
+        lin = pow(max(p - 0.8359375, 0.0) / (18.8515625 - 18.6875 * p), vec3(1.0 / 0.1593017578)) * (10000.0 / 203.0);
+    } else {
+        vec3 a = max(e, 0.0);
+        lin = mix(a * a / 3.0, (exp((a - 0.55991073) / 0.17883277) + 0.28466892) / 12.0, step(0.5, a)) * (1000.0 / 203.0);
+    }
+    lin = max(mat3(1.6605, -0.1246, -0.0182, -0.5876, 1.1329, -0.1006, -0.0728, -0.0083, 1.1187) * lin, 0.0);
+    float w = 4.9;
+    lin = lin * (1.0 + lin / (w * w)) / (1.0 + lin);
+    return pow(clamp(lin, 0.0, 1.0), vec3(1.0 / 2.2));
+}
+
+vec3 flatSample(vec2 uv) {
+    vec3 c = texture(uTex0, texCoord(uTexMat0, uSub0, uv)).rgb;
+    return uHdr != 0 ? hdrToSdr(c) : c;
+}
+
+vec3 flatBlur(vec2 uv) {
+    vec3 s = vec3(0.0);
+    for (int i = 0; i < 16; i++) {
+        float a = float(i) * 2.39996;
+        float r = 0.07 * sqrt((float(i) + 0.5) / 16.0);
+        s += flatSample(clamp(uv + vec2(cos(a), sin(a)) * r, 0.0, 1.0));
+    }
+    return s / 16.0;
+}
+
 """ + GlslCommon.LENS + """
 void main() {
+    if (uFlat == 1) {
+        vec2 fp = vNdc * uScale;                 // uzun kenar [-1, 1], y yukarı
+        float cr = cos(uFlatXf.w), sr = sin(uFlatXf.w);
+        vec2 q = vec2(cr * fp.x + sr * fp.y, -sr * fp.x + cr * fp.y) / uFlatXf.x + uFlatXf.yz;
+        vec2 uv = vec2(q.x / uFlatHalf.x * 0.5 + 0.5, 0.5 - q.y / uFlatHalf.y * 0.5);
+        vec3 fc;
+        if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0) fc = flatSample(uv);
+        else if (uFlatBlur > 0.5) fc = flatBlur(vec2(fp.x / uFillHalf.x * 0.5 + 0.5, 0.5 - fp.y / uFillHalf.y * 0.5)) * 0.55;
+        else fc = vec3(0.0);
+        if (uGradeOn > 0.5) fc = grade(fc);
+        outColor = vec4(fc * uFade, 1.0);
+        return;
+    }
     vec2 p = vNdc * uScale;
     vec3 dv;
     if (uMode == 1) {            // stereografik

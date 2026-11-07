@@ -68,6 +68,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.mhmmtbg.x5reframe.model.Aspect
+import com.mhmmtbg.x5reframe.model.ViewParams
 import com.mhmmtbg.x5reframe.model.Quality
 import com.mhmmtbg.x5reframe.ui.EditorController.Companion.fmt
 import com.mhmmtbg.x5reframe.ui.theme.Palette
@@ -114,6 +115,9 @@ private enum class Tool(val label: String) {
         SNAPSHOT -> Glyphs.Camera; STITCH -> Glyphs.Stitch
     }
 }
+
+/** Düz video / fotoğrafta yalnızca 360°'ye özgü olmayan araçlar. */
+private val FLAT_TOOLS = listOf(Tool.TRIM, Tool.FRAME, Tool.KEYFRAME, Tool.COLOR, Tool.AUDIO, Tool.LAYER, Tool.SNAPSHOT)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -193,7 +197,7 @@ fun EditorScreen(
                     .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 when (open) {
-                    Tool.FRAME -> FramePanel(c)
+                    Tool.FRAME -> if (c.clip.is360) FramePanel(c) else FlatFramePanel(c)
                     Tool.TRIM -> TrimPanel(c)
                     Tool.STAB -> StabPanel(c)
                     Tool.MULTI -> MultiPanel(c)
@@ -208,7 +212,7 @@ fun EditorScreen(
                 }
             }
         }
-        ToolBar(tool) { t ->
+        ToolBar(tool, if (c.clip.is360) Tool.values().toList() else FLAT_TOOLS) { t ->
             if (t == Tool.SNAPSHOT) actions.snapshot()
             else tool = if (tool == t) null else t
         }
@@ -236,7 +240,11 @@ private fun TopBar(c: EditorController, a: EditorActions, onExport: () -> Unit) 
         Column(Modifier.weight(1f)) {
             Text(c.fileName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
-                "${c.clip.cameraType} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn" + if (c.clip.lrv != null) " · hızlı önizleme" else "",
+                when {
+                    c.clip.isImage -> "Fotoğraf · ${c.clip.displayWidth}×${c.clip.displayHeight}"
+                    !c.clip.is360 -> "Video · ${c.clip.displayWidth}×${c.clip.displayHeight} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn" + if (c.clip.hdrTransfer != 0) " · HDR" else ""
+                    else -> "${c.clip.cameraType} · ${"%.1f".format(c.clip.durationUs / 1e6)} sn" + if (c.clip.lrv != null) " · hızlı önizleme" else ""
+                },
                 style = MaterialTheme.typography.bodySmall, color = Palette.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
@@ -284,7 +292,8 @@ private fun ViewHud(c: EditorController, modifier: Modifier) {
     val editing = c.liveView != null
     Text(
         (c.statsText?.takeIf { c.showStats }?.let { "$it\n" } ?: "") +
-            (if (editing) "● kaydedilmedi  " else "") + "yön ${v.yaw.toInt()}°  eğim ${v.pitch.toInt()}°  açı ${v.fov.toInt()}°",
+            (if (editing) "● kaydedilmedi  " else "") + if (c.clip.is360) "yön ${v.yaw.toInt()}°  eğim ${v.pitch.toInt()}°  açı ${v.fov.toInt()}°"
+                else "yakınlaştırma ${"%.2f".format(com.mhmmtbg.x5reframe.gl.ReframeProgram.flatZoom(v))}×" + if (v.roll != 0.0) "  döndürme ${v.roll.toInt()}°" else "",
         modifier = modifier.clickable { c.showStats = !c.showStats }.background(Color(0x99000000), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
         color = if (editing) Color(0xFF6EC6FF) else Color.White,
         style = MaterialTheme.typography.bodySmall,
@@ -324,13 +333,13 @@ private fun Transport(c: EditorController, a: EditorActions) {
 }
 
 @Composable
-private fun ToolBar(selected: Tool?, onSelect: (Tool) -> Unit) {
+private fun ToolBar(selected: Tool?, tools: List<Tool>, onSelect: (Tool) -> Unit) {
     Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
     Row(
         Modifier.fillMaxWidth().background(Palette.Background).horizontalScroll(rememberScrollState())
             .navigationBarsPadding().padding(horizontal = 6.dp, vertical = 6.dp),
     ) {
-        Tool.values().forEach { t ->
+        tools.forEach { t ->
             val on = t == selected
             Column(
                 Modifier.width(72.dp).clip(RoundedCornerShape(10.dp)).clickable { onSelect(t) }.padding(vertical = 8.dp),
@@ -660,6 +669,38 @@ private fun FramePanel(c: EditorController) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ActionButton("Ufku sıfırla", Modifier.weight(1f)) { c.changeView { it.copy(pitch = 0.0, roll = 0.0) }; c.say("Ufuk sıfırlandı") }
         }
+    }
+}
+
+/** Düz klip kadrajı: oran, yerleşim, yakınlaştırma, döndürme. Kaydırma için önizlemeyi sürükleyin. */
+@Composable
+private fun FlatFramePanel(c: EditorController) {
+    val s = c.state
+    val v = c.currentView
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        LabeledRow("Oran") {
+            Segmented(Aspect.values().filter { it != Aspect.PANO }, s.aspect, { it.label }, { c.commit(s.copy(aspect = it)); c.say("Oran ${it.label}") }, Modifier.weight(1f))
+        }
+        LabeledRow("Yerleşim") {
+            Segmented(com.mhmmtbg.x5reframe.model.FrameFit.values().toList(), s.fit, { it.label }, { c.commit(s.copy(fit = it)); c.say(it.label) }, Modifier.weight(1f))
+        }
+        val zoom = com.mhmmtbg.x5reframe.gl.ReframeProgram.flatZoom(v)
+        LabeledRow("Yakınlaştır ${"%.1f".format(zoom)}×") {
+            Slider(
+                value = zoom.coerceIn(0.75f, 4f),
+                onValueChange = { z -> c.beginViewGestureOnce(); c.updateView { it.copy(fov = 90.0 / z) } },
+                onValueChangeFinished = { c.endViewGestureOnce() },
+                valueRange = 0.75f..4f,
+                modifier = Modifier.weight(1f),
+                colors = SliderDefaults.colors(thumbColor = Palette.Accent, activeTrackColor = Palette.Accent, inactiveTrackColor = Palette.SurfaceHigh),
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("Döndür 90°", Modifier.weight(1f)) { c.changeView { it.copy(roll = ViewParams.wrap(it.roll + 90.0)) }; c.say("Döndürüldü") }
+            ActionButton("Ortala", Modifier.weight(1f)) { c.changeView { it.copy(yaw = 0.0, pitch = 0.0) }; c.say("Ortalandı") }
+            ActionButton("Sıfırla", Modifier.weight(1f)) { c.changeView { ViewParams() }; c.say("Kadraj sıfırlandı") }
+        }
+        Text("Kaydırmak için önizlemeyi sürükleyin, yakınlaştırmak için iki parmakla açın.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 

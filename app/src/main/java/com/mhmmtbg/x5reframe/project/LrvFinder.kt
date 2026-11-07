@@ -14,7 +14,7 @@ object LrvFinder {
 
     /** Kaydedilmiş medya klasöründe (en fazla 3 seviye derinlikte) ada göre ara. */
     fun findInTree(context: Context, tree: Uri?, insvName: String): Uri? {
-        if (tree == null) return null
+        if (tree == null || !insvName.endsWith(".insv", true)) return null
         val target = lrvName(insvName)
         val root = runCatching { DocumentFile.fromTreeUri(context, tree) }.getOrNull() ?: return null
         fun search(d: DocumentFile, depth: Int): DocumentFile? {

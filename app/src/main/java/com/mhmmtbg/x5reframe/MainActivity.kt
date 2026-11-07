@@ -81,12 +81,27 @@ class MainActivity : AppCompatActivity() {
     private var source by mutableStateOf(com.mhmmtbg.x5reframe.ui.AlbumSource.CAMERA)
     private var selected by mutableStateOf<Set<String>>(emptySet())
 
-    /** Yeni proje: .insv ile birlikte LRV de seçilirse önizleme hızlı olur (çoklu seçim). */
-    private val picker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
-        if (uris.isNullOrEmpty()) return@registerForActivityResult
+    /** Yeni proje (dosyalardan): .insv ile birlikte LRV de seçilirse önizleme hızlı olur; her video ve fotoğraf açılır. */
+    private val picker = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris -> importMedia(uris) }
+
+    /** Yeni proje (galeriden): sistem fotoğraf seçicisi, video + fotoğraf, çoklu seçim. */
+    private val galleryPicker = registerForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(50)) { uris -> importMedia(uris) }
+
+    private var chooseSource by mutableStateOf(false)
+
+    /** Seçilen dosyalardan proje: ilk dosya açılır, kalanlar seçim sırasıyla arkasına eklenir. */
+    private fun importMedia(uris: List<Uri>?) {
+        if (uris.isNullOrEmpty()) return
         uris.forEach { runCatching { contentResolver.takePersistableUriPermission(it, Intent.FLAG_GRANT_READ_URI_PERMISSION) } }
-        val pr = com.mhmmtbg.x5reframe.project.LrvFinder.pair(uris) { u -> nameOf(u) } ?: return@registerForActivityResult
-        openNew(pr.first, pr.second)
+        val named = uris.map { it to nameOf(it) }
+        val clips = named.filterNot { it.second.endsWith(".lrv", true) }
+        val first = clips.firstOrNull() ?: return
+        val lrv = com.mhmmtbg.x5reframe.project.LrvFinder.pair(listOf(first.first) + named.filter { it.second.endsWith(".lrv", true) }.map { it.first }) { u -> nameOf(u) }?.second
+        startActivity(
+            Intent(this, EditorActivity::class.java).setData(first.first).putExtra(EditorActivity.EXTRA_LRV, lrv?.toString())
+                .putExtra(EditorActivity.EXTRA_MORE, clips.drop(1).map { it.first.toString() }.toTypedArray())
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        )
     }
 
     private fun nameOf(u: Uri): String = runCatching {
@@ -187,7 +202,7 @@ class MainActivity : AppCompatActivity() {
                             }
                             ExportBanner(); MediaTab()
                         }
-                        1 -> { Header("Projeler") { HeaderAction(Glyphs.Add, "Yeni proje") { picker.launch(arrayOf("video/*", "application/octet-stream", "*/*")) } }; ExportBanner(); ProjectsTab() }
+                        1 -> { Header("Projeler") { HeaderAction(Glyphs.Add, "Yeni proje") { chooseSource = true } }; ExportBanner(); ProjectsTab() }
                         else -> { Header("Ayarlar") {}; SettingsTab { about = true } }
                     }
                 }
@@ -207,6 +222,45 @@ class MainActivity : AppCompatActivity() {
             }
         }
         if (about) AboutDialog { about = false }
+        if (chooseSource) NewProjectDialog()
+    }
+
+    /** Yeni proje: kaynak seçimi. */
+    @Composable
+    private fun NewProjectDialog() {
+        AlertDialog(
+            onDismissRequest = { chooseSource = false },
+            title = { Text("Yeni proje") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SourceOption(Glyphs.Album, "Galeri", "Telefondaki videolar ve fotoğraflar") {
+                        chooseSource = false
+                        galleryPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo))
+                    }
+                    SourceOption(Glyphs.Folder, "Dosyalar", "360° .insv klipleri (LRV ile), MKV, WebM ve diğer dosyalar") {
+                        chooseSource = false
+                        picker.launch(arrayOf("video/*", "image/*", "application/octet-stream", "*/*"))
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { chooseSource = false }) { Text("Vazgeç", color = Palette.Muted) } },
+            containerColor = Palette.Surface, tonalElevation = 0.dp,
+        )
+    }
+
+    @Composable
+    private fun SourceOption(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, sub: String, onClick: () -> Unit) {
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(Palette.SurfaceHigh).clickable(onClick = onClick).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, null, Modifier.size(24.dp), tint = Palette.Text)
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleSmall, color = Palette.Text)
+                Text(sub, style = MaterialTheme.typography.bodySmall, color = Palette.Muted)
+            }
+        }
     }
 
     private val prefs by lazy { getSharedPreferences("prefs", MODE_PRIVATE) }
@@ -461,7 +515,7 @@ class MainActivity : AppCompatActivity() {
     @Composable
     private fun ProjectsTab() {
         if (projects.isEmpty()) {
-            EmptyState("Henüz proje yok", "Yeni proje ile kameranın SD kartından .insv klibini seç; aynı adlı LRV dosyasını da birlikte seçersen önizleme çok daha akıcı olur. Medya sekmesinden açınca LRV otomatik bulunur.")
+            EmptyState("Henüz proje yok", "Sağ üstteki + ile galeriden video ve fotoğraf ya da dosyalardan 360° .insv klibi seç. .insv ile aynı adlı LRV dosyasını da seçersen önizleme çok daha akıcı olur.")
             return
         }
         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

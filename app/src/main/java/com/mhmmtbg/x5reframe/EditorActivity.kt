@@ -51,6 +51,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private var userScrubbing = false
     private var loadError by mutableStateOf<String?>(null)
     private var loaded by mutableStateOf(false)
+    /** Test için: klip açıldı ve düzenleyici hazır. */
+    val isLoadedForTest get() = loaded && loadError == null
 
     /** Oynatıcı sayfası (albümden açılınca) ya da düzenleyici. */
     private var viewer by mutableStateOf(false)
@@ -503,7 +505,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 val clip = r.getOrElse { loadError = it.message ?: it.javaClass.simpleName; return@launch }
                 clipCache[newUri.toString()] = clip
                 withContext(Dispatchers.IO) {
-                    var p = store.create(newUri!!, displayName(newUri), clip.durationUs, clip.lrv?.uri)
+                    var p = store.create(newUri!!, displayName(newUri), clip.durationUs, clip.lrv?.uri, defaultEdit(clip, null))
                     // Albümde birden fazla çekim seçildiyse arkaya ekle
                     val more = intent.getStringArrayExtra(EXTRA_MORE).orEmpty().map(Uri::parse)
                     if (more.isNotEmpty()) {
@@ -512,7 +514,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                             val lrv = com.mhmmtbg.x5reframe.project.LrvFinder.findInTree(this@EditorActivity, folder, displayName(u))
                             runCatching { ClipInfo.load(this@EditorActivity, u, lrv) }.getOrNull()?.let { ci ->
                                 clipCache[u.toString()] = ci
-                                store.newSegment(u, displayName(u), ci.durationUs, ci.lrv?.uri)
+                                store.newSegment(u, displayName(u), ci.durationUs, ci.lrv?.uri, defaultEdit(ci, p.segments.first().edit))
                             }
                         }
                         p = p.copy(segments = p.segments + extra)
@@ -569,6 +571,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             p.layoutProvider = { c.snapshotState.layout.rects }
             p.baseProvider = { t -> c.baseAt(t) }
             p.colorProvider = { c.colorUniforms }
+            p.fitProvider = { c.snapshotState.fit }
             p.layersProvider = { c.snapshotState.layers }
             p.setVolume(projectAudio.originalVolume)
             p.setStitchInv(c.state.stitchInv)
@@ -617,6 +620,22 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         if (keep != null) { /* düzenleme zaten storeCurrentEdit ile yazıldı */ }
     }
 
+    /**
+     * Yeni parçanın başlangıç düzenlemesi. Düz video / fotoğrafta sabitleme kapalı, fotoğraf 4 sn.
+     * Projede başka parça varsa çıktı biçimi (en/boy, kalite) ondan alınır; yoksa klibe en yakın oran seçilir.
+     */
+    private fun defaultEdit(clip: ClipInfo, projectEdit: com.mhmmtbg.x5reframe.model.EditState?): com.mhmmtbg.x5reframe.model.EditState {
+        val out = if (clip.isImage) ClipInfo.IMAGE_DEFAULT_US else clip.durationUs
+        var e = com.mhmmtbg.x5reframe.model.EditState(outUs = out)
+        if (!clip.is360) {
+            e = e.copy(stabMode = com.mhmmtbg.x5reframe.stab.StabMode.OFF,
+                aspect = com.mhmmtbg.x5reframe.model.Aspect.values().filter { it != com.mhmmtbg.x5reframe.model.Aspect.PANO }
+                    .minBy { kotlin.math.abs(kotlin.math.ln(it.w.toFloat() / it.h / clip.displayAspect)) })
+        }
+        if (projectEdit != null) e = e.copy(aspect = projectEdit.aspect, quality = projectEdit.quality, hevc = projectEdit.hevc, bitrate = projectEdit.bitrate)
+        return e
+    }
+
     private fun addSegment(uri: Uri) {
         lifecycleScope.launch {
             val clip = withContext(Dispatchers.IO) {
@@ -630,7 +649,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             clipCache[uri.toString()] = clip
             storeCurrentEdit()
             val proj = project ?: return@launch
-            val seg = store.newSegment(uri, displayName(uri), clip.durationUs, clip.lrv?.uri)
+            val seg = store.newSegment(uri, displayName(uri), clip.durationUs, clip.lrv?.uri, defaultEdit(clip, proj.segments.firstOrNull()?.edit))
             val list = proj.segments + seg
             updateSegments(list, list.size - 1, reopen = true)
         }
@@ -640,7 +659,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         segments = segments,
         current = segIndex,
         select = { i -> if (i != segIndex) openSegment(i) },
-        add = { addClipPicker.launch(arrayOf("video/*", "application/octet-stream", "*/*")) },
+        add = { addClipPicker.launch(arrayOf("video/*", "image/*", "application/octet-stream", "*/*")) },
         move = { i, dir ->
             storeCurrentEdit()
             val list = segments.toMutableList()
@@ -892,8 +911,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             val ok = runCatching {
                 val pfd = contentResolver.openFileDescriptor(c.clip.uri, "r")!!
                 pfd.use {
-                    val bmp = com.mhmmtbg.x5reframe.photo.StillRenderer.render(c.clip.rig, w, h, st.layout.rects, views, base, color, dyn) {
-                        com.mhmmtbg.x5reframe.media.DualFrameSource(pfd.fileDescriptor, c.clip, realtime = false).also {
+                    val bmp = com.mhmmtbg.x5reframe.photo.StillRenderer.render(c.clip.rig, w, h, st.layout.rects, views, base, color, dyn, c.clip.displayAspect, st.fit) {
+                        com.mhmmtbg.x5reframe.media.Sources.open(this, c.clip, pfd.fileDescriptor, realtime = false).also {
                             it.seekAndShow(t, (1_000_000 / c.clip.frameRate).toLong())
                         }
                     }
@@ -1190,7 +1209,38 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private var timelineView: TimelineView? = null
     private var filmstrip: List<android.graphics.Bitmap> = emptyList()
 
+    /** Düz video / fotoğraf: kareleri doğrudan dosyadan, kare olarak ortadan kırpıp al. */
+    private fun buildFlatFilmstrip(clip: ClipInfo) {
+        Thread {
+            fun square(f: android.graphics.Bitmap): android.graphics.Bitmap {
+                val side = minOf(f.width, f.height)
+                return android.graphics.Bitmap.createScaledBitmap(
+                    android.graphics.Bitmap.createBitmap(f, (f.width - side) / 2, (f.height - side) / 2, side, side), 96, 96, true)
+            }
+            val frames = runCatching {
+                if (clip.isImage) {
+                    val b = com.mhmmtbg.x5reframe.insv.MediaProbe.decodeImage(this, clip.uri, 512)
+                    val sq = square(b); b.recycle()
+                    List(12) { sq }
+                } else {
+                    val r = android.media.MediaMetadataRetriever()
+                    try {
+                        r.setDataSource(this, clip.uri)
+                        val n = 12
+                        (0 until n).mapNotNull { i ->
+                            val t = (clip.durationUs * (i + 0.5) / n).toLong()
+                            (if (android.os.Build.VERSION.SDK_INT >= 27) r.getScaledFrameAtTime(t, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 256, 256)
+                            else r.getFrameAtTime(t, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC))?.let { f -> square(f).also { if (it !== f) f.recycle() } }
+                        }
+                    } finally { r.release() }
+                }
+            }.getOrDefault(emptyList())
+            runOnUiThread { filmstrip = frames; timelineView?.filmstrip = frames }
+        }.start()
+    }
+
     private fun buildFilmstrip(clip: ClipInfo) {
+        if (!clip.is360) { buildFlatFilmstrip(clip); return }
         val lrv = clip.lrv ?: return
         Thread {
             val frames = runCatching {
@@ -1198,7 +1248,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 try {
                     r.setDataSource(this, lrv.uri)
                     val n = 12
-                    val lens = clip.rig.lenses[0]
+                    val lens = clip.rig!!.lenses[0]
                     (0 until n).mapNotNull { i ->
                         val t = clip.durationUs * (i + 0.5) / n
                         r.getFrameAtTime(t.toLong(), android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC)?.let { f ->

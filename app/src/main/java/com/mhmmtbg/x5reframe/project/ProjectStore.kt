@@ -68,11 +68,11 @@ class ProjectStore(context: Context) {
     fun get(id: String): Project? = File(dir, "$id.json").takeIf { it.exists() }
         ?.let { runCatching { fromJson(JSONObject(it.readText())) }.getOrNull() }
 
-    fun create(clipUri: Uri, clipName: String, durationUs: Long, lrvUri: Uri? = null): Project {
+    fun create(clipUri: Uri, clipName: String, durationUs: Long, lrvUri: Uri? = null, edit: EditState? = null): Project {
         val now = System.currentTimeMillis()
         val p = Project(
             UUID.randomUUID().toString(), clipName.substringBeforeLast('.'), now, now,
-            listOf(newSegment(clipUri, clipName, durationUs, lrvUri)),
+            listOf(newSegment(clipUri, clipName, durationUs, lrvUri, edit)),
         )
         save(p)
         return p
@@ -174,6 +174,7 @@ class ProjectStore(context: Context) {
             put("stitchDistance", e.stitchDistance)
             put("bitrate", e.bitrate.name)
             put("fps", e.fps)
+            put("fit", e.fit.name)
             put("color", JSONObject().apply {
                 val g = e.color
                 put("filter", g.filter.name); put("strength", g.filterStrength.toDouble())
@@ -224,6 +225,7 @@ class ProjectStore(context: Context) {
                     g
                 } ?: com.mhmmtbg.x5reframe.model.ColorGrade(),
                 fps = o.optInt("fps", 0),
+                fit = runCatching { com.mhmmtbg.x5reframe.model.FrameFit.valueOf(o.optString("fit", "FIT")) }.getOrDefault(com.mhmmtbg.x5reframe.model.FrameFit.FIT),
                 tracks = (o.optJSONArray("tracks") ?: JSONArray()).let { arr ->
                     (0 until arr.length()).mapNotNull { i -> arr.optJSONArray(i)?.let { r -> r.getLong(0)..r.getLong(1) } }
                 },

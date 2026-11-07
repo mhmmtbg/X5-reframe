@@ -25,6 +25,9 @@ interface FrameSource {
     fun lensTexMatrix(lens: Int): FloatArray
     fun lensSubRect(lens: Int): FloatArray
 
+    /** Düz videoda shader'ın ton eşlemesi yapması gereken HDR eğrisi (0 = SDR). */
+    val hdrTransfer: Int get() = 0
+
     fun seek(us: Long)
     fun next(render: Boolean): Long = next { render }
     fun next(renderIf: (Long) -> Boolean): Long

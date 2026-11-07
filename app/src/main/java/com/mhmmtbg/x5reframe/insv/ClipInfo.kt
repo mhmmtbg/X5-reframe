@@ -6,11 +6,15 @@ import android.media.MediaFormat
 import android.net.Uri
 import java.io.FileInputStream
 
-/** Bir .insv klibinin dışa aktarım için gereken her şeyi. */
+/** Klibin türü: Insta360 360° video, düz (normal) video ya da fotoğraf. */
+enum class ClipKind { INSV360, FLAT, IMAGE }
+
+/** Bir klibin önizleme ve dışa aktarım için gereken her şeyi. */
 class ClipInfo(
     val uri: Uri,
     val cameraType: String,
-    val rig: Rig,
+    /** Lens kalibrasyonu; yalnızca 360° kliplerde. */
+    val rig: Rig?,
     /** Video izlerinin extractor içindeki indisleri; sıra = videoTrackOrder. */
     val videoTracks: List<Int>,
     val audioTrack: Int?,
@@ -22,7 +26,19 @@ class ClipInfo(
     val lrv: Lrv? = null,
     /** Hareket sensörü kaydı (sabitleme için). */
     val imu: Imu? = null,
+    val kind: ClipKind = ClipKind.INSV360,
+    /** Düz videoda saat yönünde döndürme (0, 90, 180, 270). Kod çözücü yüzeye çizerken uygular. */
+    val rotation: Int = 0,
+    /** HDR aktarım eğrisi (MediaFormat.COLOR_TRANSFER_*); 0 = SDR. */
+    val hdrTransfer: Int = 0,
 ) {
+    val is360 get() = kind == ClipKind.INSV360
+    val isImage get() = kind == ClipKind.IMAGE
+    /** Ekranda görünen boyut (döndürme uygulanmış). */
+    val displayWidth get() = if (rotation % 180 == 90) height else width
+    val displayHeight get() = if (rotation % 180 == 90) width else height
+    val displayAspect get() = displayWidth.toFloat() / displayHeight.coerceAtLeast(1)
+
     data class Lrv(val uri: Uri, val videoTrack: Int, val width: Int, val height: Int)
 
     companion object {
@@ -99,7 +115,18 @@ class ClipInfo(
                 lrv.width / 2, lrv.height, dur, fps, lrv, imu)
         }
 
+        /** Fotoğraf klibi en fazla bu kadar uzatılabilir; varsayılan süre [IMAGE_DEFAULT_US]. */
+        const val IMAGE_MAX_US = 30_000_000L
+        const val IMAGE_DEFAULT_US = 4_000_000L
+
+        /** Dosyanın türüne bakar: Insta360 kuyruğu varsa 360°, yoksa düz video ya da fotoğraf. */
         fun load(context: Context, uri: Uri, lrvUri: Uri? = null): ClipInfo {
+            val hasTrailer = runCatching {
+                context.contentResolver.openFileDescriptor(uri, "r")!!.use { pfd ->
+                    FileInputStream(pfd.fileDescriptor).channel.use { ch -> Trailer.open(ch); true }
+                }
+            }.getOrDefault(false)
+            if (!hasTrailer) return MediaProbe.load(context, uri)
             val pfd = context.contentResolver.openFileDescriptor(uri, "r")
                 ?: throw IllegalStateException("dosya açılamadı")
             pfd.use {
@@ -147,10 +174,9 @@ class ClipInfo(
                 }
                 ex.release()
                 if (video.size != 2) {
-                    throw IllegalStateException(
-                        "Şimdilik yalnızca iki video izli 360 .insv dosyaları destekleniyor (bu dosyada ${video.size} iz var). " +
-                            "LRV önizleme dosyası yerine VID_..._00_xxx.insv dosyasını seçin."
-                    )
+                    // Tek izli Insta360 dosyası (ör. LRV ya da tek lens modu): düz video olarak aç.
+                    if (video.size == 1) return MediaProbe.load(context, uri)
+                    throw IllegalStateException("Bu dosyada ${video.size} video izi var; açılamadı.")
                 }
                 val reversed = camera in TRACK_ORDER_BODIES && meta.long(TAG_MULTI_TRACK_ORDER) == TRACK0_STREAM10
                 val rig = Rig.fromOffsetV3(offset, crop, reversed)

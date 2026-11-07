@@ -40,6 +40,10 @@ class Player(
     /** Renk düzenlemesi (null = yok). */
     @Volatile var colorProvider: () -> FloatArray? = { null }
 
+    /** Düz klip yerleşimi. */
+    @Volatile var fitProvider: () -> com.mhmmtbg.x5reframe.model.FrameFit = { com.mhmmtbg.x5reframe.model.FrameFit.FIT }
+    private val appContext = context.applicationContext
+
     /** Sabitleme temel dönüşü (yoksa null). */
     @Volatile var baseProvider: (Long) -> DoubleArray? = { null }
 
@@ -49,7 +53,7 @@ class Player(
     private val pfd: ParcelFileDescriptor = context.contentResolver.openFileDescriptor(clip.uri, "r")!!
     /** Varsa hafif LRV önizleme dosyası; yoksa asıl .insv kullanılır. */
     private val prefs = context.getSharedPreferences("prefs", Context.MODE_PRIVATE)
-    private val lrvPfd: ParcelFileDescriptor? = clip.lrv?.takeIf { prefs.getBoolean("prefer_lrv", true) || clip.videoTracks.size < 2 }?.let { runCatching { context.contentResolver.openFileDescriptor(it.uri, "r") }.getOrNull() }
+    private val lrvPfd: ParcelFileDescriptor? = clip.lrv?.takeIf { clip.is360 }?.takeIf { prefs.getBoolean("prefer_lrv", true) || clip.videoTracks.size < 2 }?.let { runCatching { context.contentResolver.openFileDescriptor(it.uri, "r") }.getOrNull() }
     val usingLrv get() = lrvPfd != null
 
     private lateinit var egl: EglCore
@@ -77,14 +81,9 @@ class Player(
         handler.post {
             try {
                 egl = EglCore()
-                program = ReframeProgram(clip.rig).apply { dynamicStitch = prefs.getBoolean("dynamic_stitch", true) }
+                program = Sources.program(clip).apply { dynamicStitch = prefs.getBoolean("dynamic_stitch", true) }
                 overlay = com.mhmmtbg.x5reframe.gl.OverlayRenderer()
-                val lrv = clip.lrv
-                source = if (lrvPfd != null && lrv != null) {
-                    SideBySideFrameSource(lrvPfd.fileDescriptor, lrv.videoTrack, lrv.width, lrv.height)
-                } else {
-                    DualFrameSource(pfd.fileDescriptor, clip)
-                }
+                source = Sources.open(appContext, clip, pfd.fileDescriptor, realtime = true, lrvFd = lrvPfd?.fileDescriptor)
                 source.seekAndShow(0, frameDurUs)
                 drawNow()
                 postPosition(source.currentPts)
@@ -242,6 +241,7 @@ class Player(
             stitchPts = t
         }
         program.color = colorProvider()
+        program.fit = fitProvider()
         program.drawScene(winW, winH, layoutProvider(), sceneProvider(t), source, baseProvider(t))
         val layers = layersProvider()
         overlay?.retain(layers)

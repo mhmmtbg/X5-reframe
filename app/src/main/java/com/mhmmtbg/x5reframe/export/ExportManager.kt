@@ -140,6 +140,7 @@ object ExportManager {
                 e.layout.rects, e.stitchInv, seg.speed,
                 layers = e.layers,
                 color = if (e.color.isIdentity) null else e.color.uniforms(),
+                fit = e.fit,
                 fadeInUs = if (i > 0 && segs[i - 1].transitionOut == Transition.FADE) fade else 0,
                 fadeOutUs = if (i < segs.size - 1 && seg.transitionOut == Transition.FADE) fade else 0,
             )

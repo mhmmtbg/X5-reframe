@@ -15,7 +15,7 @@ import java.util.concurrent.TimeUnit
 import kotlin.math.abs
 
 /** Tek bir video izini donanım çözücüsüyle bir Surface'e çözer (senkron API). */
-class TrackDecoder(fd: FileDescriptor, track: Int, private val surface: Surface, realtime: Boolean) {
+class TrackDecoder(fd: FileDescriptor, track: Int, private val surface: Surface, realtime: Boolean, toneMapToSdr: Boolean = false) {
     private val extractor = MediaExtractor()
     private val codec: MediaCodec
     private val info = MediaCodec.BufferInfo()
@@ -35,10 +35,20 @@ class TrackDecoder(fd: FileDescriptor, track: Int, private val surface: Surface,
         format = extractor.getTrackFormat(track)
         // Önizleme: gerçek zamanlı öncelik; dışa aktarım: olabildiğince hızlı.
         format.setInteger(MediaFormat.KEY_PRIORITY, if (realtime) 0 else 1)
-        codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
+        // HDR: Android 13+ kod çözücüden SDR'ye ton eşlemesi iste (desteklemezse yok sayılır, shader eşler).
+        if (toneMapToSdr && android.os.Build.VERSION.SDK_INT >= 33) {
+            format.setInteger(MediaFormat.KEY_COLOR_TRANSFER_REQUEST, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
+        }
+        codec = createCodec(format)
         codec.configure(format, surface, null, 0)
         codec.start()
     }
+
+    /** Kod çözücünün gerçekten verdiği aktarım eğrisi (ton eşlemesi yapıldıysa SDR). */
+    @Volatile var outputTransfer = -1
+        private set
+
+    private fun createCodec(f: MediaFormat): MediaCodec = MediaCodec.createDecoderByType(f.getString(MediaFormat.KEY_MIME)!!)
 
     /** Sıradaki çıktı tamponunun indisini döner, akış bittiyse -1. */
     fun nextOutput(): Int {
@@ -61,7 +71,10 @@ class TrackDecoder(fd: FileDescriptor, track: Int, private val surface: Surface,
                 }
             }
             val oi = codec.dequeueOutputBuffer(info, 2000)
-            if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) gotOutput = true
+            if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                gotOutput = true
+                outputTransfer = runCatching { codec.outputFormat.getInteger(MediaFormat.KEY_COLOR_TRANSFER) }.getOrDefault(0)
+            }
             if (oi >= 0) {
                 gotOutput = true
                 if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0 && info.size == 0) {
@@ -123,8 +136,9 @@ class DualFrameSource(fd: FileDescriptor, private val clip: ClipInfo, realtime: 
         private set
     private val fullRect = floatArrayOf(1f, 0f, 1f, 0f)
 
-    override fun lensTexture(lens: Int) = textures[clip.rig.lenses[lens].videoTrackOrder]
-    override fun lensTexMatrix(lens: Int) = texMatrices[clip.rig.lenses[lens].videoTrackOrder]
+    private val rig = clip.rig ?: throw IllegalArgumentException("360° klip değil")
+    override fun lensTexture(lens: Int) = textures[rig.lenses[lens].videoTrackOrder]
+    override fun lensTexMatrix(lens: Int) = texMatrices[rig.lenses[lens].videoTrackOrder]
     override fun lensSubRect(lens: Int) = fullRect
 
     init {
