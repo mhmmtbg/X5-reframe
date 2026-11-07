@@ -28,8 +28,8 @@ class ScreenshotTest {
         for (mode in listOf(com.mhmmtbg.x5reframe.ui.theme.ThemeMode.DARK, com.mhmmtbg.x5reframe.ui.theme.ThemeMode.LIGHT)) {
             inst.runOnMainSync { com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(ctx, mode) }
             val tag = mode.name.lowercase()
-            for ((tab, name) in listOf(0 to "album", 1 to "projects", 2 to "settings")) {
-                ctx.getSharedPreferences("prefs", android.content.Context.MODE_PRIVATE).edit().putInt("tab", tab).commit()
+            for ((tab, name) in listOf(0 to "home", 1 to "album", 2 to "settings")) {
+                ctx.getSharedPreferences("prefs", android.content.Context.MODE_PRIVATE).edit().putInt(MainActivity.KEY_TAB, tab).commit()
                 ActivityScenario.launch(MainActivity::class.java).use {
                     Thread.sleep(2000)
                     shot("ui_${tag}_$name")

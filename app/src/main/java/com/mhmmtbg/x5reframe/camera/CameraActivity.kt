@@ -243,7 +243,7 @@ class CameraActivity : AppCompatActivity() {
                         ).joinToString(" · "), color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
                     }
                 }
-                if (phase == Phase.READY && selected.isEmpty()) Text("Yenile", color = Palette.Accent, style = MaterialTheme.typography.labelLarge,
+                if (phase == Phase.READY && selected.isEmpty()) Text("Yenile", color = Palette.AccentText, style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.clickable { load() }.padding(8.dp))
             }
             message?.let {
@@ -351,7 +351,7 @@ class CameraActivity : AppCompatActivity() {
                 Text(if (connecting) "Bağlanıyor…" else "Bağlan", color = Palette.OnAccent, style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(Palette.Accent)
                         .clickable(enabled = !connecting) { connect() }.padding(horizontal = 20.dp, vertical = 11.dp))
-                Text("Telefon zaten bağlı", color = Palette.Accent, style = MaterialTheme.typography.labelLarge,
+                Text("Telefon zaten bağlı", color = Palette.AccentText, style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.clickable(enabled = !connecting) {
                         Thread {
                             val n = CameraLink.findExisting(this@CameraActivity)

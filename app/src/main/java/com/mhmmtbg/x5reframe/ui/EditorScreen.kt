@@ -131,6 +131,10 @@ fun EditorScreen(
 ) {
     var tool by rememberSaveable(startTool) { mutableStateOf<Tool?>(if (startTool == "trim") Tool.TRIM else null) }
     LaunchedEffect(tool) { c.layerTool = tool == Tool.LAYER }
+    LaunchedEffect(c.openToolRequest) {
+        when (c.openToolRequest) { "layer" -> tool = Tool.LAYER; "trim" -> tool = Tool.TRIM }
+        c.openToolRequest = null
+    }
     var showExport by remember { mutableStateOf(false) }
     val s = c.state
 
@@ -184,11 +188,19 @@ fun EditorScreen(
                 t.outUs = s.outUs
                 t.keyframes = c.activeKeyframes.map { it.timeUs }
                 t.trackRanges = s.tracks
+                t.waveform = c.waveform
+                t.layerBars = s.layers.map { l ->
+                    TimelineView.LayerBar(
+                        l.id, if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) l.content else "Görsel",
+                        l.startUs, if (l.endUs < 0) s.outUs else l.endUs,
+                        l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.IMAGE, l.id == c.selectedLayer,
+                    )
+                }
                 t.setDark(Palette.dark)
                 if (!c.playing) t.positionUs = c.positionUs
             },
         )
-        KeyframeButton(c)
+        QuickBar(c, seq) { tool = it }
 
         val open = tool
         if (open != null && open != Tool.SNAPSHOT) {
@@ -274,11 +286,11 @@ internal fun FeedbackPill(c: EditorController, modifier: Modifier) {
     AnimatedVisibility(visible && fb != null, modifier, enter = fadeIn(), exit = fadeOut()) {
         val positive = fb?.positive ?: true
         Row(
-            Modifier.background(Color(0xEE202329), RoundedCornerShape(20.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
+            Modifier.background(Color(0xEE1C1E22), RoundedCornerShape(20.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             if (positive) {
-                Icon(Glyphs.Check, null, tint = Color(0xFFFFC94D), modifier = Modifier.size(16.dp))
+                Icon(Glyphs.Check, null, tint = Color(0xFF8DAEFF), modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
             }
             Text(fb?.text ?: "", color = if (positive) Color.White else Color(0xFFFF8A8A), style = MaterialTheme.typography.bodyMedium)
@@ -295,7 +307,7 @@ private fun ViewHud(c: EditorController, modifier: Modifier) {
             (if (editing) "● kaydedilmedi  " else "") + if (c.clip.is360) "yön ${v.yaw.toInt()}°  eğim ${v.pitch.toInt()}°  açı ${v.fov.toInt()}°"
                 else "yakınlaştırma ${"%.2f".format(com.mhmmtbg.x5reframe.gl.ReframeProgram.flatZoom(v))}×" + if (v.roll != 0.0) "  döndürme ${v.roll.toInt()}°" else "",
         modifier = modifier.clickable { c.showStats = !c.showStats }.background(Color(0x99000000), RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp),
-        color = if (editing) Color(0xFF6EC6FF) else Color.White,
+        color = if (editing) Color(0xFF8DAEFF) else Color.White,
         style = MaterialTheme.typography.bodySmall,
     )
 }
@@ -345,22 +357,47 @@ private fun ToolBar(selected: Tool?, tools: List<Tool>, onSelect: (Tool) -> Unit
                 Modifier.width(72.dp).clip(RoundedCornerShape(10.dp)).clickable { onSelect(t) }.padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(t.icon, null, Modifier.size(24.dp), tint = if (on) Palette.Accent else Palette.Text)
+                Icon(t.icon, null, Modifier.size(24.dp), tint = if (on) Palette.AccentText else Palette.Text)
                 Spacer(Modifier.height(4.dp))
-                Text(t.label, color = if (on) Palette.Accent else Palette.Muted, style = MaterialTheme.typography.labelSmall,
+                Text(t.label, color = if (on) Palette.AccentText else Palette.Muted, style = MaterialTheme.typography.labelSmall,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
 }
 
-/** Oynatma çizgisinin altında: anahtar kare ekle / sil. */
+/** Oynatma çizgisinin altında bağlama göre hızlı işlemler: böl, anahtar kare, metin. */
+@Composable
+private fun QuickBar(c: EditorController, seq: SequenceUi, openTool: (Tool) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        QuickChip(Glyphs.Cut, "Böl") { seq.split(seq.current) }
+        KeyframeButton(c)
+        QuickChip(Glyphs.Text, "Metin") { openTool(Tool.LAYER) }
+    }
+}
+
+@Composable
+private fun QuickChip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Row(
+        Modifier.clip(RoundedCornerShape(18.dp)).background(Palette.SurfaceHigh).clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 7.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(icon, null, Modifier.size(14.dp), tint = Palette.Text)
+        Spacer(Modifier.width(6.dp))
+        Text(label, color = Palette.Text, style = MaterialTheme.typography.labelLarge)
+    }
+}
+
+/** Anahtar kare ekle / sil. */
 @Composable
 private fun KeyframeButton(c: EditorController) {
     val near = c.activeKeyframeNear(c.positionUs, 120_000) != null
-    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+    Row(horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
         Row(
-            Modifier.clip(RoundedCornerShape(18.dp)).background(if (near) Palette.Keyframe else Palette.SurfaceHigh)
+            Modifier.clip(RoundedCornerShape(18.dp)).background(if (near) Palette.Accent else Palette.SurfaceHigh)
                 .clickable { if (near) c.deleteKeyframe() else c.addOrUpdateKeyframe() }.padding(horizontal = 14.dp, vertical = 7.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -419,7 +456,7 @@ private fun AiPanel(c: EditorController, a: EditorActions) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(c.aiProvider, color = Palette.Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.weight(1f))
-            Text("Ayarlar", color = Palette.Accent, style = MaterialTheme.typography.labelMedium,
+            Text("Ayarlar", color = Palette.AccentText, style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.clickable(onClick = a.aiSettings).padding(4.dp))
         }
         if (!c.aiReady) {
@@ -536,7 +573,7 @@ private fun CurveChip(cv: com.mhmmtbg.x5reframe.model.Curve, selected: Boolean, 
             .border(1.dp, if (selected) Palette.Accent else Palette.Outline, RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        val col = if (selected) Palette.Accent else Palette.Muted
+        val col = if (selected) Palette.AccentText else Palette.Muted
         androidx.compose.foundation.Canvas(Modifier.size(56.dp, 30.dp)) {
             val path = androidx.compose.ui.graphics.Path()
             val n = 24
@@ -586,7 +623,7 @@ private fun <T> Segmented(options: List<T>, selected: T, label: (T) -> String, o
                     .clickable { onSelect(o) },
                 contentAlignment = Alignment.Center,
             ) {
-                Text(label(o), color = if (on) Palette.Accent else Palette.Muted, style = MaterialTheme.typography.labelLarge)
+                Text(label(o), color = if (on) Palette.AccentText else Palette.Muted, style = MaterialTheme.typography.labelLarge)
             }
         }
     }
@@ -860,7 +897,7 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
                     .clickable { c.selectedLayer = l.id }.padding(horizontal = 12.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) "T" else "▣", color = Palette.Accent, modifier = Modifier.width(20.dp))
+                Text(if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) "T" else "▣", color = Palette.AccentText, modifier = Modifier.width(20.dp))
                 Text(
                     if (l.kind == com.mhmmtbg.x5reframe.model.Layer.Kind.TEXT) l.content.replace('\n', ' ') else "Görsel",
                     Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium,
@@ -925,7 +962,7 @@ private fun TextDialog(initial: String, style: com.mhmmtbg.x5reframe.model.Layer
         onDismissRequest = onDismiss,
         title = { Text("Metin") },
         text = { androidx.compose.material3.OutlinedTextField(text, { text = it }, minLines = 1, maxLines = 4) },
-        confirmButton = { androidx.compose.material3.TextButton(onClick = { if (text.isNotBlank()) onOk(text.trim(), style) }) { Text("Tamam", color = Palette.Accent) } },
+        confirmButton = { androidx.compose.material3.TextButton(onClick = { if (text.isNotBlank()) onOk(text.trim(), style) }) { Text("Tamam", color = Palette.AccentText) } },
         dismissButton = { androidx.compose.material3.TextButton(onClick = onDismiss) { Text("Vazgeç") } },
         containerColor = Palette.Surface, tonalElevation = 0.dp,
     )
@@ -1004,7 +1041,7 @@ private fun AudioPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
         } else {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("♪ " + au.musicName, Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
-                Text("Değiştir", color = Palette.Accent, style = MaterialTheme.typography.labelMedium,
+                Text("Değiştir", color = Palette.AccentText, style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.clickable { seq.pickMusic() }.padding(8.dp))
                 Text("Kaldır", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
                     modifier = Modifier.clickable { seq.updateAudio(au.copy(musicUri = null, musicName = "")); c.say("Müzik kaldırıldı") }.padding(8.dp))

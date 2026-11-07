@@ -113,7 +113,7 @@ fun SequenceStrip(seq: SequenceUi) {
                 Modifier.width(52.dp).height(44.dp).border(1.dp, Palette.Outline, RoundedCornerShape(8.dp))
                     .background(Color.Transparent).combinedClickable(onClick = seq.add),
                 contentAlignment = Alignment.Center,
-            ) { Text("+ Klip", style = MaterialTheme.typography.labelMedium, color = Palette.Accent) }
+            ) { Text("+ Klip", style = MaterialTheme.typography.labelMedium, color = Palette.AccentText) }
         }
     }
 }

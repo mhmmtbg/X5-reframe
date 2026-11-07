@@ -385,6 +385,10 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
     // ---- Katmanlar ----
 
     var selectedLayer by mutableStateOf<String?>(null)
+    /** Zaman çizelgesinden istenen araç (ör. katman çubuğuna dokununca "layer"). */
+    var openToolRequest by mutableStateOf<String?>(null)
+    /** Klip sesinin dalga biçimi (zaman çizelgesi için). */
+    var waveform by mutableStateOf<FloatArray?>(null)
     /** Katman sekmesi açıkken önizlemede sürükleme katmanı taşır. */
     var layerTool by mutableStateOf(false)
 

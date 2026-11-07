@@ -186,15 +186,16 @@ class MainActivity : AppCompatActivity() {
 
     @Composable
     private fun Home() {
-        // Insta360 düzeni: alt gezinme çubuğu, açılışta Albüm.
-        var tab by remember { mutableStateOf(intent.getIntExtra(EXTRA_TAB, prefs.getInt("tab", 0))) }
+        // Alt gezinme: Ana sayfa (yeni proje + projeler), 360° albüm, ayarlar.
+        var tab by remember { mutableStateOf(intent.getIntExtra(EXTRA_TAB, prefs.getInt(KEY_TAB, 0))) }
         var about by remember { mutableStateOf(false) }
         Column(Modifier.fillMaxSize().background(Palette.Background)) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 Column(Modifier.fillMaxSize()) {
                     when (tab) {
-                        0 -> {
-                            Header("Albüm") {
+                        0 -> HomeTab(onAlbum = { tab = 1; prefs.edit().putInt(KEY_TAB, 1).apply() })
+                        1 -> {
+                            Header("360° Albüm") {
                                 HeaderAction(Glyphs.Wifi, "Kameraya bağlan") {
                                     startActivity(Intent(this@MainActivity, com.mhmmtbg.x5reframe.camera.CameraActivity::class.java))
                                 }
@@ -202,20 +203,19 @@ class MainActivity : AppCompatActivity() {
                             }
                             ExportBanner(); MediaTab()
                         }
-                        1 -> { Header("Projeler") { HeaderAction(Glyphs.Add, "Yeni proje") { chooseSource = true } }; ExportBanner(); ProjectsTab() }
                         else -> { Header("Ayarlar") {}; SettingsTab { about = true } }
                     }
                 }
             }
             Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
             Row(Modifier.fillMaxWidth().background(Palette.Background).navigationBarsPadding().height(60.dp)) {
-                listOf(Triple("Albüm", Glyphs.Album, 0), Triple("Projeler", Glyphs.Projects, 1), Triple("Ayarlar", Glyphs.Settings, 2)).forEach { (label, icon, i) ->
+                listOf(Triple("Ana sayfa", Glyphs.Home, 0), Triple("360° Albüm", Glyphs.Sphere, 1), Triple("Ayarlar", Glyphs.Settings, 2)).forEach { (label, icon, i) ->
                     val sel = tab == i
                     Column(
-                        Modifier.weight(1f).fillMaxHeight().clickable { tab = i; prefs.edit().putInt("tab", i).apply() },
+                        Modifier.weight(1f).fillMaxHeight().clickable { tab = i; prefs.edit().putInt(KEY_TAB, i).apply() },
                         verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Icon(icon, label, Modifier.size(24.dp), tint = if (sel) Palette.Accent else Palette.Muted)
+                        Icon(icon, label, Modifier.size(24.dp), tint = if (sel) Palette.AccentText else Palette.Muted)
                         Text(label, color = if (sel) Palette.Text else Palette.Muted, style = MaterialTheme.typography.labelSmall)
                     }
                 }
@@ -380,7 +380,7 @@ class MainActivity : AppCompatActivity() {
                     modifier = Modifier.clickable { com.mhmmtbg.x5reframe.ai.AiSettings.setKey(ctx, provider, null); hasKey = false; status = "Anahtar silindi" to true }
                         .padding(horizontal = 8.dp, vertical = 8.dp))
                 Spacer(Modifier.weight(1f))
-                Text("Anahtar al", color = Palette.Accent, style = MaterialTheme.typography.labelLarge,
+                Text("Anahtar al", color = Palette.AccentText, style = MaterialTheme.typography.labelLarge,
                     modifier = Modifier.clickable { runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(provider.keyUrl))) } }.padding(8.dp))
             }
             androidx.compose.material3.OutlinedTextField(
@@ -454,6 +454,8 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         const val EXTRA_TAB = "tab"
+        /** Seçili alt sekme (v3.1 düzeni: 0 ana sayfa, 1 albüm, 2 ayarlar). */
+        const val KEY_TAB = "tab31"
         const val KEY_DYNAMIC_STITCH = "dynamic_stitch"
         const val KEY_PREFER_LRV = "prefer_lrv"
         const val UPDATE_URL = "https://github.com/mhmmtbg/X5-reframe/raw/builds/x5-reframe.apk"
@@ -487,7 +489,7 @@ class MainActivity : AppCompatActivity() {
                 Text("✓ Hazır: ${s.request.title}", Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
                 TextButton(onClick = {
                     runCatching { startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(s.uri, "video/mp4").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)) }
-                }) { Text("Aç", color = Palette.Accent) }
+                }) { Text("Aç", color = Palette.AccentText) }
             }
             else -> {}
         }
@@ -501,25 +503,99 @@ class MainActivity : AppCompatActivity() {
             title = { Text("X5 Reframe $version") },
             text = {
                 Text(
-                    "Insta360 X5 360° kliplerini telefonda, internetsiz kadrajlar ve hızlıca dışa aktarır.\n\n" +
+                    "Telefonda internetsiz video düzenleyici: Insta360 X5 360° klipleri ve her türlü video ile fotoğrafı kadrajlar, düzenler ve hızlıca dışa aktarır.\n\n" +
                         "Insta360 dosya yapısı ve lens modeli için telemetry-parser (AdrianEddy, MIT/Apache-2.0) belgelerinden yararlanıldı. " +
                         "Yüz ve nesne algılama: Google ML Kit (cihaz içi). Simgeler: Material Icons (Apache-2.0).",
                     style = MaterialTheme.typography.bodyMedium,
                 )
             },
-            confirmButton = { TextButton(onClick = onClose) { Text("Tamam", color = Palette.Accent) } },
+            confirmButton = { TextButton(onClick = onClose) { Text("Tamam", color = Palette.AccentText) } },
             containerColor = Palette.Surface, tonalElevation = 0.dp,
         )
     }
 
+    /** Ana sayfa: yeni proje (galeri / dosyalar / kamera), ipucu, projeler. */
     @Composable
-    private fun ProjectsTab() {
-        if (projects.isEmpty()) {
-            EmptyState("Henüz proje yok", "Sağ üstteki + ile galeriden video ve fotoğraf ya da dosyalardan 360° .insv klibi seç. .insv ile aynı adlı LRV dosyasını da seçersen önizleme çok daha akıcı olur.")
-            return
+    private fun HomeTab(onAlbum: () -> Unit) {
+        var tipHidden by remember { mutableStateOf(prefs.getInt("tip_hidden_day", -1) == dayIndex()) }
+        LazyColumn(contentPadding = PaddingValues(bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item { Header("X5 Reframe") {} }
+            item {
+                Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    // Birincil eylem: galeriden yeni proje
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(Palette.Accent)
+                            .clickable { galleryPicker.launch(androidx.activity.result.PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)) }
+                            .padding(horizontal = 18.dp, vertical = 18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).background(Palette.OnAccent.copy(alpha = 0.18f)), contentAlignment = Alignment.Center) {
+                            Icon(Glyphs.Add, null, Modifier.size(26.dp), tint = Palette.OnAccent)
+                        }
+                        Spacer(Modifier.width(14.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Yeni proje", style = MaterialTheme.typography.titleLarge, color = Palette.OnAccent)
+                            Text("Galeriden video ve fotoğraf seç", style = MaterialTheme.typography.bodyMedium, color = Palette.OnAccent.copy(alpha = 0.85f))
+                        }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        QuickAction(Glyphs.Folder, "Dosyalar", "360° .insv, MKV, WebM", Modifier.weight(1f)) {
+                            picker.launch(arrayOf("video/*", "image/*", "application/octet-stream", "*/*"))
+                        }
+                        QuickAction(Glyphs.Wifi, "Kamera", "Kablosuz bağlan", Modifier.weight(1f)) {
+                            startActivity(Intent(this@MainActivity, com.mhmmtbg.x5reframe.camera.CameraActivity::class.java))
+                        }
+                        QuickAction(Glyphs.Sphere, "360° albüm", "SD kart klasörü", Modifier.weight(1f), onAlbum)
+                    }
+                }
+            }
+            item { ExportBanner() }
+            if (!tipHidden) item {
+                TipCard(TIPS[dayIndex() % TIPS.size]) { prefs.edit().putInt("tip_hidden_day", dayIndex()).apply(); tipHidden = true }
+            }
+            item {
+                Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Projeler", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    if (projects.isNotEmpty()) Text("${projects.size}", color = Palette.Muted, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+            if (projects.isEmpty()) item {
+                Text(
+                    "Henüz proje yok. Yeni proje ile galeriden video ve fotoğraf ya da Dosyalar ile 360° .insv klibi seç; .insv ile aynı adlı LRV dosyasını da seçersen önizleme çok daha akıcı olur.",
+                    color = Palette.Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(horizontal = 20.dp),
+                )
+            }
+            items(projects, key = { it.id }) { p -> Box(Modifier.padding(horizontal = 16.dp)) { ProjectCard(p) } }
         }
-        LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            items(projects, key = { it.id }) { p -> ProjectCard(p) }
+    }
+
+    private fun dayIndex() = (System.currentTimeMillis() / 86_400_000L).toInt()
+
+    @Composable
+    private fun QuickAction(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, sub: String, modifier: Modifier, onClick: () -> Unit) {
+        Column(
+            modifier.clip(RoundedCornerShape(14.dp)).background(Palette.Surface).border(1.dp, Palette.Outline, RoundedCornerShape(14.dp))
+                .clickable(onClick = onClick).padding(horizontal = 12.dp, vertical = 12.dp),
+        ) {
+            Icon(icon, null, Modifier.size(22.dp), tint = Palette.Text)
+            Spacer(Modifier.height(10.dp))
+            Text(title, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(sub, style = MaterialTheme.typography.bodySmall, color = Palette.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+
+    @Composable
+    private fun TipCard(tip: String, onClose: () -> Unit) {
+        Row(
+            Modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(Palette.SurfaceHigh).padding(start = 14.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Glyphs.Lightbulb, null, Modifier.size(20.dp), tint = Palette.AccentText)
+            Spacer(Modifier.width(12.dp))
+            Text(tip, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            Box(Modifier.size(40.dp).clip(RoundedCornerShape(20.dp)).clickable(onClick = onClose), contentAlignment = Alignment.Center) {
+                Icon(Glyphs.Close, "İpucunu gizle", Modifier.size(18.dp), tint = Palette.Muted)
+            }
         }
     }
 
@@ -541,7 +617,11 @@ class MainActivity : AppCompatActivity() {
             Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
                 Text(p.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    "${"%.1f".format(p.totalDurationUs / 1e6)} sn · ${p.segments.size} parça · ${p.keyframeCount} anahtar kare",
+                    run {
+                        val n360 = p.segments.count { it.clipName.endsWith(".insv", true) }
+                        val kind = when (n360) { p.segments.size -> "360°"; 0 -> "Video"; else -> "360° + video" }
+                        "$kind · ${"%.1f".format(p.totalDurationUs / 1e6)} sn · ${p.segments.size} parça"
+                    },
                     color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
                 )
                 Text(DateUtils.getRelativeTimeSpanString(p.updatedAt).toString(), color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
@@ -617,6 +697,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    private val TIPS = listOf(
+        "Düz videoda önizlemeyi sürükleyip iki parmakla yakınlaştır, sonra anahtar kare ekle: yavaş kaydırma ve yakınlaşma etkisi.",
+        "Dikey bir videoyu yatay projede kullanırken Görünüm › Yerleşim › Bulanık arka plan siyah boşlukları doldurur.",
+        "360° klibin yanında aynı adlı LRV dosyasını da seç: önizleme çok daha akıcı olur.",
+        "Dışa aktarım arka planda sürer; uygulamadan çıkabilirsin, bitince bildirim gelir.",
+        "Kablosuz bağlantıda yalnızca seçtiğin çekimler telefona iner; diğerlerini indirmeden önizleyebilirsin.",
+        "Fotoğraf klibinin süresini Kes aracındaki tutamaklarla 30 saniyeye kadar uzatabilirsin.",
+    )
 
     @Composable
     private fun EmptyState(title: String, body: String) {

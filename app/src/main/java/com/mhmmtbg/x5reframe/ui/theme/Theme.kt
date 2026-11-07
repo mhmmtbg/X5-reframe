@@ -47,26 +47,34 @@ enum class ThemeMode(val label: String, val night: Int) {
 }
 
 /**
- * Tasarım sistemi: düz, gölgesiz. Koyu tema saf siyah zeminlidir (AMOLED'de piksel kapalı).
- * Tek vurgu rengi (amber) birincil eylemler, kesme tutamakları ve seçili durumlar içindir;
- * açık temada metin olarak okunabilsin diye koyulaştırılır.
+ * Tasarım sistemi: tek renkli (siyah-beyaz-gri) zemin, tek vurgu rengi kobalt mavisi.
+ * Düz, gölgesiz, parlamasız. Koyu tema saf siyah zeminlidir (AMOLED'de piksel kapalı).
+ * Vurgu yalnızca birincil eylem, seçili durum, kesme tutamakları ve anahtar kareler içindir.
  */
 object Palette {
     var dark by mutableStateOf(true)
         internal set
 
-    val Background get() = if (dark) Color(0xFF000000) else Color(0xFFF5F6F8)
-    val Surface get() = if (dark) Color(0xFF0C0D0F) else Color(0xFFFFFFFF)
-    val SurfaceHigh get() = if (dark) Color(0xFF1B1D21) else Color(0xFFE9ECF0)
-    val Outline get() = if (dark) Color(0xFF30343B) else Color(0xFFD3D8DF)
-    val Text get() = if (dark) Color(0xFFF2F4F7) else Color(0xFF12151A)
-    val Muted get() = if (dark) Color(0xFFA3ABB7) else Color(0xFF59626E)
+    val Background get() = if (dark) Color(0xFF000000) else Color(0xFFF7F7F8)
+    val Surface get() = if (dark) Color(0xFF0E0F11) else Color(0xFFFFFFFF)
+    val SurfaceHigh get() = if (dark) Color(0xFF1C1E22) else Color(0xFFEEEFF2)
+    val Outline get() = if (dark) Color(0xFF2C2F35) else Color(0xFFDCDEE3)
+    val Text get() = if (dark) Color(0xFFF3F4F6) else Color(0xFF111318)
+    val Muted get() = if (dark) Color(0xFF9CA3AF) else Color(0xFF5B6270)
     /** Etkisiz düğme/simge: okunur ama soluk. */
-    val Disabled get() = if (dark) Color(0xFF6B7280) else Color(0xFF9AA2AD)
-    val Accent get() = if (dark) Color(0xFFFFC94D) else Color(0xFFC77A00)
-    val OnAccent get() = Color(0xFF1A1A1A)
-    val Keyframe get() = if (dark) Color(0xFF6EC6FF) else Color(0xFF1565C0)
+    val Disabled get() = if (dark) Color(0xFF6B7280) else Color(0xFF9AA0AA)
+    /** Kobalt: koyu zeminde biraz açık, açık zeminde koyu (her ikisinde de beyaz yazı okunur). */
+    val Accent get() = if (dark) Color(0xFF3D6DF2) else Color(0xFF2754D6)
+    val OnAccent get() = Color(0xFFFFFFFF)
+    /** Vurgunun metin/ince çizgi olarak kullanımı (koyu zeminde daha açık). */
+    val AccentText get() = if (dark) Color(0xFF8DAEFF) else Color(0xFF2754D6)
+    val Keyframe get() = AccentText
+    val Success get() = if (dark) Color(0xFF4ADE80) else Color(0xFF15803D)
     val Error get() = if (dark) Color(0xFFFF6B6B) else Color(0xFFC62828)
+
+    /** Video üstü yüzeyler (temadan bağımsız). */
+    val Scrim = Color(0x99000000)
+    val OnVideo = Color(0xFFFFFFFF)
 }
 
 private fun scheme(dark: Boolean) = if (dark) darkColorScheme(
@@ -76,7 +84,7 @@ private fun scheme(dark: Boolean) = if (dark) darkColorScheme(
     surfaceContainerHigh = Palette.SurfaceHigh, surfaceContainerHighest = Palette.SurfaceHigh, surfaceContainerLow = Palette.Surface,
     surfaceContainerLowest = Palette.Background, outline = Palette.Outline, outlineVariant = Palette.Outline, error = Palette.Error,
 ) else lightColorScheme(
-    primary = Palette.Accent, onPrimary = Palette.OnAccent, secondary = Palette.Keyframe, onSecondary = Color.White,
+    primary = Palette.Accent, onPrimary = Palette.OnAccent, secondary = Palette.Keyframe, onSecondary = Palette.OnAccent,
     background = Palette.Background, onBackground = Palette.Text, surface = Palette.Surface, onSurface = Palette.Text,
     surfaceVariant = Palette.SurfaceHigh, onSurfaceVariant = Palette.Muted, surfaceContainer = Palette.Surface,
     surfaceContainerHigh = Palette.SurfaceHigh, surfaceContainerHighest = Palette.SurfaceHigh, surfaceContainerLow = Palette.Surface,
@@ -84,7 +92,10 @@ private fun scheme(dark: Boolean) = if (dark) darkColorScheme(
 )
 
 private val typography = Typography(
+    headlineSmall = TextStyle(fontSize = 24.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.2).sp),
+    titleLarge = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.SemiBold),
     titleMedium = TextStyle(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+    titleSmall = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
     labelLarge = TextStyle(fontSize = 14.sp, fontWeight = FontWeight.Medium),
     labelMedium = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Medium),
     bodyMedium = TextStyle(fontSize = 14.sp),

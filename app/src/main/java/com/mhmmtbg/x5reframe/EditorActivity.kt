@@ -561,6 +561,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             val clip = clipCache[seg.clipUri.toString()] ?: withContext(Dispatchers.IO) {
                 runCatching { ClipInfo.load(this@EditorActivity, seg.clipUri, seg.lrvUri) }
             }.getOrElse {
+                autoPlayNext = false; autoAdvancing = false
                 loadError = (it.message ?: it.javaClass.simpleName) + "\n\nKlip taşınmış ya da silinmiş olabilir."
                 return@launch
             }
@@ -584,12 +585,17 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             filmstrip = emptyList()
             timelineView?.filmstrip = emptyList()
             buildFilmstrip(clip)
+            buildWaveform(c)
             segIndex = i
             c.aiLogState = aiLogState
             refreshAiState(c)
             controller = c
             player = p
             surface?.let { sf -> if (sf.isValid) p.attachSurface(sf, surfW, surfH) }
+            // Parça giriş noktasından başlar; proje oynatılıyorsa kesintisiz devam eder.
+            if (seg.edit.inUs > 0) { c.positionUs = seg.edit.inUs; timelineView?.positionUs = seg.edit.inUs; p.seekTo(seg.edit.inUs) }
+            if (autoPlayNext) { autoPlayNext = false; p.play() }
+            autoAdvancing = false
             loaded = true
         }
     }
@@ -1116,6 +1122,17 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
             }
             override fun onPeek(us: Long) { peeked = true; player?.seekTo(us) }
             override fun onTrimChanged(inUs: Long, outUs: Long) { controller?.dragTrim(inUs, outUs) }
+            override fun onLayerSelected(id: String) {
+                val c = controller ?: return
+                c.selectedLayer = id
+                c.openToolRequest = "layer"
+            }
+            override fun onLayerTimeChanged(id: String, startUs: Long, endUs: Long, done: Boolean) {
+                val c = controller ?: return
+                c.selectedLayer = id
+                c.updateLayerLive { it.copy(startUs = startUs, endUs = endUs) }
+                if (done) { c.endLayerGesture(); c.say("Metin ${fmtSec(startUs)} – ${fmtSec(endUs)}") }
+            }
         }
         return t
     }
@@ -1173,10 +1190,26 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
      * Oynatma sırasında her karede yalnızca zaman çizelgesi çizgisi güncellenir; arayüzün geri kalanı
      * (Compose) saniyede ~8 kez. Her karede tüm ekranın yeniden oluşturulması önizlemeyi takıltıyordu.
      */
+    /** Proje boyunca oynatma: parçanın çıkış noktasına gelince sıradakine geç ve çalmaya devam et. */
+    private var autoPlayNext = false
+    private var autoAdvancing = false
+
+    private fun maybeAdvance(c: EditorController, us: Long) {
+        val p = player ?: return
+        if (!p.playing || autoAdvancing || viewer || c.recording || c.tracking) return
+        if (us >= c.state.outUs - 20_000 && us >= c.state.inUs && segIndex < segments.size - 1) {
+            autoAdvancing = true
+            autoPlayNext = true
+            p.pause()
+            openSegment(segIndex + 1)
+        }
+    }
+
     override fun onPosition(us: Long) {
         if (userScrubbing) return
         timelineView?.positionUs = us
         val c = controller ?: return
+        maybeAdvance(c, us)
         c.recordSample(us)
         val now = android.os.SystemClock.uptimeMillis()
         if (!c.playing || now - lastUiPositionMs >= 120) {
@@ -1236,6 +1269,18 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 }
             }.getOrDefault(emptyList())
             runOnUiThread { filmstrip = frames; timelineView?.filmstrip = frames }
+        }.start()
+    }
+
+    private fun fmtSec(us: Long) = "%.1f sn".format(us / 1e6)
+
+    /** Klip sesinin dalga biçimi (bir kez hesaplanır, önbellekte kalır). */
+    private fun buildWaveform(c: EditorController) {
+        val track = c.clip.audioTrack ?: run { c.waveform = null; return }
+        com.mhmmtbg.x5reframe.media.Waveform.cached(c.clip.uri)?.let { c.waveform = it; return }
+        Thread {
+            val w = com.mhmmtbg.x5reframe.media.Waveform.compute(this, c.clip.uri, track)
+            runOnUiThread { if (controller === c) c.waveform = w }
         }.start()
     }
 

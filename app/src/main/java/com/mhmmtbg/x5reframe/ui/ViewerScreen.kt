@@ -142,7 +142,7 @@ fun ViewerScreen(
                                 .background(Color(0x66000000)).padding(horizontal = 10.dp, vertical = 9.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Icon(item.icon, item.label, Modifier.size(22.dp), tint = if (item.active) Palette.Accent else Color.White)
+                            Icon(item.icon, item.label, Modifier.size(22.dp), tint = if (item.active) Palette.AccentText else Color.White)
                             AnimatedVisibility(labelsVisible) {
                                 Text(item.label, color = Color.White, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(start = 8.dp, end = 4.dp))
                             }
