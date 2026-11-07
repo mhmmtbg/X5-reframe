@@ -113,24 +113,28 @@ class EditorActions(
     val captionModes: () -> List<Pair<String, String>> = { emptyList() },
     /** Ses: seslendirme kaydını başlat / durdur, ritme göre böl. */
     val toggleVoice: () -> Unit = {},
+    /** Akıllı araçlar (normal video): akıllı kadraj, sessizlik kesme, projeyi otomatik kurgula. */
+    val smartReframe: (Aspect) -> Unit = {},
+    val removeSilences: () -> Unit = {},
+    val autoEditAll: (Int) -> Unit = {},
     val splitOnBeats: (Int) -> Unit = {},
     val autoCaptions: (String) -> Unit = {},
 )
 
 /** Düzenleyici araç çubuğu (yatay kaydırılır). Paneli olmayanlar (Anlık görüntü) doğrudan çalışır. */
 private enum class Tool(val label: String) {
-    AI("Yapay zekâ"), TRIM("Kes"), SPEED("Hız"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), COLOR("Renk"), MULTI("Çoklu açı"),
+    AI("Yapay zekâ"), SMART("Akıllı"), TRIM("Kes"), SPEED("Hız"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), COLOR("Renk"), MULTI("Çoklu açı"),
     STAB("Sabitleme"), AUDIO("Ses"), LAYER("Metin"), SNAPSHOT("Anlık görüntü"), STITCH("Dikiş");
 
     val icon: androidx.compose.ui.graphics.vector.ImageVector get() = when (this) {
-        AI -> Glyphs.Chat; TRIM -> Glyphs.Cut; SPEED -> Glyphs.Speed; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe; COLOR -> Glyphs.Palette
+        AI -> Glyphs.Chat; SMART -> Glyphs.Sparkle; TRIM -> Glyphs.Cut; SPEED -> Glyphs.Speed; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe; COLOR -> Glyphs.Palette
         MULTI -> Glyphs.Album; STAB -> Glyphs.Horizon; AUDIO -> Glyphs.VolumeOn; LAYER -> Glyphs.Text
         SNAPSHOT -> Glyphs.Camera; STITCH -> Glyphs.Stitch
     }
 }
 
 /** Düz video / fotoğrafta yalnızca 360°'ye özgü olmayan araçlar. */
-private val FLAT_TOOLS = listOf(Tool.TRIM, Tool.SPEED, Tool.FRAME, Tool.STAB, Tool.KEYFRAME, Tool.COLOR, Tool.AUDIO, Tool.LAYER, Tool.SNAPSHOT)
+private val FLAT_TOOLS = listOf(Tool.SMART, Tool.TRIM, Tool.SPEED, Tool.FRAME, Tool.STAB, Tool.KEYFRAME, Tool.COLOR, Tool.AUDIO, Tool.LAYER, Tool.SNAPSHOT)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -225,6 +229,7 @@ fun EditorScreen(
                 when (open) {
                     Tool.FRAME -> if (c.clip.is360) FramePanel(c) else FlatFramePanel(c)
                     Tool.TRIM -> TrimPanel(c)
+                    Tool.SMART -> SmartPanel(c, actions)
                     Tool.SPEED -> SpeedPanel(c, seq)
                     Tool.STAB -> if (c.clip.is360) StabPanel(c) else FlatStabPanel(c, actions)
                     Tool.MULTI -> MultiPanel(c)
@@ -981,9 +986,36 @@ private fun TrimPanel(c: EditorController) {
         }
         ActionButton("Kesmeyi sıfırla", Modifier.fillMaxWidth(), enabled = s.inUs != 0L || s.outUs != c.clip.durationUs) { c.resetTrim() }
         Text(
-            "Düğmeler oynatma çizgisinin olduğu yeri kullanır. Zaman çizelgesindeki sarı tutamakları sürükleyerek de ayarlayabilirsin.",
+            "Düğmeler oynatma çizgisinin olduğu yeri kullanır. Zaman çizelgesindeki mavi tutamakları sürükleyerek de ayarlayabilirsin.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+/** Normal video için akıllı araçlar. */
+@Composable
+private fun SmartPanel(c: EditorController, a: EditorActions) {
+    val task = c.autoTask
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (task != null) {
+            Text(task.first, style = MaterialTheme.typography.bodyMedium)
+            LinearProgressIndicator(progress = { task.second }, modifier = Modifier.fillMaxWidth().height(6.dp), color = Palette.Accent, trackColor = Palette.SurfaceHigh)
+            ActionButton("Durdur", Modifier.fillMaxWidth()) { a.cancelAuto() }
+            return@Column
+        }
+        Text("Akıllı kadraj", style = MaterialTheme.typography.titleSmall)
+        Text("Yatay videoyu dikey ya da kareye çevirirken yüzleri izleyip konuyu ortada tutar.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(Aspect.PORTRAIT, Aspect.SQUARE, Aspect.FOUR_FIVE, Aspect.LANDSCAPE).forEach { asp -> ActionButton(asp.label, Modifier.weight(1f)) { a.smartReframe(asp) } }
+        }
+        Text("Öne çıkanlar", style = MaterialTheme.typography.titleSmall)
+        Text("Tüm projeden hareketli, sesli ve yüz içeren anları seçip kısa bir kurgu yapar (müzik varsa ritme uyar).", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(15, 30, 60).forEach { sec -> ActionButton("$sec sn", Modifier.weight(1f)) { a.autoEditAll(sec) } }
+        }
+        Text("Sessizlikler", style = MaterialTheme.typography.titleSmall)
+        ActionButton("Sessizlikleri kes", Modifier.fillMaxWidth()) { a.removeSilences() }
+        Text("Konuşmalı videolarda uzun duraklamaları çıkarır; parça sesli bölümlere bölünür.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 

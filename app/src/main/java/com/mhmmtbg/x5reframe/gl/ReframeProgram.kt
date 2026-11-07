@@ -351,6 +351,17 @@ class ReframeProgram(private val rig: Rig?, highQualityStitch: Boolean = false) 
     private fun DoubleArray.toFloats() = FloatArray(size) { this[it].toFloat() }
 
     companion object {
+        /**
+         * Düz klipte görüntünün yarı boyları (uzun kenarı 1 olan çıktı uzayında), [drawFlat] ile aynı hesap.
+         */
+        fun flatHalf(outW: Float, outH: Float, srcAspect: Float, fit: com.mhmmtbg.x5reframe.model.FrameFit): Pair<Float, Float> {
+            val sx: Float; val sy: Float
+            if (outW >= outH) { sx = 1f; sy = outH / outW } else { sx = outW / outH; sy = 1f }
+            val a = srcAspect.coerceAtLeast(0.01f)
+            val hy = if (fit == com.mhmmtbg.x5reframe.model.FrameFit.FILL) maxOf(sy, sx / a) else minOf(sy, sx / a)
+            return a * hy to hy
+        }
+
         /** Düz klipte görüş açısı → yakınlaştırma (90° = 1×). */
         fun flatZoom(view: ViewParams): Float = (90.0 / view.fov.coerceAtLeast(1.0)).toFloat()
 

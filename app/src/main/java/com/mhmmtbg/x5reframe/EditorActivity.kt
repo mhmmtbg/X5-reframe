@@ -542,6 +542,29 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 segs.forEachIndexed { i, seg ->
                     if (cancelled) { out += seg; return@forEachIndexed }
                     val clip = clipCache[seg.clipUri.toString()] ?: ClipInfo.load(this, seg.clipUri, seg.lrvUri).also { clipCache[seg.clipUri.toString()] = it }
+                    if (!clip.is360) {
+                        // Normal video / fotoğraf: hareket, ses ve yüzlere göre öne çıkanlar
+                        if (clip.isImage) { out += seg; return@forEachIndexed }
+                        flatAutoCancelled = false
+                        val samples = com.mhmmtbg.x5reframe.auto.FlatAuto.scan(this, clip, seg.edit.inUs, seg.edit.outUs, cancelled = { flatAutoCancelled }) { p ->
+                            runOnUiThread { c.autoTask = "Çekim ${i + 1}/${segs.size} çözümleniyor…" to ((i + p) / segs.size) }
+                        }
+                        if (flatAutoCancelled) { cancelled = true; out += seg; return@forEachIndexed }
+                        val ranges = com.mhmmtbg.x5reframe.auto.FlatAuto.highlights(samples, perClipUs, shotUs)
+                        if (ranges.isEmpty()) { out += seg; return@forEachIndexed }
+                        // Çıktı yönü kaynaktan çok farklıysa konuyu ortada tutan kadraj
+                        val outAspect = seg.edit.aspect.w.toFloat() / seg.edit.aspect.h
+                        val keys = if (kotlin.math.abs(kotlin.math.ln(outAspect / clip.displayAspect)) > 0.4)
+                            com.mhmmtbg.x5reframe.auto.FlatAuto.reframe(samples, clip.displayAspect, seg.edit.aspect) else emptyList()
+                        ranges.forEach { r ->
+                            val e = seg.edit.copy(inUs = r.first, outUs = r.last.coerceAtMost(seg.edit.outUs),
+                                keyframes = keys.filter { it.timeUs in (r.first - 1_000_000)..(r.last + 1_000_000) },
+                                fit = if (keys.isNotEmpty()) com.mhmmtbg.x5reframe.model.FrameFit.FILL else seg.edit.fit)
+                            out += store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, e)
+                                .copy(transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT)
+                        }
+                        return@forEachIndexed
+                    }
                     val stab = autoStab(clip, seg.edit.inUs)
                     val ed = com.mhmmtbg.x5reframe.auto.AutoEditor(applicationContext, clip, stab ?: { null })
                     autoEditor = ed
@@ -581,6 +604,65 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 } else if (cancelled) c.say("Durduruldu", false)
             }
         }, "auto-edit-all").start()
+    }
+
+    @Volatile private var flatAutoCancelled = false
+
+    /**
+     * Akıllı kadraj: çıktıyı [aspect] yapar, parçadaki yüzleri izleyerek konuyu ortada tutan
+     * kaydırma anahtar kareleri ekler (normal videolar).
+     */
+    private fun smartReframe(c: EditorController, aspect: com.mhmmtbg.x5reframe.model.Aspect) {
+        if (c.autoTask != null || c.clip.is360) return
+        player?.pause()
+        flatAutoCancelled = false
+        val st = c.state
+        c.autoTask = "Konu aranıyor…" to 0f
+        Thread({
+            val r = runCatching {
+                val samples = com.mhmmtbg.x5reframe.auto.FlatAuto.scan(this, c.clip, st.inUs, st.outUs, 300_000, { flatAutoCancelled || controller !== c }) { p ->
+                    runOnUiThread { c.autoTask = "Konu aranıyor…" to p }
+                }
+                samples.count { !it.faceX.isNaN() } to com.mhmmtbg.x5reframe.auto.FlatAuto.reframe(samples, c.clip.displayAspect, aspect)
+            }
+            runOnUiThread {
+                c.autoTask = null
+                r.onSuccess { (faces, keys) ->
+                    if (flatAutoCancelled) return@onSuccess
+                    c.commit(c.state.copy(aspect = aspect, fit = com.mhmmtbg.x5reframe.model.FrameFit.FILL, keyframes = keys))
+                    c.say(if (faces > 0) "Akıllı kadraj ${aspect.label}: ${keys.size} anahtar kare" else "Yüz bulunamadı; kadraj ortalandı (${aspect.label})")
+                }.onFailure { c.say("Akıllı kadraj yapılamadı: ${it.message}", false) }
+            }
+        }, "smart-reframe").start()
+    }
+
+    /** Sessiz aralıkları kesip at: parça konuşulan / sesli bölümlere bölünür. */
+    private fun removeSilences(c: EditorController) {
+        val track = c.clip.audioTrack ?: run { c.say("Bu klipte ses yok", false); return }
+        storeCurrentEdit()
+        val seg = segments.getOrNull(segIndex) ?: return
+        Thread {
+            val wave = com.mhmmtbg.x5reframe.media.Waveform.compute(this, c.clip.uri, track)
+            runOnUiThread {
+                if (wave == null) { c.say("Ses okunamadı", false); return@runOnUiThread }
+                val sil = com.mhmmtbg.x5reframe.auto.FlatAuto.silences(wave, seg.edit.inUs, seg.edit.outUs)
+                if (sil.isEmpty()) { c.say("Kesilecek sessizlik bulunamadı"); return@runOnUiThread }
+                val keep = ArrayList<LongRange>()
+                var a = seg.edit.inUs
+                for (r in sil) { if (r.first - a >= 300_000) keep += a..r.first; a = r.last }
+                if (seg.edit.outUs - a >= 300_000) keep += a..seg.edit.outUs
+                val parts = keep.mapIndexed { k, r ->
+                    val e = seg.edit.copy(inUs = r.first, outUs = r.last)
+                    if (k == 0) seg.copy(edit = e, transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT)
+                    else store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, e)
+                        .copy(speed = seg.speed, volume = seg.volume, transitionOut = if (k == keep.size - 1) seg.transitionOut else com.mhmmtbg.x5reframe.project.Transition.CUT)
+                }
+                val removed = sil.sumOf { it.last - it.first }
+                val list = segments.toMutableList().apply { removeAt(segIndex); addAll(segIndex, parts) }
+                updateSegments(list, segIndex, reopen = true)
+                c.say("${sil.size} sessizlik kesildi · ${"%.1f".format(removed / 1e6)} sn kısaldı")
+            }
+        }.start()
     }
 
     /** Seçili parçayı öne çıkan aralıklara böl (siyaha geçişlerle). */
@@ -1243,7 +1325,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 else replaceWithHighlights(ranges)
             }
         } },
-        cancelAuto = { autoEditor?.cancelled = true },
+        cancelAuto = { autoEditor?.cancelled = true; flatAutoCancelled = true },
         step = { fwd -> c.clearLive(); player?.step(fwd) },
         snapshot = { snapshot(c) },
         aiSend = { text -> aiSend(c, text) },
@@ -1272,6 +1354,9 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         resumeTrack = { c.trackResume?.let { (t, box) -> c.positionUs = t; player?.seekTo(t); startDeepTrack(c, t, c.activeViewAt(t), box) } },
         requestHistogram = { player?.requestHistogram { h -> controller?.histogram = h } },
         toggleVoice = { toggleVoice() },
+        smartReframe = { asp -> smartReframe(c, asp) },
+        removeSilences = { removeSilences(c) },
+        autoEditAll = { sec -> autoEditProject(sec) },
         splitOnBeats = { n -> splitOnBeats(n) },
         captionModes = {
             if (c.clip.audioTrack == null) emptyList() else buildList {
