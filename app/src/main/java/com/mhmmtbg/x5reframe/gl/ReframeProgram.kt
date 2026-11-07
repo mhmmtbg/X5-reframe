@@ -365,6 +365,7 @@ vec3 grade(vec3 c) {
 
 const float COS_LIMIT = -0.17365; // lens alanı ~100 derece
 
+""" + GlslCommon.LENS + """
 // HDR → SDR: eğriyi doğrusallaştır, BT.2020 → BT.709, yumuşak ton eşleme, ekran gaması.
 vec3 hdrToSdr(vec3 e) {
     vec3 lin;
@@ -396,7 +397,6 @@ vec3 flatBlur(vec2 uv) {
     return s / 16.0;
 }
 
-""" + GlslCommon.LENS + """
 void main() {
     if (uFlat == 1) {
         vec2 fp = vNdc * uScale;                 // uzun kenar [-1, 1], y yukarı
