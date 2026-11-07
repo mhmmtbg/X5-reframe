@@ -472,6 +472,31 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         controller?.stopRecording()
     }
 
+    private fun startDeepTrack(c: EditorController, from: Long, view: com.mhmmtbg.x5reframe.model.ViewParams, box: com.mhmmtbg.x5reframe.auto.AutoEditor.Box) {
+        c.trackSelecting = false
+        c.trackCandidates = emptyList()
+        c.trackResume = null
+        val to = c.state.outUs
+        runAuto(c) { ed ->
+            val a = c.state.aspect
+            val r = ed.deepTrack(from, to, view, box, a.w, a.h) { p, t ->
+                runOnUiThread { c.autoTask = "Takip ediliyor… ${EditorController.fmt(t)}" to p }
+            }
+            runOnUiThread {
+                c.applyTrack(from, r.keys)
+                val dur = EditorController.fmt(r.endUs - from)
+                c.trackResume = if (!r.lost && r.lastBox != null && r.endUs < to - 200_000) r.endUs to r.lastBox else null
+                when {
+                    r.keys.size < 2 -> c.say("Hedef takip edilemedi", false)
+                    r.lost -> c.say("Hedef kayboldu · $dur takip edildi", false)
+                    ed.cancelled -> c.say("Takip duraklatıldı · $dur")
+                    else -> c.say("Takip tamam · $dur")
+                }
+                c.trackTarget = null
+            }
+        }
+    }
+
     private fun showViewer() { viewer = true; editorStartTool = null }
 
     private fun viewerActions(c: EditorController) = com.mhmmtbg.x5reframe.ui.ViewerActions(
@@ -583,6 +608,20 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         cancelAuto = { autoEditor?.cancelled = true },
         step = { fwd -> c.clearLive(); player?.step(fwd) },
         snapshot = { snapshot(c) },
+        suggestTargets = {
+            c.trackTarget = null
+            runAuto(c) { ed ->
+                val a = c.state.aspect
+                val boxes = ed.suggestTargets(c.positionUs, c.currentView, a.w, a.h)
+                runOnUiThread {
+                    c.trackCandidates = boxes
+                    c.trackSelecting = true
+                    c.say(if (boxes.isEmpty()) "Öneri yok: hedefin çevresine kutu çiz" else "${boxes.size} hedef önerildi")
+                }
+            }
+        },
+        deepTrack = { c.trackTarget?.let { startDeepTrack(c, c.positionUs, c.currentView, it) } },
+        resumeTrack = { c.trackResume?.let { (t, box) -> c.positionUs = t; player?.seekTo(t); startDeepTrack(c, t, c.activeViewAt(t), box) } },
         dynamicStitch = { getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("dynamic_stitch", true) },
         setDynamicStitch = { on ->
             getSharedPreferences("prefs", MODE_PRIVATE).edit().putBoolean("dynamic_stitch", on).apply()

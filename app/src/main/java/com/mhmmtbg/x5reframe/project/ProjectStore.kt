@@ -167,6 +167,7 @@ class ProjectStore(context: Context) {
             put("stabMode", e.stabMode.name); put("stabStrength", e.stabStrength)
             put("stitchDistance", e.stitchDistance)
             put("bitrate", e.bitrate.name)
+            put("tracks", JSONArray().apply { e.tracks.forEach { r -> put(JSONArray().put(r.first).put(r.last)) } })
             put("layout", e.layout.name)
             put("layers", JSONArray().apply {
                 e.layers.forEach { l ->
@@ -201,6 +202,9 @@ class ProjectStore(context: Context) {
                 stitchDistance = o.optDouble("stitchDistance", 0.0),
                 bitrate = runCatching { com.mhmmtbg.x5reframe.model.BitrateLevel.valueOf(o.optString("bitrate")) }
                     .getOrDefault(com.mhmmtbg.x5reframe.model.BitrateLevel.STANDARD),
+                tracks = (o.optJSONArray("tracks") ?: JSONArray()).let { arr ->
+                    (0 until arr.length()).mapNotNull { i -> arr.optJSONArray(i)?.let { r -> r.getLong(0)..r.getLong(1) } }
+                },
                 layers = (o.optJSONArray("layers") ?: JSONArray()).let { arr ->
                     (0 until arr.length()).mapNotNull { i ->
                         val l = arr.getJSONObject(i)

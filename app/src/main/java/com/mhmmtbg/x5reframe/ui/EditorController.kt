@@ -213,6 +213,87 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         setLive(null)
     }
 
+    // ---- Derin takip ----
+
+    /** Önizlemede hedef seçimi açık mı. */
+    var trackSelecting by mutableStateOf(false)
+    var trackCandidates by mutableStateOf<List<com.mhmmtbg.x5reframe.auto.AutoEditor.Box>>(emptyList())
+    var trackTarget by mutableStateOf<com.mhmmtbg.x5reframe.auto.AutoEditor.Box?>(null)
+    /** Duraklatılan takip: kaldığı zaman ve son kutu. */
+    var trackResume by mutableStateOf<Pair<Long, com.mhmmtbg.x5reframe.auto.AutoEditor.Box>?>(null)
+
+    /** Takip sonucunu uygula ve aralığı işaretle. */
+    fun applyTrack(from: Long, keys: List<Keyframe>) {
+        if (keys.size < 2) return
+        val to = keys.last().timeUs
+        val kept = ap.keyframes.filter { it.timeUs < from || it.timeUs > to }
+        // Bitişik aralıkları birleştir
+        val merged = (state.tracks + listOf(from..to)).sortedBy { it.first }.fold(mutableListOf<LongRange>()) { acc, r ->
+            val last = acc.lastOrNull()
+            if (last != null && r.first <= last.last + 200_000) acc[acc.size - 1] = last.first..maxOf(last.last, r.last) else acc += r
+            acc
+        }
+        commit(withActive(ap.copy(keyframes = (kept + keys).sortedBy { it.timeUs })).copy(tracks = merged))
+        setLive(null)
+    }
+
+    fun activeViewAt(t: Long): ViewParams = ap.viewAt(t)
+
+    fun clearTracks() {
+        val spans = state.tracks
+        if (spans.isEmpty()) return
+        val kept = ap.keyframes.filter { k -> spans.none { k.timeUs in it } }
+        commit(withActive(ap.copy(keyframes = kept)).copy(tracks = emptyList()))
+        trackResume = null
+        say("Takipler kaldırıldı")
+    }
+
+    // ---- Eğriler ve hareket şablonları ----
+
+    /** Yakındaki anahtar karenin bir sonrakine geçiş eğrisini değiştir. */
+    fun setCurve(curve: com.mhmmtbg.x5reframe.model.Curve) {
+        val k = ap.keyframeNear(positionUs) ?: return
+        commit(withActive(ap.copy(keyframes = ap.keyframes.map { if (it === k) it.copy(curve = curve) else it })))
+        say("Geçiş: ${curve.label}")
+    }
+
+    enum class Template(val label: String, val seconds: Double) {
+        PLANET("Küçük gezegen", 3.0), HERO("Kahraman", 4.0), RABBIT("Tavşan deliği", 3.0), PUNCH("Yakınlaş", 1.6)
+    }
+
+    /** Oynatma çizgisinden başlayan hazır kamera hareketi (kesme sonunu aşmaz). */
+    fun applyTemplate(t: Template) {
+        val start = positionUs
+        val end = (start + (t.seconds * 1e6).toLong()).coerceAtMost(state.outUs)
+        if (end - start < 500_000) { say("Şablon için yeterli süre yok", false); return }
+        val v = currentView
+        val d = end - start
+        val W = com.mhmmtbg.x5reframe.model.Projection.WIDE
+        val L = com.mhmmtbg.x5reframe.model.Curve.LINEAR
+        val keys = when (t) {
+            Template.PLANET -> listOf(
+                Keyframe(start, v),
+                Keyframe(end, v.copy(projection = W, pitch = -90.0, roll = 0.0, fov = 250.0)),
+            )
+            Template.RABBIT -> listOf(
+                Keyframe(start, v),
+                Keyframe(end, v.copy(projection = W, pitch = 90.0, roll = 0.0, fov = 250.0)),
+            )
+            Template.HERO -> (0..4).map { i ->
+                // Tam tur: dört çeyrek, doğrusal hız; ilk ve son çeyrekte yumuşak
+                val curve = if (i == 0) com.mhmmtbg.x5reframe.model.Curve.EASE_IN else if (i == 3) com.mhmmtbg.x5reframe.model.Curve.EASE_OUT else L
+                Keyframe(start + d * i / 4, v.copy(yaw = ViewParams.wrap(v.yaw + 90.0 * i)), curve)
+            }
+            Template.PUNCH -> listOf(
+                Keyframe(start, v, com.mhmmtbg.x5reframe.model.Curve.FAST_IN_OUT),
+                Keyframe(start + d / 3, v.copy(fov = (v.fov * 0.5).coerceAtLeast(v.projection.minFov))),
+                Keyframe(end, v),
+            )
+        }
+        replaceKeyframes(start, end, keys)
+        say("${t.label}: ${keys.size} anahtar kare")
+    }
+
     // ---- Kayıt modu: oynarken parmakla / telefonu çevirerek yapılan bakış anahtar karelere dönüşür ----
 
     var recording by mutableStateOf(false)

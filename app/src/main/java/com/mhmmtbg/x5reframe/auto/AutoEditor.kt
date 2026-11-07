@@ -51,14 +51,14 @@ class AutoEditor(
     private val H = 360
     private val scanFov = 100.0
 
-    private inner class Gl : AutoCloseable {
+    private inner class Gl(val w: Int = W, val h: Int = H) : AutoCloseable {
         val egl = EglCore()
-        val pb = egl.createPbuffer(W, H).also { egl.makeCurrent(it) }
+        val pb = egl.createPbuffer(w, h).also { egl.makeCurrent(it) }
         val pfd = context.contentResolver.openFileDescriptor(clip.lrv?.uri ?: clip.uri, "r")!!
         val program = ReframeProgram(clip.rig)
         val source: FrameSource = clip.lrv?.let { SideBySideFrameSource(pfd.fileDescriptor, it.videoTrack, it.width, it.height) }
             ?: DualFrameSource(pfd.fileDescriptor, clip, realtime = false)
-        val buf: ByteBuffer = ByteBuffer.allocateDirect(W * H * 4).order(ByteOrder.nativeOrder())
+        val buf: ByteBuffer = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
         val frameDur = (1_000_000 / clip.frameRate).toLong()
 
         /** Kaynağı t'ye getir (ileri yönde ucuz ilerler). */
@@ -73,13 +73,13 @@ class AutoEditor(
         }
 
         fun render(view: ViewParams): Bitmap {
-            program.draw(W, H, view, source, baseAt(source.currentPts))
+            program.draw(w, h, view, source, baseAt(source.currentPts))
             buf.rewind()
-            GLES30.glReadPixels(0, 0, W, H, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
-            val bmp = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888)
+            GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
             buf.rewind()
             bmp.copyPixelsFromBuffer(buf)
-            return Bitmap.createBitmap(bmp, 0, 0, W, H, Matrix().apply { preScale(1f, -1f) }, false)
+            return Bitmap.createBitmap(bmp, 0, 0, w, h, Matrix().apply { preScale(1f, -1f) }, false).also { bmp.recycle() }
         }
 
         override fun close() {
@@ -92,10 +92,13 @@ class AutoEditor(
     }
 
     /** Görüntüdeki bir pikselin kullanıcı çerçevesindeki yönü (yaw, pitch derece). */
-    private fun pixelDirection(view: ViewParams, px: Float, py: Float): Pair<Double, Double> {
+    private fun pixelDirection(view: ViewParams, px: Float, py: Float, w: Int = W, h: Int = H): Pair<Double, Double> {
+        // Uzun kenar = görüş açısı (ReframeProgram ile aynı)
         val k = tan(Math.toRadians(view.fov) / 2)
-        val nx = (px / W * 2 - 1) * k
-        val ny = -(py / H * 2 - 1) * k * H / W
+        val sx = if (w >= h) 1.0 else w.toDouble() / h
+        val sy = if (w >= h) h.toDouble() / w else 1.0
+        val nx = (px / w * 2 - 1) * k * sx
+        val ny = -(py / h * 2 - 1) * k * sy
         val dv = doubleArrayOf(nx, -ny, 1.0)
         val r = Rig.mul(Rig.mul(Rig.rotY(Math.toRadians(view.yaw)), Rig.rotX(Math.toRadians(view.pitch))), Rig.rotZ(Math.toRadians(view.roll)))
         val d = DoubleArray(3) { i -> r[i * 3] * dv[0] + r[i * 3 + 1] * dv[1] + r[i * 3 + 2] * dv[2] }
@@ -240,6 +243,204 @@ class AutoEditor(
         }
         det.close()
         return keys
+    }
+
+    // ---- Derin takip v2: hedef önerisi + şablon eşleştirme + nesne algılayıcıyla yeniden bulma ----
+
+    /** Önizleme karesinde normalize (0..1) kutu. */
+    data class Box(val cx: Float, val cy: Float, val w: Float, val h: Float, val label: String = "")
+
+    class TrackResult(val keys: List<Keyframe>, val endUs: Long, val lastBox: Box?, val lost: Boolean)
+
+    private fun sizeFor(aspectW: Int, aspectH: Int): Pair<Int, Int> =
+        if (aspectW >= aspectH) 480 to (480 * aspectH / aspectW).coerceAtLeast(120) else (480 * aspectW / aspectH).coerceAtLeast(120) to 480
+
+    /** O anki karede takip edilebilecek hedefleri öner (kişiler ve nesneler). */
+    fun suggestTargets(t: Long, view: ViewParams, aspectW: Int, aspectH: Int): List<Box> {
+        val (w, h) = sizeFor(aspectW, aspectH)
+        val out = ArrayList<Box>()
+        Gl(w, h).use { gl ->
+            if (!gl.moveTo(t)) return emptyList()
+            val bmp = gl.render(view.copy(projection = com.mhmmtbg.x5reframe.model.Projection.RECTILINEAR, fov = view.fov.coerceIn(40.0, 110.0)))
+            val img = InputImage.fromBitmap(bmp, 0)
+            val od = ObjectDetection.getClient(ObjectDetectorOptions.Builder().setDetectorMode(ObjectDetectorOptions.SINGLE_IMAGE_MODE)
+                .enableMultipleObjects().enableClassification().build())
+            runCatching { Tasks.await(od.process(img)) }.getOrDefault(emptyList()).forEach { o ->
+                val b = o.boundingBox
+                val label = o.labels.maxByOrNull { it.confidence }?.text ?: "Nesne"
+                out += Box(b.exactCenterX() / w, b.exactCenterY() / h, b.width().toFloat() / w, b.height().toFloat() / h, trLabel(label))
+            }
+            od.close()
+            val fd = FaceDetection.getClient(FaceDetectorOptions.Builder().setPerformanceMode(FaceDetectorOptions.PERFORMANCE_MODE_ACCURATE).build())
+            runCatching { Tasks.await(fd.process(img)) }.getOrDefault(emptyList()).forEach { f ->
+                val b = f.boundingBox
+                // Yüzü omuzlarla birlikte al: takip daha kararlı
+                out += Box(b.exactCenterX() / w, (b.exactCenterY() + b.height() * 0.6f) / h, b.width() * 1.8f / w, b.height() * 2.2f / h, "Kişi")
+            }
+            fd.close()
+            bmp.recycle()
+        }
+        return out.filter { it.w in 0.02f..0.95f && it.h in 0.02f..0.95f }
+    }
+
+    private fun trLabel(en: String) = when (en.lowercase()) {
+        "fashion good" -> "Kıyafet"; "food" -> "Yiyecek"; "home good" -> "Eşya"; "place" -> "Mekân"; "plant" -> "Bitki"
+        else -> "Nesne"
+    }
+
+    /**
+     * Seçilen kutuyu [fromUs]'tan itibaren takip et. Kamera hedefe yumuşakça döner (hedef ortada kalır).
+     * Önce şablon eşleştirme (her türlü konu için), tutmazsa ML Kit nesne algılayıcıyla yeniden bulma.
+     * [cancelled] ile durdurulursa o ana kadarki sonuç döner (Devam ile sürdürülebilir).
+     */
+    fun deepTrack(fromUs: Long, toUs: Long, startView: ViewParams, target: Box, aspectW: Int, aspectH: Int,
+                  progress: (Float, Long) -> Unit): TrackResult {
+        val (w, h) = sizeFor(aspectW, aspectH)
+        val det = ObjectDetection.getClient(ObjectDetectorOptions.Builder().setDetectorMode(ObjectDetectorOptions.STREAM_MODE).enableMultipleObjects().build())
+        val keys = ArrayList<Keyframe>()
+        // Çözümleme düz (doğrusal) görünümde yapılır; anahtar karelere kullanıcının izdüşümü yazılır.
+        var view = startView.copy(projection = com.mhmmtbg.x5reframe.model.Projection.RECTILINEAR, fov = startView.fov.coerceIn(40.0, 110.0))
+        val step = 66_000L
+        // Kutu piksel cinsinden (yarım çözünürlük gri görüntüde)
+        val gw = w / 2; val gh = h / 2
+        var bw = (target.w * gw).coerceIn(8f, gw * 0.8f)
+        var bh = (target.h * gh).coerceIn(8f, gh * 0.8f)
+        var px = target.cx * gw; var py = target.cy * gh
+        var template: FloatArray? = null
+        val TS = 24
+        var lostSince = -1L
+        var t = fromUs
+        var n = 0
+        var lastBox: Box? = null
+        var lost = false
+        Gl(w, h).use { gl ->
+            while (t <= toUs && !cancelled) {
+                if (!gl.moveTo(t)) break
+                val bmp = gl.render(view)
+                val gray = grayHalf(bmp)
+                var found = false
+                if (template == null) {
+                    template = patch(gray, gw, gh, px, py, bw, bh, TS)
+                    found = true
+                } else {
+                    // Şablonu beklenen konum çevresinde ara (3 ölçek)
+                    var best = -1f; var bx = px; var by = py; var bs = 1f
+                    for (sc in floatArrayOf(0.92f, 1f, 1.08f)) {
+                        val sw = bw * sc; val sh = bh * sc
+                        val r = (maxOf(sw, sh) * 0.8f).toInt().coerceAtLeast(6)
+                        var yy = -r
+                        while (yy <= r) {
+                            var xx = -r
+                            while (xx <= r) {
+                                val cx = px + xx; val cy = py + yy
+                                if (cx - sw / 2 >= 0 && cy - sh / 2 >= 0 && cx + sw / 2 < gw && cy + sh / 2 < gh) {
+                                    val sc2 = ncc(template!!, patch(gray, gw, gh, cx, cy, sw, sh, TS))
+                                    if (sc2 > best) { best = sc2; bx = cx; by = cy; bs = sc }
+                                }
+                                xx += 2
+                            }
+                            yy += 2
+                        }
+                    }
+                    if (best > 0.55f) {
+                        px = bx; py = by; bw *= bs; bh *= bs
+                        val fresh = patch(gray, gw, gh, px, py, bw, bh, TS)
+                        for (i in fresh.indices) template!![i] = template!![i] * 0.9f + fresh[i] * 0.1f
+                        found = true
+                    } else {
+                        // Yeniden bulma: beklenen konuma en yakın algılanan nesne
+                        val objs = runCatching { Tasks.await(det.process(InputImage.fromBitmap(bmp, 0))) }.getOrDefault(emptyList())
+                        val near = objs.minByOrNull { o ->
+                            val dx = o.boundingBox.exactCenterX() / 2 - px; val dy = o.boundingBox.exactCenterY() / 2 - py; dx * dx + dy * dy
+                        }?.takeIf { o ->
+                            val dx = o.boundingBox.exactCenterX() / 2 - px; val dy = o.boundingBox.exactCenterY() / 2 - py
+                            dx * dx + dy * dy < (maxOf(bw, bh) * 1.5f).let { it * it }
+                        }
+                        if (near != null) {
+                            px = near.boundingBox.exactCenterX() / 2; py = near.boundingBox.exactCenterY() / 2
+                            bw = near.boundingBox.width() / 2f; bh = near.boundingBox.height() / 2f
+                            template = patch(gray, gw, gh, px, py, bw, bh, TS)
+                            found = true
+                        }
+                    }
+                }
+                bmp.recycle()
+                if (found) {
+                    lostSince = -1
+                    val (yaw, pitch) = pixelDirection(view, px * 2, py * 2, w, h)
+                    // Kamerayı hedefe yumuşakça çevir; görüntüdeki hedef de aynı oranda ortaya kayar
+                    val a = 0.35
+                    val dyaw = ViewParams.wrap(yaw - view.yaw)
+                    val newView = view.copy(yaw = ViewParams.wrap(view.yaw + dyaw * a), pitch = (view.pitch + (pitch - view.pitch) * a).coerceIn(-75.0, 75.0))
+                    val (nx, ny) = directionToPixel(newView, yaw, pitch, w, h)
+                    view = newView
+                    px = (nx / 2).coerceIn(bw / 2, gw - bw / 2); py = (ny / 2).coerceIn(bh / 2, gh - bh / 2)
+                    lastBox = Box(px / gw, py / gh, bw / gw, bh / gh)
+                } else {
+                    if (lostSince < 0) lostSince = t
+                    if (t - lostSince > 1_500_000) { lost = true; break }
+                }
+                if (n % 3 == 0) keys += Keyframe(t, view.copy(projection = startView.projection, fov = startView.fov), com.mhmmtbg.x5reframe.model.Curve.LINEAR)
+                progress(((t - fromUs).toFloat() / (toUs - fromUs).coerceAtLeast(1)).coerceIn(0f, 1f), t)
+                t += step; n++
+            }
+        }
+        det.close()
+        val end = keys.lastOrNull()?.timeUs ?: fromUs
+        return TrackResult(keys, end, lastBox, lost)
+    }
+
+    /** Bir yönün (yaw, pitch) görünümdeki piksel konumu. */
+    private fun directionToPixel(view: ViewParams, yaw: Double, pitch: Double, w: Int, h: Int): Pair<Float, Float> {
+        val cy = kotlin.math.cos(Math.toRadians(pitch))
+        val d = doubleArrayOf(cy * kotlin.math.sin(Math.toRadians(yaw)), -kotlin.math.sin(Math.toRadians(pitch)), cy * kotlin.math.cos(Math.toRadians(yaw)))
+        val r = Rig.mul(Rig.mul(Rig.rotY(Math.toRadians(view.yaw)), Rig.rotX(Math.toRadians(view.pitch))), Rig.rotZ(Math.toRadians(view.roll)))
+        // görünüm = R^T * d
+        val v = DoubleArray(3) { i -> r[i] * d[0] + r[3 + i] * d[1] + r[6 + i] * d[2] }
+        val k = tan(Math.toRadians(view.fov) / 2)
+        val sx = if (w >= h) 1.0 else w.toDouble() / h
+        val sy = if (w >= h) h.toDouble() / w else 1.0
+        val nx = v[0] / v[2] / (k * sx); val ny = v[1] / v[2] / (k * sy)
+        return ((nx + 1) / 2 * w).toFloat() to ((ny + 1) / 2 * h).toFloat()
+    }
+
+    private fun grayHalf(b: Bitmap): FloatArray {
+        val w = b.width; val h = b.height
+        val px = IntArray(w * h)
+        b.getPixels(px, 0, w, 0, 0, w, h)
+        val gw = w / 2; val gh = h / 2
+        val g = FloatArray(gw * gh)
+        for (y in 0 until gh) for (x in 0 until gw) {
+            var s = 0f
+            for (dy in 0..1) for (dx in 0..1) {
+                val c = px[(y * 2 + dy) * w + x * 2 + dx]
+                s += ((c shr 16) and 0xff) * 0.299f + ((c shr 8) and 0xff) * 0.587f + (c and 0xff) * 0.114f
+            }
+            g[y * gw + x] = s / 4f
+        }
+        return g
+    }
+
+    /** Kutuyu TS x TS ızgaraya örnekle (çift doğrusal). */
+    private fun patch(g: FloatArray, gw: Int, gh: Int, cx: Float, cy: Float, bw: Float, bh: Float, ts: Int): FloatArray {
+        val out = FloatArray(ts * ts)
+        for (j in 0 until ts) for (i in 0 until ts) {
+            val x = (cx - bw / 2 + (i + 0.5f) * bw / ts).coerceIn(0f, gw - 1.001f)
+            val y = (cy - bh / 2 + (j + 0.5f) * bh / ts).coerceIn(0f, gh - 1.001f)
+            val x0 = x.toInt(); val y0 = y.toInt(); val fx = x - x0; val fy = y - y0
+            val a = g[y0 * gw + x0]; val b = g[y0 * gw + x0 + 1]; val c = g[(y0 + 1) * gw + x0]; val d = g[(y0 + 1) * gw + x0 + 1]
+            out[j * ts + i] = (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy
+        }
+        return out
+    }
+
+    private fun ncc(a: FloatArray, b: FloatArray): Float {
+        var ma = 0f; var mb = 0f
+        for (i in a.indices) { ma += a[i]; mb += b[i] }
+        ma /= a.size; mb /= b.size
+        var sab = 0f; var saa = 0f; var sbb = 0f
+        for (i in a.indices) { val x = a[i] - ma; val y = b[i] - mb; sab += x * y; saa += x * x; sbb += y * y }
+        return if (saa < 1f || sbb < 1f) 0f else sab / kotlin.math.sqrt(saa * sbb)
     }
 
     private fun audioEnergy(fromUs: Long, toUs: Long, stepUs: Long): FloatArray {

@@ -34,6 +34,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -83,6 +86,10 @@ class EditorActions(
     val cancelAuto: () -> Unit,
     val step: (Boolean) -> Unit,
     val snapshot: () -> Unit = {},
+    /** Derin takip: hedef öner, başlat, devam et. */
+    val suggestTargets: () -> Unit = {},
+    val deepTrack: () -> Unit = {},
+    val resumeTrack: () -> Unit = {},
     val dynamicStitch: () -> Boolean = { true },
     val setDynamicStitch: (Boolean) -> Unit = {},
 )
@@ -144,6 +151,7 @@ fun EditorScreen(
                     )
                 }
             }
+            if (c.trackSelecting) TrackOverlay(c, Modifier.size(w, h))
             FeedbackPill(c, Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
             ViewHud(c, Modifier.align(Alignment.BottomStart).padding(10.dp))
         }
@@ -160,6 +168,7 @@ fun EditorScreen(
                 t.inUs = s.inUs
                 t.outUs = s.outUs
                 t.keyframes = c.activeKeyframes.map { it.timeUs }
+                t.trackRanges = s.tracks
                 if (!c.playing) t.positionUs = c.positionUs
             },
         )
@@ -348,6 +357,22 @@ private fun KeyframePanel(c: EditorController, a: EditorActions) {
             ActionButton(if (near != null) "Kareyi güncelle" else "Anahtar kare ekle", Modifier.weight(1.4f), primary = true) { c.addOrUpdateKeyframe() }
             ActionButton("Sil", Modifier.weight(0.8f), enabled = near != null) { c.deleteKeyframe() }
         }
+        if (near != null) {
+            Text("Bu kareden sonrakine geçiş", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                com.mhmmtbg.x5reframe.model.Curve.values().forEach { cv ->
+                    CurveChip(cv, cv == near.curve) { c.setCurve(cv) }
+                }
+            }
+        }
+        Text("Hareket şablonları (oynatma çizgisinden başlar)", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            EditorController.Template.values().forEach { t ->
+                Text(t.label, color = Palette.Text, style = MaterialTheme.typography.labelLarge,
+                    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Palette.SurfaceHigh).clickable { c.applyTemplate(t) }
+                        .padding(horizontal = 12.dp, vertical = 9.dp))
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             ActionButton("◀ Önceki", Modifier.weight(1f), enabled = c.previousKeyframeTime() != null) { c.previousKeyframeTime()?.let(a.seek) }
             ActionButton("Sonraki ▶", Modifier.weight(1f), enabled = c.nextKeyframeTime() != null) { c.nextKeyframeTime()?.let(a.seek) }
@@ -361,6 +386,31 @@ private fun KeyframePanel(c: EditorController, a: EditorActions) {
             Text("Tüm anahtar kareleri temizle", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
                 modifier = Modifier.clickable { c.clearKeyframes() }.padding(vertical = 6.dp))
         }
+    }
+}
+
+/** Eğri seçimi: küçük grafik + ad. */
+@Composable
+private fun CurveChip(cv: com.mhmmtbg.x5reframe.model.Curve, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier.width(76.dp).clip(RoundedCornerShape(8.dp)).background(if (selected) Palette.SurfaceHigh else Color.Transparent)
+            .border(1.dp, if (selected) Palette.Accent else Palette.Outline, RoundedCornerShape(8.dp)).clickable(onClick = onClick).padding(6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        val col = if (selected) Palette.Accent else Palette.Muted
+        androidx.compose.foundation.Canvas(Modifier.size(56.dp, 30.dp)) {
+            val path = androidx.compose.ui.graphics.Path()
+            val n = 24
+            for (i in 0..n) {
+                val t = i / n.toDouble()
+                val x = size.width * t.toFloat()
+                val y = size.height * (1f - cv.apply(t).toFloat())
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, col, style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx()))
+        }
+        Text(cv.label, color = if (selected) Palette.Text else Palette.Muted, style = MaterialTheme.typography.labelSmall,
+            maxLines = 2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
 
@@ -508,23 +558,91 @@ private fun AutoPanel(c: EditorController, a: EditorActions) {
         if (task != null) {
             Text(task.first, style = MaterialTheme.typography.bodyMedium)
             LinearProgressIndicator(progress = { task.second }, modifier = Modifier.fillMaxWidth().height(6.dp), color = Palette.Accent, trackColor = Palette.SurfaceHigh)
-            ActionButton("Durdur", Modifier.fillMaxWidth()) { a.cancelAuto() }
+            ActionButton(if (task.first.startsWith("Takip")) "Duraklat" else "Durdur", Modifier.fillMaxWidth()) { a.cancelAuto() }
             return
         }
-        ActionButton("Akıllı kadraj: kişileri takip et", Modifier.fillMaxWidth(), primary = true) { a.autoFrame() }
-        Text("Klipteki yüzleri bulur, kamerayı en belirgin kişiye yumuşakça çeviren anahtar kareler oluşturur (kesme aralığında).",
-            color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
-        ActionButton("Ortadakini takip et", Modifier.fillMaxWidth(), primary = true) { a.autoTrack() }
-        Text("Takip edilecek kişiyi ya da nesneyi kadrajın ortasına al; oynatma çizgisinden itibaren kaybolana kadar takip edilir.",
+        Text("Derin takip", style = MaterialTheme.typography.titleSmall)
+        if (c.trackSelecting) {
+            Text("Önizlemedeki yeşil kutulardan birine dokun ya da hedefin çevresine parmağınla kutu çiz.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ActionButton("Takibi başlat", Modifier.weight(1.4f), primary = true, enabled = c.trackTarget != null) { a.deepTrack() }
+                ActionButton("Vazgeç", Modifier.weight(1f)) { c.trackSelecting = false; c.trackTarget = null; c.trackCandidates = emptyList() }
+            }
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ActionButton("Hedef seç", Modifier.weight(1f), primary = true) { a.suggestTargets() }
+                c.trackResume?.let { (t, _) -> ActionButton("Devam et · ${fmt(t)}", Modifier.weight(1f)) { a.resumeTrack() } }
+            }
+            Text("Kişi, araç, hayvan ya da herhangi bir nesneyi seç; kamera oynatma çizgisinden itibaren onu kadrajın ortasında tutar. Takip edilen aralık zaman çizelgesinde yeşil görünür.",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+            if (c.state.tracks.isNotEmpty()) {
+                Text("Takipleri kaldır", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.clickable { c.clearTracks() }.padding(vertical = 4.dp))
+            }
+        }
+        Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
+        ActionButton("Akıllı kadraj: kişileri takip et", Modifier.fillMaxWidth()) { a.autoFrame() }
+        Text("Klipteki yüzleri bulur, kamerayı en belirgin kişiye yumuşakça çevirir (kesme aralığında).",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
         LabeledRow("Öne çıkan") {
             Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 listOf(15, 30, 60).forEach { sec -> ActionButton("$sec sn", Modifier.weight(1f)) { a.autoHighlights(sec) } }
             }
         }
-        Text("Kişi, ses ve hareketin en yoğun olduğu anları seçip bu parçayı o anlardan oluşan kısa bir kurguya böler (geri alınabilir değil; önce Çoğalt önerilir).",
+        Text("Kişi, ses ve hareketin en yoğun olduğu anlardan kısa bir kurgu oluşturur. Tümü telefonda, internetsiz çalışır.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
-        Text("Tümü telefonda, internetsiz çalışır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** Hedef seçimi: önerilen kutular (ince yeşil), seçilen (kalın yeşil); dokun ya da kutu çiz. */
+@Composable
+private fun TrackOverlay(c: EditorController, modifier: Modifier) {
+    val green = Color(0xFF3DDC84)
+    var drawStart by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+    var drawEnd by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+    androidx.compose.foundation.Canvas(
+        modifier
+            .pointerInput(Unit) {
+                detectTapGestures { p ->
+                    val nx = p.x / size.width; val ny = p.y / size.height
+                    val hit = c.trackCandidates.filter { kotlin.math.abs(nx - it.cx) <= it.w / 2 && kotlin.math.abs(ny - it.cy) <= it.h / 2 }
+                        .minByOrNull { it.w * it.h }
+                    if (hit != null) { c.trackTarget = hit; c.say("Hedef: ${hit.label.ifEmpty { "seçildi" }}") }
+                }
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { drawStart = it; drawEnd = it },
+                    onDrag = { ch, _ -> drawEnd = ch.position },
+                    onDragEnd = {
+                        val s0 = drawStart; val e0 = drawEnd
+                        if (s0 != null && e0 != null) {
+                            val bw = kotlin.math.abs(e0.x - s0.x) / size.width; val bh = kotlin.math.abs(e0.y - s0.y) / size.height
+                            if (bw > 0.03f && bh > 0.03f) {
+                                c.trackTarget = com.mhmmtbg.x5reframe.auto.AutoEditor.Box(
+                                    (s0.x + e0.x) / 2 / size.width, (s0.y + e0.y) / 2 / size.height, bw, bh, "Seçim")
+                                c.say("Hedef seçildi")
+                            }
+                        }
+                        drawStart = null; drawEnd = null
+                    },
+                )
+            }
+    ) {
+        fun box(b: com.mhmmtbg.x5reframe.auto.AutoEditor.Box, width: Float) {
+            drawRect(green, topLeft = androidx.compose.ui.geometry.Offset((b.cx - b.w / 2) * size.width, (b.cy - b.h / 2) * size.height),
+                size = androidx.compose.ui.geometry.Size(b.w * size.width, b.h * size.height),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width))
+        }
+        c.trackCandidates.forEach { if (it != c.trackTarget) box(it, 1.5.dp.toPx()) }
+        c.trackTarget?.let { box(it, 3.dp.toPx()) }
+        val s0 = drawStart; val e0 = drawEnd
+        if (s0 != null && e0 != null) {
+            drawRect(green, topLeft = androidx.compose.ui.geometry.Offset(minOf(s0.x, e0.x), minOf(s0.y, e0.y)),
+                size = androidx.compose.ui.geometry.Size(kotlin.math.abs(e0.x - s0.x), kotlin.math.abs(e0.y - s0.y)),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()))
+        }
     }
 }
 

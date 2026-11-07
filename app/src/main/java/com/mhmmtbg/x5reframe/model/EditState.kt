@@ -56,6 +56,8 @@ data class EditState(
     /** Üst katmanlar (metin, görsel); listede sonraki üstte çizilir. */
     val layers: List<Layer> = emptyList(),
     val bitrate: BitrateLevel = BitrateLevel.STANDARD,
+    /** Derin takip uygulanan aralıklar (zaman çizelgesinde yeşil). */
+    val tracks: List<LongRange> = emptyList(),
 ) {
     fun pane(i: Int): Pane = if (i == 0) Pane(keyframes, baseView)
         else extraPanes.getOrNull(i - 1) ?: Pane(baseView = baseView.copy(yaw = ViewParams.wrap(baseView.yaw + defaultPaneYaw[i % 4])))
