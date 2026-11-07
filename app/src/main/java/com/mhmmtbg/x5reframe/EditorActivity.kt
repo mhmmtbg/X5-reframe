@@ -766,10 +766,24 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val to = c.state.outUs
         runAuto(c) { ed ->
             val a = c.state.aspect
-            val r = ed.deepTrack(from, to, view, box, a.w, a.h) { p, t ->
+            runOnUiThread { c.tracking = true; c.trackLive = box }
+            val r = try { ed.deepTrack(from, to, view, box, a.w, a.h, { p, t ->
                 runOnUiThread { c.autoTask = "Takip ediliyor… ${EditorController.fmt(t)}" to p }
-            }
+            }) { t, v, b ->
+                // Canlı önizleme: takipçinin gördüğü kare ve hedef kutusu
+                runOnUiThread {
+                    if (c.tracking) {
+                        c.trackLive = b
+                        c.setLive(v)
+                        c.positionUs = t
+                        timelineView?.positionUs = t
+                        player?.seekTo(t)
+                    }
+                }
+            } } catch (e: Throwable) { runOnUiThread { c.tracking = false; c.trackLive = null; c.setLive(null) }; throw e }
             runOnUiThread {
+                c.tracking = false
+                c.trackLive = null
                 c.applyTrack(from, r.keys)
                 val dur = EditorController.fmt(r.endUs - from)
                 c.trackResume = if (!r.lost && r.lastBox != null && r.endUs < to - 200_000) r.endUs to r.lastBox else null
@@ -780,6 +794,12 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                     else -> c.say("Takip tamam · $dur")
                 }
                 c.trackTarget = null
+                // Sonucu göster: takip edilen aralığı baştan oynat
+                if (r.keys.size >= 2) {
+                    c.positionUs = from
+                    player?.seekTo(from)
+                    saveHandler.postDelayed({ player?.play() }, 400)
+                }
             }
         }
     }

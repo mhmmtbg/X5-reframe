@@ -153,7 +153,7 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
         else { setLive(transform(liveView ?: p.viewAt(positionUs)).clamped()); onChanged() }
     }
 
-    private fun setLive(v: ViewParams?) { liveView = v; snapshotLive = v }
+    fun setLive(v: ViewParams?) { liveView = v; snapshotLive = v }
 
     fun clearLive() { setLive(null) }
 
@@ -266,6 +266,10 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
     var trackSelecting by mutableStateOf(false)
     var trackCandidates by mutableStateOf<List<com.mhmmtbg.x5reframe.auto.AutoEditor.Box>>(emptyList())
     var trackTarget by mutableStateOf<com.mhmmtbg.x5reframe.auto.AutoEditor.Box?>(null)
+    /** Takip sürerken canlı kutu (önizlemede yeşil; null = hedef şu an görünmüyor). */
+    var trackLive by mutableStateOf<com.mhmmtbg.x5reframe.auto.AutoEditor.Box?>(null)
+    var tracking by mutableStateOf(false)
+
     /** Duraklatılan takip: kaldığı zaman ve son kutu. */
     var trackResume by mutableStateOf<Pair<Long, com.mhmmtbg.x5reframe.auto.AutoEditor.Box>?>(null)
 

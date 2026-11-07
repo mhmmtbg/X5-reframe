@@ -162,6 +162,7 @@ fun EditorScreen(
                 }
             }
             if (c.trackSelecting) TrackOverlay(c, Modifier.size(w, h))
+            if (c.tracking) TrackLiveOverlay(c, Modifier.size(w, h))
             FeedbackPill(c, Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
             ViewHud(c, Modifier.align(Alignment.BottomStart).padding(10.dp))
         }
@@ -723,6 +724,24 @@ private fun AutoPanel(c: EditorController, a: EditorActions) {
         }
         Text("Kişi, ses ve hareketin en yoğun olduğu anlardan kısa bir kurgu oluşturur. Tümü telefonda, internetsiz çalışır.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** Takip sürerken: hedefin canlı yeşil kutusu; kaybolunca uyarı. */
+@Composable
+private fun TrackLiveOverlay(c: EditorController, modifier: Modifier) {
+    val green = Color(0xFF3DDC84)
+    Box(modifier) {
+        val b = c.trackLive
+        androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+            if (b != null) drawRect(green,
+                topLeft = androidx.compose.ui.geometry.Offset((b.cx - b.w / 2) * size.width, (b.cy - b.h / 2) * size.height),
+                size = androidx.compose.ui.geometry.Size(b.w * size.width, b.h * size.height),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(3.dp.toPx()))
+        }
+        Text(if (b != null) "Takip ediliyor" else "Hedef aranıyor…", color = Color.White, style = MaterialTheme.typography.labelMedium,
+            modifier = Modifier.align(Alignment.TopStart).padding(10.dp).background(Color(0x99000000), RoundedCornerShape(6.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp))
     }
 }
 

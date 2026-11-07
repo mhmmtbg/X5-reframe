@@ -310,7 +310,9 @@ class AutoEditor(
      * [cancelled] ile durdurulursa o ana kadarki sonuç döner (Devam ile sürdürülebilir).
      */
     fun deepTrack(fromUs: Long, toUs: Long, startView: ViewParams, target: Box, aspectW: Int, aspectH: Int,
-                  progress: (Float, Long) -> Unit): TrackResult {
+                  progress: (Float, Long) -> Unit,
+                  /** Canlı önizleme: zaman, takipçinin baktığı görünüm, hedef kutusu (kaybolduysa null) */
+                  onFrame: (Long, ViewParams, Box?) -> Unit = { _, _, _ -> }): TrackResult {
         val (w, h) = sizeFor(aspectW, aspectH)
         val det = ObjectDetection.getClient(ObjectDetectorOptions.Builder().setDetectorMode(ObjectDetectorOptions.STREAM_MODE).enableMultipleObjects().build())
         val keys = ArrayList<Keyframe>()
@@ -398,6 +400,7 @@ class AutoEditor(
                 }
                 if (n % 3 == 0) keys += Keyframe(t, view.copy(projection = startView.projection, fov = startView.fov), com.mhmmtbg.x5reframe.model.Curve.LINEAR)
                 progress(((t - fromUs).toFloat() / (toUs - fromUs).coerceAtLeast(1)).coerceIn(0f, 1f), t)
+                if (n % 2 == 0) onFrame(t, view, if (found) lastBox else null)
                 t += step; n++
             }
         }
