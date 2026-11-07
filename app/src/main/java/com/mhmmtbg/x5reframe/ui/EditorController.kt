@@ -78,7 +78,7 @@ class EditorController(val clip: ClipInfo, val fileName: String, initial: EditSt
 
     private val ap: com.mhmmtbg.x5reframe.model.Pane get() = state.pane(activePane)
     val activeKeyframes: List<Keyframe> get() = ap.keyframes
-    fun activeKeyframeNear(t: Long) = ap.keyframeNear(t)
+    fun activeKeyframeNear(t: Long, tolUs: Long = 300_000) = ap.keyframeNear(t, tolUs)
     private fun withActive(p: com.mhmmtbg.x5reframe.model.Pane) = state.withPane(activePane, p)
 
     /** Hareket sensörü varsa sabitleyici (yoksa sabitleme seçenekleri kapalı). */

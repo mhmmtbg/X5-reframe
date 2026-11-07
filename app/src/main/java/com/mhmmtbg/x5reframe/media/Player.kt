@@ -123,6 +123,10 @@ class Player(
     /** 1 / dikiş mesafesi (m); 0 = sonsuz. */
     fun setStitchInv(v: Float) = handler.post { if (::program.isInitialized) { program.stitchInvDistance = v; drawNow() } }
 
+    fun setDynamicStitch(on: Boolean) = handler.post {
+        if (::program.isInitialized) { program.dynamicStitch = on; program.resetStitch(); stitchPts = -1; drawNow() }
+    }
+
     fun requestRedraw() {
         if (playing || redrawQueued) return
         redrawQueued = true

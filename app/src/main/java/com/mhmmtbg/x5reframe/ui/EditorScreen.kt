@@ -31,6 +31,9 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.ui.draw.clip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -79,9 +82,22 @@ class EditorActions(
     val autoTrack: () -> Unit,
     val cancelAuto: () -> Unit,
     val step: (Boolean) -> Unit,
+    val snapshot: () -> Unit = {},
+    val dynamicStitch: () -> Boolean = { true },
+    val setDynamicStitch: (Boolean) -> Unit = {},
 )
 
-private enum class Tool(val label: String) { FRAME("Kadraj"), AUTO("Oto"), MULTI("Çoklu"), TRIM("Kes"), STAB("Sabit"), LAYER("Katman"), AUDIO("Ses") }
+/** Düzenleyici araç çubuğu (yatay kaydırılır). Paneli olmayanlar (Anlık görüntü) doğrudan çalışır. */
+private enum class Tool(val label: String) {
+    TRIM("Kes"), FRAME("Görünüm"), AUTO("Derin takip"), KEYFRAME("Anahtar kare"), MULTI("Çoklu açı"),
+    STAB("Sabitleme"), AUDIO("Ses"), LAYER("Metin"), SNAPSHOT("Anlık görüntü"), STITCH("Dikiş");
+
+    val icon: androidx.compose.ui.graphics.vector.ImageVector get() = when (this) {
+        TRIM -> Glyphs.Cut; FRAME -> Glyphs.Tune; AUTO -> Glyphs.Sparkle; KEYFRAME -> Glyphs.Keyframe
+        MULTI -> Glyphs.Album; STAB -> Glyphs.Horizon; AUDIO -> Glyphs.VolumeOn; LAYER -> Glyphs.Text
+        SNAPSHOT -> Glyphs.Camera; STITCH -> Glyphs.Stitch
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -93,7 +109,7 @@ fun EditorScreen(
     seq: SequenceUi,
     startTool: String? = null,
 ) {
-    var tool by rememberSaveable(startTool) { mutableStateOf(if (startTool == "trim") Tool.TRIM else Tool.FRAME) }
+    var tool by rememberSaveable(startTool) { mutableStateOf<Tool?>(if (startTool == "trim") Tool.TRIM else null) }
     LaunchedEffect(tool) { c.layerTool = tool == Tool.LAYER }
     var showExport by remember { mutableStateOf(false) }
     val s = c.state
@@ -135,9 +151,10 @@ fun EditorScreen(
         Transport(c, actions)
         SequenceStrip(seq)
 
+        // Ortası sabit, kayan zaman çizelgesi
         AndroidView(
             factory = timelineFactory,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            modifier = Modifier.fillMaxWidth(),
             update = { t ->
                 t.durationUs = c.clip.durationUs
                 t.inUs = s.inUs
@@ -146,21 +163,31 @@ fun EditorScreen(
                 if (!c.playing) t.positionUs = c.positionUs
             },
         )
+        KeyframeButton(c)
 
-        ToolTabs(tool) { tool = it }
-        Box(
-            Modifier.fillMaxWidth().heightIn(min = 170.dp, max = 220.dp).background(Palette.Surface)
-                .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            when (tool) {
-                Tool.FRAME -> FramePanel(c)
-                Tool.TRIM -> TrimPanel(c)
-                Tool.STAB -> StabPanel(c)
-                Tool.MULTI -> MultiPanel(c)
-                Tool.LAYER -> LayerPanel(c, actions)
-                Tool.AUTO -> AutoPanel(c, actions)
-                Tool.AUDIO -> AudioPanel(c, actions, seq)
+        val open = tool
+        if (open != null && open != Tool.SNAPSHOT) {
+            Box(
+                Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 230.dp).background(Palette.Surface)
+                    .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                when (open) {
+                    Tool.FRAME -> FramePanel(c)
+                    Tool.TRIM -> TrimPanel(c)
+                    Tool.STAB -> StabPanel(c)
+                    Tool.MULTI -> MultiPanel(c)
+                    Tool.LAYER -> LayerPanel(c, actions)
+                    Tool.AUTO -> AutoPanel(c, actions)
+                    Tool.AUDIO -> AudioPanel(c, actions, seq)
+                    Tool.KEYFRAME -> KeyframePanel(c, actions)
+                    Tool.STITCH -> StitchPanel(c, actions)
+                    Tool.SNAPSHOT -> {}
+                }
             }
+        }
+        ToolBar(tool) { t ->
+            if (t == Tool.SNAPSHOT) actions.snapshot()
+            else tool = if (tool == t) null else t
         }
     }
 
@@ -274,21 +301,86 @@ private fun Transport(c: EditorController, a: EditorActions) {
 }
 
 @Composable
-private fun ToolTabs(selected: Tool, onSelect: (Tool) -> Unit) {
-    Row(Modifier.fillMaxWidth().background(Palette.Surface).padding(top = 4.dp)) {
+private fun ToolBar(selected: Tool?, onSelect: (Tool) -> Unit) {
+    Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
+    Row(
+        Modifier.fillMaxWidth().background(Palette.Background).horizontalScroll(rememberScrollState())
+            .navigationBarsPadding().padding(horizontal = 6.dp, vertical = 6.dp),
+    ) {
         Tool.values().forEach { t ->
             val on = t == selected
             Column(
-                Modifier.weight(1f).clickable { onSelect(t) }.padding(top = 10.dp),
+                Modifier.width(72.dp).clip(RoundedCornerShape(10.dp)).clickable { onSelect(t) }.padding(vertical = 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Text(t.label, color = if (on) Palette.Text else Palette.Muted, style = MaterialTheme.typography.labelLarge)
-                Spacer(Modifier.height(8.dp))
-                Box(Modifier.width(32.dp).height(3.dp).background(if (on) Palette.Accent else Color.Transparent, RoundedCornerShape(2.dp)))
+                Icon(t.icon, null, Modifier.size(24.dp), tint = if (on) Palette.Accent else Palette.Text)
+                Spacer(Modifier.height(4.dp))
+                Text(t.label, color = if (on) Palette.Accent else Palette.Muted, style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }
-    Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
+}
+
+/** Oynatma çizgisinin altında: anahtar kare ekle / sil. */
+@Composable
+private fun KeyframeButton(c: EditorController) {
+    val near = c.activeKeyframeNear(c.positionUs, 120_000) != null
+    Row(Modifier.fillMaxWidth().padding(bottom = 6.dp), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier.clip(RoundedCornerShape(18.dp)).background(if (near) Palette.Keyframe else Palette.SurfaceHigh)
+                .clickable { if (near) c.deleteKeyframe() else c.addOrUpdateKeyframe() }.padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Glyphs.Keyframe, null, Modifier.size(14.dp), tint = if (near) Palette.OnAccent else Palette.Keyframe)
+            Spacer(Modifier.width(6.dp))
+            Text(if (near) "Anahtar kareyi sil" else "Anahtar kare ekle", color = if (near) Palette.OnAccent else Palette.Text,
+                style = MaterialTheme.typography.labelLarge)
+        }
+    }
+}
+
+@Composable
+private fun KeyframePanel(c: EditorController, a: EditorActions) {
+    val near = c.activeKeyframeNear(c.positionUs)
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton(if (near != null) "Kareyi güncelle" else "Anahtar kare ekle", Modifier.weight(1.4f), primary = true) { c.addOrUpdateKeyframe() }
+            ActionButton("Sil", Modifier.weight(0.8f), enabled = near != null) { c.deleteKeyframe() }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            ActionButton("◀ Önceki", Modifier.weight(1f), enabled = c.previousKeyframeTime() != null) { c.previousKeyframeTime()?.let(a.seek) }
+            ActionButton("Sonraki ▶", Modifier.weight(1f), enabled = c.nextKeyframeTime() != null) { c.nextKeyframeTime()?.let(a.seek) }
+        }
+        Text(
+            if (c.activeKeyframes.isEmpty()) "Önizlemede sürükleyerek yönü, iki parmakla açıyı ayarla; sonra anahtar kare ekle. Kamera kareler arasında kendiliğinden hareket eder."
+            else "${c.activeKeyframes.size} anahtar kare.",
+            color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
+        )
+        if (c.activeKeyframes.isNotEmpty()) {
+            Text("Tüm anahtar kareleri temizle", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
+                modifier = Modifier.clickable { c.clearKeyframes() }.padding(vertical = 6.dp))
+        }
+    }
+}
+
+@Composable
+private fun StitchPanel(c: EditorController, a: EditorActions) {
+    val s = c.state
+    var dyn by remember { mutableStateOf(a.dynamicStitch()) }
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        SwitchRow("Dinamik dikiş", dyn) { dyn = it; a.setDynamicStitch(it); c.say(if (it) "Dinamik dikiş açık" else "Dinamik dikiş kapalı") }
+        Text("Dikiş çizgisi her bölgede yakındaki nesnelere göre hizalanır ve iki lensin rengi eşitlenir. Dışa aktarımda daha ince taneli çalışır.",
+            color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        LabeledRow("Mesafe") {
+            Segmented(
+                listOf(0.0, 5.0, 2.0, 1.0, 0.5), s.stitchDistance, { if (it == 0.0) "Oto" else "${if (it < 1) it.toString().replace('.', ',') else it.toInt().toString()} m" },
+                { d -> c.commit(s.copy(stitchDistance = d)); c.say(if (d == 0.0) "Dikiş: otomatik" else "Dikiş mesafesi ${d} m") },
+                Modifier.weight(1f),
+            )
+        }
+        Text("Dinamik dikiş kapalıyken tüm dikişe tek bir mesafe uygulanır.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+    }
 }
 
 @Composable
@@ -383,29 +475,8 @@ private fun FramePanel(c: EditorController) {
                 }
             }
         }
-        LabeledRow("Dikiş") {
-            Segmented(
-                listOf(0.0, 5.0, 2.0, 1.0, 0.5), s.stitchDistance, { if (it == 0.0) "Uzak" else "${if (it < 1) it.toString().replace('.', ',') else it.toInt().toString()} m" },
-                { d -> c.commit(s.copy(stitchDistance = d)); c.say(if (d == 0.0) "Dikiş: uzak" else "Dikiş mesafesi ${d} m") },
-                Modifier.weight(1f),
-            )
-        }
-        val near = c.activeKeyframeNear(c.positionUs) != null
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ActionButton(if (near) "Kareyi güncelle" else "Anahtar kare ekle", Modifier.weight(1.4f), primary = true) { c.addOrUpdateKeyframe() }
-            ActionButton("Sil", Modifier.weight(0.8f), enabled = near) { c.deleteKeyframe() }
             ActionButton("Ufku sıfırla", Modifier.weight(1f)) { c.changeView { it.copy(pitch = 0.0, roll = 0.0) }; c.say("Ufuk sıfırlandı") }
-        }
-        Text(
-            if (c.activeKeyframes.isEmpty()) "Önizlemede sürükle: yön · iki parmak: yakınlaştır. Anahtar kare eklersen kamera kareler arasında yumuşakça hareket eder."
-            else "${c.activeKeyframes.size} anahtar kare. Değiştirdiğin kadraj, Kareyi güncelle / ekle ile kaydedilir.",
-            color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
-        )
-        if (c.activeKeyframes.isNotEmpty()) {
-            Text(
-                "Tüm anahtar kareleri temizle", color = Palette.Error, style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.clickable { c.clearKeyframes() }.padding(vertical = 6.dp),
-            )
         }
     }
 }

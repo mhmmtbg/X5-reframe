@@ -582,6 +582,12 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         } },
         cancelAuto = { autoEditor?.cancelled = true },
         step = { fwd -> c.clearLive(); player?.step(fwd) },
+        snapshot = { snapshot(c) },
+        dynamicStitch = { getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("dynamic_stitch", true) },
+        setDynamicStitch = { on ->
+            getSharedPreferences("prefs", MODE_PRIVATE).edit().putBoolean("dynamic_stitch", on).apply()
+            player?.setDynamicStitch(on)
+        },
     )
 
     // ---- Önizleme yüzeyi ----
@@ -672,11 +678,14 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 c.positionUs = us
                 player?.seekTo(us)
             }
+            private var peeked = false
             override fun onScrubStart() { userScrubbing = true; player?.pause() }
             override fun onScrubEnd() {
                 userScrubbing = false
                 controller?.endTrimDrag()
+                if (peeked) { peeked = false; controller?.let { player?.seekTo(it.positionUs) } }
             }
+            override fun onPeek(us: Long) { peeked = true; player?.seekTo(us) }
             override fun onTrimChanged(inUs: Long, outUs: Long) { controller?.dragTrim(inUs, outUs) }
         }
         return t

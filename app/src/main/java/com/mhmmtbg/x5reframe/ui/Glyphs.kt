@@ -42,4 +42,7 @@ object Glyphs {
     val Sparkle = icon("sparkle", "M19,9l1.25,-2.75L23,5l-2.75,-1.25L19,1l-1.25,2.75L15,5l2.75,1.25L19,9zM11.5,9.5L9,4 6.5,9.5 1,12l5.5,2.5L9,20l2.5,-5.5L17,12l-5.5,-2.5zM19,15l-1.25,2.75L15,19l2.75,1.25L19,23l1.25,-2.75L23,19l-2.75,-1.25L19,15z")
     val Tune = icon("tune", "M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10zM15,9h2V7h4V5h-4V3h-2v6z")
     val Save = icon("save", "M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z")
+    val Horizon = icon("horizon", "M2,12h4v2H2zM18,12h4v2h-4zM8,12h8v2H8zM12,4l4,5H8z")
+    val Text = icon("text", "M5,4v3h5.5v12h3V7H19V4z")
+    val Stitch = icon("stitch", "M11,2h2v4h-2zM11,8h2v4h-2zM11,14h2v4h-2zM11,20h2v2h-2zM3,6c0,-1.1 0.9,-2 2,-2h4v16H5c-1.1,0 -2,-0.9 -2,-2zM15,4h4c1.1,0 2,0.9 2,2v12c0,1.1 -0.9,2 -2,2h-4z")
 }
