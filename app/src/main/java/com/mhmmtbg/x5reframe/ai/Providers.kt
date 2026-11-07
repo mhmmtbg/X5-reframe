@@ -148,6 +148,29 @@ object AiClient {
     private fun usageOf(u: JSONObject?, inKey: String, outKey: String): String =
         if (u == null) "" else "${u.optInt(inKey)} girdi + ${u.optInt(outKey)} çıktı token"
 
+    /** Sık karşılaşılan sağlayıcı hatalarını ne yapılacağını söyleyen Türkçe mesaja çevir. */
+    fun friendly(url: String, code: Int, msg: String): String {
+        val m = msg.lowercase()
+        val who = when { "anthropic" in url -> "Anthropic (Claude)"; "openai" in url -> "OpenAI (ChatGPT)"; else -> "Google (Gemini)" }
+        return when {
+            "credit balance is too low" in m ->
+                "Anthropic API hesabında kredi yok. console.anthropic.com > Plans & Billing bölümünden kredi yükle. " +
+                    "Not: Claude.ai Pro/Max aboneliği API kredisi içermez, API ayrı ücretlendirilir."
+            "insufficient_quota" in m || "exceeded your current quota" in m ->
+                "$who hesabında kullanılabilir bakiye/kota yok. Sağlayıcının faturalandırma sayfasından bakiye ekle."
+            code == 401 || "invalid x-api-key" in m || "incorrect api key" in m || "api key not valid" in m ->
+                "$who API anahtarı geçersiz. Ayarlar > Yapay zekâ'da anahtarı yeniden gir."
+            code == 403 -> "$who bu anahtara izin vermiyor (bölge, proje ya da model erişimi): $msg"
+            code == 404 || "not_found" in m || "model" in m && "not found" in m ->
+                "$who bu model adını tanımıyor. Ayarlar > Yapay zekâ'da başka bir model seç."
+            code == 429 || "resource_exhausted" in m || "rate limit" in m ->
+                "$who istek sınırına ulaşıldı. Biraz bekleyip tekrar dene ya da daha ucuz/hızlı bir model seç."
+            code == 529 || code == 503 || "overloaded" in m -> "$who şu an yoğun. Birkaç dakika sonra tekrar dene."
+            code == 413 || "too large" in m -> "İstek çok büyük. Daha kısa bir aralık ya da daha az klip ile dene."
+            else -> "HTTP $code: $msg"
+        }
+    }
+
     private fun post(url: String, body: JSONObject, headers: Map<String, String>): JSONObject {
         val c = URL(url).openConnection() as HttpURLConnection
         c.requestMethod = "POST"
@@ -165,7 +188,7 @@ object AiClient {
                     val o = JSONObject(text)
                     o.optJSONObject("error")?.optString("message") ?: o.optString("message")
                 }.getOrNull()?.takeIf { it.isNotBlank() } ?: text.take(300)
-                throw AiException("HTTP $code: $msg")
+                throw AiException(friendly(url, code, msg))
             }
             return JSONObject(text)
         } catch (e: java.io.IOException) {
