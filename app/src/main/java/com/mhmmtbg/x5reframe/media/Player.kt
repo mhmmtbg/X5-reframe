@@ -399,7 +399,8 @@ class Player(
             val px = java.nio.ByteBuffer.allocateDirect(4)
             GLES30.glReadPixels(fx + fw / 2, fy + fh / 2, 1, 1, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, px)
             android.util.Log.i("X5Player", "ilk çizim ${winW}x$winH çerçeve $fx,$fy ${fw}x$fh orta=" +
-                (0..3).joinToString(",") { (px.get(it).toInt() and 255).toString() } + " tuval=$canvas renk=${program.color != null}")
+                (0..3).joinToString(",") { (px.get(it).toInt() and 255).toString() } + " tuval=$canvas renk=${program.color != null} " +
+                "glHata=${GLES30.glGetError()} kaynak=${source.javaClass.simpleName} görünüm=${sceneProvider(t).first()} bakış=${lookProvider()} temel=${baseProvider(t)?.toList()}")
         }
         egl.swap(window)
     }

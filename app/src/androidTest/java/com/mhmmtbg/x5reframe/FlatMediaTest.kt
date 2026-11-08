@@ -161,6 +161,37 @@ class FlatMediaTest {
     private fun isGreen(c: Int) = Color.green(c) > 170 && Color.red(c) < 90 && Color.blue(c) < 90
 
     /** Önizleme hızı: 2× parçada konum ~2 kat hızlı ilerler, 0,5×'te yarı hızda, ters parçada geriye gider. */
+    /** Oynatıcı fotoğrafı ekrana çiziyor mu (düzenleyicide fotoğraf siyah kalıyordu). */
+    @Test
+    fun playerShowsPhoto() {
+        val img = File(ctx.cacheDir, "player_photo.png").also { makeImage(it) }
+        val clip = ClipInfo.load(ctx, Uri.fromFile(img))
+        val rt = android.os.HandlerThread("rd").apply { start() }
+        val reader = android.media.ImageReader.newInstance(320, 240, android.graphics.PixelFormat.RGBA_8888, 3)
+        val last = java.util.concurrent.atomic.AtomicInteger(0)
+        reader.setOnImageAvailableListener({ r ->
+            r.acquireLatestImage()?.use { im ->
+                val pl = im.planes[0]; val b = pl.buffer
+                val o = 120 * pl.rowStride + 160 * pl.pixelStride
+                last.set(Color.rgb(b.get(o).toInt() and 255, b.get(o + 1).toInt() and 255, b.get(o + 2).toInt() and 255))
+            }
+        }, android.os.Handler(rt.looper))
+        var errors = ""
+        val p = com.mhmmtbg.x5reframe.media.Player(ctx, clip, object : com.mhmmtbg.x5reframe.media.Player.Listener {
+            override fun onPosition(us: Long) {}
+            override fun onPlayingChanged(playing: Boolean) {}
+            override fun onError(message: String) { errors += message }
+        })
+        p.attachSurface(reader.surface, 320, 240)
+        assertTrue(p.awaitIdle(15_000))
+        Thread.sleep(500)
+        p.requestRedraw(); assertTrue(p.awaitIdle(5_000)); Thread.sleep(300)
+        val c = last.get()
+        android.util.Log.i("FlatMediaTest", "oynatıcı fotoğraf orta=${Integer.toHexString(c)} hata='$errors'")
+        p.release(); Thread.sleep(200); reader.close(); rt.quitSafely()
+        assertTrue("fotoğraf siyah: ${Integer.toHexString(c)}", Color.red(c) + Color.green(c) + Color.blue(c) > 60)
+    }
+
     @Test
     fun previewHonorsSpeedAndReverse() {
         val vid = File(ctx.cacheDir, "flat_speed.mp4").also { makeVideo(it, seconds = 6, rotation = 0) }
