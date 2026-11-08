@@ -99,6 +99,7 @@ class ImageFrameSource(private var bitmap: Bitmap?, private val durationUs: Long
     private val callbackThread = HandlerThread("st-image").apply { start() }
     /** Üretici yüzey: kare gelene kadar açık kalır (erken kapatılırsa kare hiç ulaşmayabilir). */
     private val producer = Surface(st)
+    private var glWindow: android.opengl.EGLSurface? = null
 
     override val hasFrame = true
     override var currentPts = 0L
@@ -123,8 +124,9 @@ class ImageFrameSource(private var bitmap: Bitmap?, private val durationUs: Long
         poll()
         android.util.Log.i("ImageFrameSource", "gl=${win != null} geldi=$arrived alındı=$latched ${(System.nanoTime() - t0) / 1_000_000} ms " +
             "matris=${texMatrix.joinToString(",") { "%.2f".format(it) }} ${bmp.width}x${bmp.height}")
-        // Pencere yüzeyi ancak kare alındıktan sonra kapatılır (kapanış kuyruktaki kareyi siler)
-        win?.let { android.opengl.EGL14.eglDestroySurface(android.opengl.EGL14.eglGetCurrentDisplay(), it) }
+        // Üretici (EGL pencere yüzeyi ve Surface) kaynak kapanana kadar bağlı kalır: bağlantı kesilince
+        // tüketici tamponları bırakır ve doku bir süre sonra siyaha döner.
+        glWindow = win
     }
 
     /** Geçerli EGL bağlamıyla üretici yüzeye bir pencere yüzeyi açıp bit eşlemi çizer. */
@@ -173,7 +175,6 @@ class ImageFrameSource(private var bitmap: Bitmap?, private val durationUs: Long
         st.updateTexImage()
         st.getTransformMatrix(texMatrix)
         latched = true
-        producer.release()
         bitmap?.recycle(); bitmap = null
         callbackThread.quitSafely()
         return true
@@ -197,7 +198,9 @@ class ImageFrameSource(private var bitmap: Bitmap?, private val durationUs: Long
     }
 
     override fun release() {
-        if (!latched) { producer.release(); callbackThread.quitSafely(); bitmap?.recycle(); bitmap = null }
+        if (!latched) { callbackThread.quitSafely(); bitmap?.recycle(); bitmap = null }
+        glWindow?.let { runCatching { android.opengl.EGL14.eglDestroySurface(android.opengl.EGL14.eglGetCurrentDisplay(), it) } }
+        producer.release()
         st.release()
         android.opengl.GLES30.glDeleteTextures(1, intArrayOf(texture), 0)
     }
