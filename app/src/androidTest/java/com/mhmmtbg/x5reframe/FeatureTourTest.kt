@@ -547,7 +547,7 @@ class FeatureTourTest {
             step("Kare dondur") {
                 tool("Hız")
                 val n = segs().size
-                seek(1_000_000)
+                seek((st().inUs + st().outUs) / 2)
                 tap("Kareyi dondur")
                 check("kare dondurma parça ekledi", waitFor(20_000, "dondurma") { segs().size >= n + 2 }, "${n} → ${segs().size}")
                 check("dondurulmuş kare 2 sn", segs().any { it.clipName == "Dondurulmuş kare" && it.outputDurationUs == 2_000_000L })
@@ -569,6 +569,16 @@ class FeatureTourTest {
                 tap("Çoğalt")
                 check("proje çoğaltıldı", waitFor(5000, "çoğalt") { nodes("tour", true).fetchSemanticsNodes().size > n })
             }
+            step("Projeyi aç") {
+                tap("Ana sayfa", last = true)
+                waitFor(5000, "ana sayfa") { exists("Kaldığın yerden devam et") }
+                tap("Kaldığın yerden devam et")
+                check("proje düzenleyicide açıldı", waitFor(30_000, "proje") { exists("Dışa aktar") && true })
+                Thread.sleep(3000)
+                shot("proje açık")
+                inst.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                Thread.sleep(1500)
+            }
             step("Albüm") {
                 tap("360° Albüm", last = true)
                 check("albüm açıldı", waitFor(5000, "albüm") { exists("Kamera klasörünü seç") || exists("Dışa aktarılanlar") })
@@ -579,15 +589,6 @@ class FeatureTourTest {
                 scrollToText("Önbelleği temizle")
                 check("önbellek satırı", exists("Önbelleği temizle"))
                 tap("Önbelleği temizle"); Thread.sleep(1500)
-            }
-            step("Projeyi aç") {
-                tap("Ana sayfa", last = true)
-                waitFor(5000, "ana sayfa") { exists("Kaldığın yerden devam et") }
-                tap("Kaldığın yerden devam et")
-                check("proje düzenleyicide açıldı", waitFor(30_000, "proje") { exists("Dışa aktar") && true })
-                Thread.sleep(3000)
-                inst.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
-                Thread.sleep(1500)
             }
         }
         ActivityScenario.launch(com.mhmmtbg.x5reframe.camera.CameraActivity::class.java).use {
