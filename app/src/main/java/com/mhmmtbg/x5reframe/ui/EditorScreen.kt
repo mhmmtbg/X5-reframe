@@ -399,11 +399,10 @@ private fun Transport(c: EditorController, a: EditorActions, fullscreen: Boolean
         Modifier.fillMaxWidth().background(Palette.Background).padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            "${fmt(c.positionUs)} / ${fmt(c.clip.durationUs)}",
-            fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, color = Palette.Muted,
-            modifier = Modifier.weight(1f).padding(start = 6.dp), maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
-        )
+        Column(Modifier.weight(1f).padding(start = 6.dp)) {
+            Text(fmt(c.positionUs), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = Palette.Text, maxLines = 1, softWrap = false)
+            Text(fmt(c.clip.durationUs), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, color = Palette.Muted, maxLines = 1, softWrap = false)
+        }
         IconButton(onClick = { c.previousKeyframeTime()?.let(a.seek) }, enabled = c.previousKeyframeTime() != null) {
             Icon(Glyphs.PrevKey, "Önceki anahtar kare", tint = if (c.previousKeyframeTime() != null) Palette.Text else Palette.Disabled)
         }
@@ -1347,8 +1346,10 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ActionButton("+ Metin", Modifier.weight(1f), primary = true) { editing = true }
             ActionButton("+ Görsel", Modifier.weight(1f)) { a.pickImage() }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             ActionButton("Çıkartma", Modifier.weight(1f)) { stickers = true }
-            ActionButton("Altyazı", Modifier.weight(1f)) { captions = true }
+            ActionButton("Otomatik altyazı", Modifier.weight(1f)) { captions = true }
         }
         c.captionProgress?.let { p ->
             Text("Altyazı oluşturuluyor… %${(p * 100).toInt()}", style = MaterialTheme.typography.bodySmall)

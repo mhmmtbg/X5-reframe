@@ -83,7 +83,7 @@ class ScreenshotTest {
                     val i = Intent(ctx, EditorActivity::class.java).setData(Uri.fromFile(img))
                     if (tool != "NONE") i.putExtra(EditorActivity.EXTRA_TOOL, tool)
                     ActivityScenario.launch<EditorActivity>(i).use {
-                        Thread.sleep(3500)
+                        Thread.sleep(7000)
                         shot("ui_${dev}_" + tool.lowercase())
                     }
                 }

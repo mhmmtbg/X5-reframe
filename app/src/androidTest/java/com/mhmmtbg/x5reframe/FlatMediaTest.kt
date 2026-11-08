@@ -186,6 +186,8 @@ class FlatMediaTest {
             // Aramanın bitmesini bekle (emülatör yavaş olabilir)
             val deadline = System.currentTimeMillis() + 5000
             while (kotlin.math.abs(pos.get() - startUs) > 100_000 && System.currentTimeMillis() < deadline) Thread.sleep(50)
+            assertTrue("oynatıcı hazırlanamadı", p.awaitIdle(15_000))
+            Thread.sleep(150)
             val a = pos.get()
             val t0 = System.nanoTime()
             p.play()

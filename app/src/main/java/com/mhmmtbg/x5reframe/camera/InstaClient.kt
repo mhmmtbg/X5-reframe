@@ -35,9 +35,11 @@ class InstaClient(private val host: String = "192.168.42.1", private val port: I
     private var lastSend = 0L
 
     fun open(timeoutMs: Int = 5000): InstaClient {
+        // Dikkat: apply içinde "port" Socket'in kendi (henüz 0 olan) bağlantı noktasına çözülür; sınıfınki açıkça verilir
+        val target = InetSocketAddress(this.host, this@InstaClient.port)
         socket = (network?.socketFactory?.createSocket() ?: Socket()).apply {
             tcpNoDelay = true
-            connect(InetSocketAddress(host, port), timeoutMs)
+            connect(target, timeoutMs)
             soTimeout = 0
         }
         out = socket.getOutputStream()

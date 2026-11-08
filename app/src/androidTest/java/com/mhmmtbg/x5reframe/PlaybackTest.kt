@@ -46,7 +46,8 @@ class PlaybackTest {
         player.sceneProvider = { listOf(ViewParams(yaw = 180.0, fov = 90.0)) }
         player.setMuted(true)
         player.attachSurface(reader.surface, 960, 540)
-        Thread.sleep(1500)
+        Thread.sleep(500)
+        assertTrue("oynatıcı hazırlanamadı", player.awaitIdle(15_000))
         player.play()
         Thread.sleep(5000)
         player.pause()

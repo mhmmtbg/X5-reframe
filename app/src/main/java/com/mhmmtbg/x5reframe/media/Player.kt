@@ -125,12 +125,23 @@ class Player(
 
     fun attachSurface(surface: Surface, width: Int, height: Int) = handler.post {
         if (released) return@post
+        val t0 = System.nanoTime()
         try {
             if (window != EGL14.EGL_NO_SURFACE) egl.releaseSurface(window)
             window = egl.createWindowSurface(surface)
+            val t1 = System.nanoTime()
             winW = width; winH = height
             drawNow()
+            val ms = (System.nanoTime() - t0) / 1_000_000
+            if (ms > 200) android.util.Log.i("X5Player", "yüzey bağlama $ms ms (oluşturma ${(t1 - t0) / 1_000_000} ms)")
         } catch (t: Throwable) { error(t) }
+    }
+
+    /** Oynatıcı iş parçacığındaki bekleyen işler bitene kadar bekle (testler ve sıralı işlemler için). */
+    fun awaitIdle(timeoutMs: Long = 10_000): Boolean {
+        val l = java.util.concurrent.CountDownLatch(1)
+        handler.post { l.countDown() }
+        return l.await(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
     }
 
     fun resizeSurface(width: Int, height: Int) = handler.post { winW = width; winH = height; drawNow() }
