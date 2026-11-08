@@ -394,8 +394,16 @@ class Player(
         overlay?.draw(fw, fh, layers, t, outProvider(), fx, fy)
         // Zaman damgası pencerede kalıcıdır: dururken "şimdi" verilir ki eski bir zaman kalmasın
         runCatching { egl.setPresentationTime(window, if (presentAtNs > 0) presentAtNs else System.nanoTime()) }
+        if (!diagDone && source.hasFrame) {
+            diagDone = true
+            val px = java.nio.ByteBuffer.allocateDirect(4)
+            GLES30.glReadPixels(fx + fw / 2, fy + fh / 2, 1, 1, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, px)
+            android.util.Log.i("X5Player", "ilk çizim ${winW}x$winH çerçeve $fx,$fy ${fw}x$fh orta=" +
+                (0..3).joinToString(",") { (px.get(it).toInt() and 255).toString() } + " tuval=$canvas renk=${program.color != null}")
+        }
         egl.swap(window)
     }
+    private var diagDone = false
 
     private val power = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
     private var thermalTick = 0

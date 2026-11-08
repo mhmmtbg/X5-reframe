@@ -117,9 +117,12 @@ class ImageFrameSource(private var bitmap: Bitmap?, private val durationUs: Long
             canvas.drawBitmap(bmp, 0f, 0f, null)
             producer.unlockCanvasAndPost(canvas)
         }
-        val until = System.nanoTime() + 3_000_000_000L
+        val t0 = System.nanoTime()
+        val until = t0 + 3_000_000_000L
         while (!arrived && System.nanoTime() < until) Thread.sleep(2)
         poll()
+        android.util.Log.i("ImageFrameSource", "gl=${win != null} geldi=$arrived alındı=$latched ${(System.nanoTime() - t0) / 1_000_000} ms " +
+            "matris=${texMatrix.joinToString(",") { "%.2f".format(it) }} ${bmp.width}x${bmp.height}")
         // Pencere yüzeyi ancak kare alındıktan sonra kapatılır (kapanış kuyruktaki kareyi siler)
         win?.let { android.opengl.EGL14.eglDestroySurface(android.opengl.EGL14.eglGetCurrentDisplay(), it) }
     }
