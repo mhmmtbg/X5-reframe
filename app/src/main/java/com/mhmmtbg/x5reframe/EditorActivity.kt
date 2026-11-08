@@ -1312,7 +1312,8 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         val t = c.positionUs
         val st = c.state
         val pano = c.currentView.projection == com.mhmmtbg.x5reframe.model.Projection.EQUIRECT
-        val long = if (pano) 5760 else 3840
+        // 360° çekimde 4K/5,7K; normal videoda kaynağın çözünürlüğünden büyütülmez (boşuna büyük dosya olmasın)
+        val long = if (pano) 5760 else if (c.clip.is360) 3840 else maxOf(c.clip.displayWidth, c.clip.displayHeight).coerceIn(480, 3840)
         val aw = st.aspect.w; val ah = st.aspect.h
         val w = (if (aw >= ah) long else long * aw / ah) / 2 * 2
         val h = (if (aw >= ah) long * ah / aw else long) / 2 * 2
