@@ -1753,7 +1753,7 @@ internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi)
     Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 28.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Dışa aktar", style = MaterialTheme.typography.titleMedium)
         Text(
-            "${w}×$h · ${s.aspect.label} · ${"%.1f".format((s.outUs - s.inUs) / 1e6)} sn · ${if (s.includeAudio) "sesli" else "sessiz"}",
+            "${w}×$h · ${s.aspect.label} · ${"%.1f".format((if (whole) seq.segments.sumOf { it.outputDurationUs } else s.outUs - s.inUs) / 1e6)} sn · ${if (s.includeAudio) "sesli" else "sessiz"}",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall,
         )
         when (val ex = c.exportUi) {

@@ -114,6 +114,14 @@ class FeatureTourTest {
 
     private fun exists(text: String, sub: Boolean = false) = nodes(text, sub).fetchSemanticsNodes().isNotEmpty()
 
+    /** Tembel listelerde (LazyColumn) henüz çizilmemiş öğeye kaydır. */
+    private fun scrollToText(text: String) {
+        val m = androidx.compose.ui.test.hasText(text)
+        val lists = rule.onAllNodes(androidx.compose.ui.test.hasScrollToIndexAction())
+        for (i in 0 until lists.fetchSemanticsNodes().size) runCatching { lists[i].performScrollToNode(m) }
+        Thread.sleep(400)
+    }
+
     /** Alttaki araç çubuğundan aracı aç (zaten açıksa dokunulmaz). */
     private fun tool(label: String) { tap(label, last = true); Thread.sleep(500) }
 
@@ -282,6 +290,8 @@ class FeatureTourTest {
     @Test
     fun tour() {
         sh("wm size 1080x2340"); sh("wm density 420")
+        // Sistem izin penceresi turu bölmesin
+        sh("pm grant ${ctx.packageName} android.permission.POST_NOTIFICATIONS")
         inst.runOnMainSync { com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(ctx, com.mhmmtbg.x5reframe.ui.theme.ThemeMode.DARK) }
         try {
             flatVideo()
@@ -530,6 +540,10 @@ class FeatureTourTest {
                 inst.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
                 Thread.sleep(800)
             }
+            step("Anlık görüntü") {
+                tap("Anlık görüntü", last = true)
+                check("anlık görüntü kaydedildi", waitFor(30_000, "anlık") { c().feedback?.text?.startsWith("Anlık görüntü kaydedildi") == true }, "${c().feedback?.text}")
+            }
             step("Kare dondur") {
                 tool("Hız")
                 val n = segs().size
@@ -549,11 +563,31 @@ class FeatureTourTest {
                 Thread.sleep(2500)
                 check("son projeler / devam kartı", exists("Kaldığın yerden devam et") || exists("Yeni proje", sub = true))
             }
-            step("Albüm") { tap("360° Albüm", last = true); Thread.sleep(1500) }
+            step("Proje menüsü") {
+                val n = nodes("tour", false).fetchSemanticsNodes().size
+                tap("⋮")
+                tap("Çoğalt")
+                check("proje çoğaltıldı", waitFor(5000, "çoğalt") { nodes("tour", true).fetchSemanticsNodes().size > n })
+            }
+            step("Albüm") {
+                tap("360° Albüm", last = true)
+                check("albüm açıldı", waitFor(5000, "albüm") { exists("Kamera klasörünü seç") || exists("Dışa aktarılanlar") })
+            }
             step("Ayarlar") {
-                tap("Ayarlar"); Thread.sleep(1500)
+                tap("Ayarlar", last = true)
+                check("ayarlar açıldı", waitFor(5000, "ayarlar") { exists("Tema", sub = true) || exists("Görünüm") })
+                scrollToText("Önbelleği temizle")
                 check("önbellek satırı", exists("Önbelleği temizle"))
                 tap("Önbelleği temizle"); Thread.sleep(1500)
+            }
+            step("Projeyi aç") {
+                tap("Ana sayfa", last = true)
+                waitFor(5000, "ana sayfa") { exists("Kaldığın yerden devam et") }
+                tap("Kaldığın yerden devam et")
+                check("proje düzenleyicide açıldı", waitFor(30_000, "proje") { exists("Dışa aktar") && true })
+                Thread.sleep(3000)
+                inst.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
+                Thread.sleep(1500)
             }
         }
         ActivityScenario.launch(com.mhmmtbg.x5reframe.camera.CameraActivity::class.java).use {
