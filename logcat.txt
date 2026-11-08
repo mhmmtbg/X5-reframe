@@ -1,0 +1,358 @@
+--------- beginning of main
+11-08 21:20:20.299  4937  5063 I ExportTest: sequence export error=null frames=60 audio=93
+11-08 21:21:03.354  4937  5063 I ExportTest: 360 export error=null tagged=true frames=30
+11-08 21:21:03.384  4937  5063 I ExportTest: 360 out tracks=2
+11-08 21:21:44.889  4937  5063 I ExportTest: mix export error=null frames=60 audio=93
+11-08 21:21:45.119  4937  5063 I ExportTest: t=1.0 horizon error=1.65 deg
+11-08 21:21:45.122  4937  5063 I ExportTest: t=4.0 horizon error=1.69 deg
+11-08 21:21:45.126  4937  5063 I ExportTest: t=8.0 horizon error=3.11 deg
+11-08 21:21:45.132  4937  5063 I ExportTest: t=12.0 horizon error=2.89 deg
+11-08 21:21:45.142  4937  5063 I ExportTest: t=16.0 horizon error=0.14 deg
+11-08 21:22:11.464  4937  5063 I ExportTest: quad export error=null frames=30
+11-08 21:22:25.921  4937  5063 I ExportTest: auto scan samples=17 withFaces=17 faces=[Face(yaw=-41.711653406617735, pitch=4.662212828269333, size=0.24791667), Face(yaw=39.667622914973144, pitch=-8.04978745728729, size=0.25416666), Face(yaw=-40.5003123132391, pitch=3.565038280502886, size=0.27083334), Face(yaw=39.667622914973144, pitch=-7.834966209630896, size=0.25833333), Face(yaw=-33.44197438622988, pitch=0.3561069894172848, size=0.2375)]
+11-08 21:22:25.922  4937  5063 I ExportTest: auto smart keys=9 first=ViewParams(yaw=19.064727690723288, pitch=-3.092582683649008, roll=0.0, fov=80.0, projection=RECTILINEAR)
+11-08 21:22:25.924  4937  5063 I ExportTest: auto highlights=[1000000..2000000, 3000000..4000000]
+11-08 21:22:33.255  4937  5063 I ExportTest: auto track keys=7 last=ViewParams(yaw=157.35540857174442, pitch=22.565024646680374, roll=0.0, fov=80.0, projection=RECTILINEAR)
+11-08 21:22:34.206  4937  5063 I ExportTest: lrv 1664x832 seek pts=1968633
+11-08 21:22:41.553  4937  5063 I ExportTest: overlay bright pixels=4856
+11-08 21:22:41.598  4937  5063 I ExportTest: clip: Insta360 X5 2880x2880 dur=19219200 fps=30.0 audio=2
+11-08 21:23:32.802  4937  5063 I ExportTest: export error=null uri=content://media/external_primary/video/media/1000000025 seconds=51.204 videoSamples=90 audioSamples=141
+11-08 21:23:32.829  4937  5063 I ExportTest: out track 0: {track-id=1, level=4096, mime=video/avc, frame-count=90, profile=65536, language=```, color-standard=1, display-width=1280, csd-1=java.nio.HeapByteBuffer[pos=0 lim=10 cap=10], color-transfer=3, durationUs=2999966, display-height=720, width=1280, color-range=2, max-input-size=194126, frame-rate=30, height=720, csd-0=java.nio.HeapByteBuffer[pos=0 lim=22 cap=22]}
+11-08 21:23:32.830  4937  5063 I ExportTest: out track 1: {max-bitrate=192000, sample-rate=48000, track-id=2, durationUs=3008000, mime=audio/mp4a-latm, profile=2, channel-count=2, bitrate=192000, language=```, aac-profile=2, max-input-size=689, csd-0=java.nio.HeapByteBuffer[pos=0 lim=5 cap=5]}
+11-08 21:23:32.830  4937  5063 I ExportTest: hasVideo=true hasAudio=true
+11-08 21:23:39.818  4937  5063 I FeatureTour: — Açılış
+11-08 21:23:40.048  4937  8174 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:23:40.105  4937  5063 I FeatureTour: ✓ düzenleyici açıldı
+11-08 21:23:40.165  4937  8174 I X5Player: ilk kare: 0
+11-08 21:23:42.607  4937  5063 I FeatureTour: ✓ klip süresi ~8 sn  [8000000]
+11-08 21:23:42.608  4937  5063 I FeatureTour: ✓ ses izi var
+11-08 21:23:42.609  4937  5063 I FeatureTour:   parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+11-08 21:23:45.882  4937  5063 I FeatureTour: — Oynat ve duraklat
+11-08 21:23:47.057  4937  8174 I X5Player: ilk çizim 1080x809 çerçeve 0,102 1080x607 orta=99,156,80,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:23:47.140  4937  8174 I X5Player: yüzey bağlama 239 ms (oluşturma 1 ms)
+11-08 21:23:47.737  4937  8174 I X5Player: oynat pts=0 hız=1.0 ters=false
+11-08 21:23:47.933  4937  8174 I X5Player: oynatma pts=100000 saat=195414 hız=1.0 atlanan=2
+11-08 21:23:50.989  4937  5063 I FeatureTour: ✓ oynatma ilerledi (1×)  [konum 1966666]
+11-08 21:23:51.023  4937  5063 I FeatureTour: ✓ duraklat düğmesi
+11-08 21:23:51.024  4937  5063 I FeatureTour:   parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+11-08 21:23:51.277  4937  5063 I FeatureTour: — Hız 2×
+11-08 21:23:54.269  4937  5063 I FeatureTour: ✓ parça hızı 2×  [2.0]
+11-08 21:23:55.130  4937  8174 I X5Player: oynat pts=0 hız=2.0 ters=false
+11-08 21:23:55.135  4937  8174 I X5Player: oynatma pts=33333 saat=7998 hız=2.0 atlanan=0
+11-08 21:23:57.539  4937  5063 I FeatureTour: ✓ önizleme 2× hızlı  [1,5 sn'de konum 2133333]
+11-08 21:23:58.047  4937  5063 I FeatureTour:   parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+11-08 21:23:58.205  4937  5063 I FeatureTour: — Hız eğrisi ve ters
+11-08 21:23:58.783  4937  5063 I FeatureTour: ✓ eğri Kahraman  [HERO]
+11-08 21:23:59.349  4937  5063 I FeatureTour: ✓ eğri Özel  [CUSTOM]
+11-08 21:24:00.478  4937  5063 I FeatureTour: ✓ ters açık
+11-08 21:24:00.986  4937  5063 I FeatureTour: ✓ ters kapalı
+11-08 21:24:01.800  4937  5063 I FeatureTour:   parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+11-08 21:24:01.966  4937  5063 I FeatureTour: — Kes
+11-08 21:24:04.484  4937  5063 I FeatureTour: ✓ başlangıç 1 sn  [1000000]
+11-08 21:24:05.678  4937  5063 I FeatureTour: ✓ bitiş kısaldı  [7000000]
+11-08 21:24:06.174  4937  5063 I FeatureTour: ✓ kesme sıfırlandı
+11-08 21:24:06.985  4937  5063 I FeatureTour:   parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+11-08 21:24:07.137  4937  5063 I FeatureTour: — Böl
+11-08 21:24:08.284  4937  8405 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:24:08.350  4937  8405 I X5Player: ilk kare: 0
+11-08 21:24:12.664  4937  5063 I FeatureTour: ✓ parça bölündü  [1 → 2]
+11-08 21:24:12.665  4937  5063 I FeatureTour:   parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:24:12.667  4937  8405 I X5Player: ilk çizim 1080x809 çerçeve 0,102 1080x607 orta=99,156,80,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:24:12.775  4937  8405 I X5Player: yüzey bağlama 4423 ms (oluşturma 71 ms)
+11-08 21:24:12.980  4937  5063 I FeatureTour: — Geçiş
+11-08 21:24:13.091  4937  8405 I X5Player: arama 1500000 → 1500000, 316 ms
+11-08 21:24:16.370  4937  5063 I FeatureTour: ✓ geçiş Çapraz  [DISSOLVE]
+11-08 21:24:16.371  4937  5063 I FeatureTour:   parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:24:16.543  4937  5063 I FeatureTour: — Anahtar kare
+11-08 21:24:17.843  4937  5063 I FeatureTour: ✓ anahtar kare eklendi  [0 → 1]
+11-08 21:24:20.207  4937  5063 I FeatureTour: ✓ anahtar kareler temizlendi  [0]
+11-08 21:24:21.018  4937  5063 I FeatureTour:   parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:24:21.163  4937  5063 I FeatureTour: — Görünüm
+11-08 21:24:23.575  4937  5063 I FeatureTour: ✓ oran 9:16  [PORTRAIT]
+11-08 21:24:24.191  4937  5063 I FeatureTour: ✓ yerleşim Doldur  [FILL]
+11-08 21:24:25.776  4937  5063 I FeatureTour: ✓ yerleşim Bulanık  [BLUR]
+11-08 21:24:27.245  4937  5063 I FeatureTour: ✓ yatay ayna
+11-08 21:24:28.673  4937  5063 I FeatureTour: ✓ kırpma 1:1  [CropRect(l=0.21875, t=0.0, r=0.78125, b=1.0)]
+11-08 21:24:30.027  4937  5063 I FeatureTour: ✓ döndürme  [roll 90.0]
+11-08 21:24:31.485  4937  5063 I FeatureTour: ✓ yeşil ekran açık
+11-08 21:24:33.713  4937  5063 I FeatureTour: ✓ kişi ayırma açık  [BLUR]
+11-08 21:24:40.841  4937  5063 I FeatureTour: ✓ kişi ayırma kapalı  [null]
+11-08 21:24:45.257  4937  5063 I FeatureTour:   parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:24:45.398  4937  5063 I FeatureTour: — Renk
+11-08 21:24:45.657  4937  8405 I X5Player: yüzey bağlama 212 ms (oluşturma 2 ms)
+11-08 21:24:49.520  4937  5063 I FeatureTour: ✓ filtre Canlı  [VIVID]
+11-08 21:24:55.986  4937  5063 I FeatureTour:   parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:24:56.137  4937  5063 I FeatureTour: — Metin
+11-08 21:24:59.886  4937  5063 I FeatureTour: ✓ metin katmanı eklendi  [[Merhaba]]
+11-08 21:25:00.777  4937  5063 I FeatureTour: ✓ yazı tipi  [SERIF]
+11-08 21:25:01.397  4937  5063 I FeatureTour: ✓ giriş animasyonu  [POP]
+11-08 21:25:01.398  4937  5063 I FeatureTour:   parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:25:01.753  4937  5063 I FeatureTour: — Şablon ve çıkartma
+11-08 21:25:02.780  4937  5063 I FeatureTour: ✓ şablon katmanı  [2]
+11-08 21:25:04.510  4937  5063 I FeatureTour: ✓ çıkartma eklendi
+11-08 21:25:06.263  4937  5063 I FeatureTour: ✓ altyazı seçenekleri
+11-08 21:25:07.628  4937  5063 I FeatureTour:   parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:25:07.774  4937  5063 I FeatureTour: — Ses
+11-08 21:25:09.484  4937  5063 I FeatureTour: ✓ gürültü azaltma
+11-08 21:25:09.985  4937  5063 I FeatureTour: ✓ parça ses yükselmesi  [500000]
+11-08 21:25:10.251  4937  5063 I FeatureTour: ✓ müzik vuruşları  [14]
+11-08 21:25:11.568  4937  5063 I FeatureTour: ✓ müziği kıs
+11-08 21:25:11.866  4937  8585 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:25:12.000  4937  8585 I X5Player: ilk kare: 0
+11-08 21:25:16.117  4937  8585 I X5Player: ilk çizim 1080x327 çerçeve 249,0 581x327 orta=98,156,81,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.21875, t=0.0, r=0.78125, b=1.0), flipH=true, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:25:16.202  4937  8585 I X5Player: yüzey bağlama 4201 ms (oluşturma 74 ms)
+11-08 21:25:16.203  4937  5063 I FeatureTour: ✓ ritme göre böl  [2 → 5]
+11-08 21:25:17.080  4937  5063 I FeatureTour:   parçalar: 5, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:25:17.229  4937  5063 I FeatureTour: — Sabitleme
+11-08 21:25:28.234  4937  5063 I FeatureTour: ✓ hareket analizi
+11-08 21:25:29.036  4937  5063 I FeatureTour: ✓ sabitleme açık  [SMOOTH]
+11-08 21:25:29.840  4937  5063 I FeatureTour:   parçalar: 5, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:25:29.989  4937  5063 I FeatureTour: — Akıllı kadraj
+11-08 21:25:36.922  4937  5063 I FeatureTour: ✓ akıllı kadraj bitti
+11-08 21:25:36.923  4937  5063 I FeatureTour: ✓ kadraj anahtar kareleri  [2]
+11-08 21:25:37.960  4937  5063 I FeatureTour: ✓ geri al  [LANDSCAPE]
+11-08 21:25:38.908  4937  5063 I FeatureTour: ✓ yinele  [PORTRAIT]
+11-08 21:25:39.405  4937  5063 I FeatureTour:   parçalar: 5, toplam 8.0 sn, seçili 1: FLAT
+11-08 21:25:39.583  4937  5063 I FeatureTour: — Sessizlikleri kes
+11-08 21:25:39.866  4937  8684 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:25:39.989  4937  8684 I X5Player: ilk kare: 0
+11-08 21:25:43.768  4937  8684 I X5Player: ilk çizim 1080x852 çerçeve 0,123 1080x607 orta=56,105,151,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.21875, t=0.0, r=0.78125, b=1.0), flipH=true, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=[-0.047380197793245316, 0.0037031902465969324, 0.009454086422920227, 1.1068127155303955]
+11-08 21:25:43.836  4937  8684 I X5Player: yüzey bağlama 3846 ms (oluşturma 1 ms)
+11-08 21:25:44.092  4937  5063 I FeatureTour: ✓ sessizlik çıkarıldı  [8000000 → 6650000]
+11-08 21:25:44.984  4937  5063 I FeatureTour:   parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+11-08 21:25:45.139  4937  5063 I FeatureTour: — Tam ekran
+11-08 21:25:46.570  4937  5063 I FeatureTour: ✓ tam ekranda araçlar gizli
+11-08 21:25:47.810  4937  5063 I FeatureTour: ✓ araçlar geri geldi
+11-08 21:25:47.811  4937  5063 I FeatureTour:   parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+11-08 21:25:48.003  4937  5063 I FeatureTour: — Dışa aktar MP4
+11-08 21:26:59.541  4937  5063 I FeatureTour: ✓ MP4 dışa aktarım bitti  [Done(uri=content://media/external_primary/video/media/1000000050, videoSec=6.65, tookSec=68.927)]
+11-08 21:26:59.556  4937  5063 I FeatureTour: ✓ MP4 dosyası geçerli  [süre 6033277]
+11-08 21:26:59.557  4937  5063 I FeatureTour:   parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+11-08 21:26:59.754  4937  5063 I FeatureTour: — Dışa aktar GIF
+11-08 21:27:34.004  4937  5063 I FeatureTour: ✓ GIF oluştu  [Done(uri=content://media/external_primary/images/media/1000000053, videoSec=6.65, tookSec=32.121)]
+11-08 21:27:34.005  4937  5063 I FeatureTour:   parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+11-08 21:27:34.191  4937  5063 I FeatureTour: — Dışa aktar ses
+11-08 21:27:37.189  4937  5063 I FeatureTour: ✓ M4A oluştu  [Done(uri=content://media/external_primary/audio/media/1000000056, videoSec=6.65, tookSec=0.968)]
+11-08 21:27:37.991  4937  5063 I FeatureTour:   parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+11-08 21:27:38.165  4937  5063 I FeatureTour: — Anlık görüntü
+11-08 21:27:44.717  4937  5063 I FeatureTour: ✓ anlık görüntü kaydedildi  [Anlık görüntü kaydedildi · 640×360 · Resimler/X5Reframe]
+11-08 21:27:44.718  4937  5063 I FeatureTour:   parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+11-08 21:27:44.868  4937  5063 I FeatureTour: — Kare dondur
+11-08 21:27:46.819  4937  8684 I X5Player: yüzey bağlama 213 ms (oluşturma 2 ms)
+11-08 21:27:51.316  4937  5063 I FeatureTour: ✓ kare dondurma parça ekledi  [5 → 7]
+11-08 21:27:51.316  4937  5063 I FeatureTour: ✓ dondurulmuş kare 2 sn
+11-08 21:27:51.317  4937  5063 I FeatureTour:   parçalar: 7, toplam 8.7 sn, seçili 2: IMAGE
+11-08 21:27:51.505  4937  9180 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 1280x720
+11-08 21:27:51.505  4937  9180 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:27:51.505  4937  9180 I X5Player: ilk kare: 0
+11-08 21:27:55.044  4937  9180 I X5Player: ilk çizim 1080x852 çerçeve 0,123 1080x607 orta=204,50,76,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FILL, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:27:55.071  4937  9180 I X5Player: yüzey bağlama 3564 ms (oluşturma 3 ms)
+11-08 21:27:55.835  4937  5063 I FeatureTour: — Ana sayfa
+11-08 21:27:58.362  4937  5063 I FeatureTour: ✓ son projeler / devam kartı
+11-08 21:27:58.660  4937  5063 I FeatureTour: — Proje menüsü
+11-08 21:27:59.733  4937  5063 I FeatureTour: ✓ proje çoğaltıldı
+11-08 21:27:59.892  4937  5063 I FeatureTour: — Projeyi aç
+11-08 21:28:00.812  4937  9230 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:28:01.007  4937  9230 I X5Player: ilk kare: 0
+11-08 21:28:06.820  4937  9230 I X5Player: ilk çizim 1080x809 çerçeve 0,102 1080x607 orta=99,156,80,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:28:06.917  4937  9230 I X5Player: yüzey bağlama 5738 ms (oluşturma 4 ms)
+11-08 21:28:06.944  4937  5063 I FeatureTour: ✓ proje düzenleyicide açıldı
+11-08 21:28:11.812  4937  5063 I FeatureTour: — Albüm
+11-08 21:28:12.318  4937  5063 I FeatureTour: ✓ albüm açıldı
+11-08 21:28:12.454  4937  5063 I FeatureTour: — Ayarlar
+11-08 21:28:12.944  4937  5063 I FeatureTour: ✓ ayarlar açıldı
+11-08 21:28:13.566  4937  5063 I FeatureTour: ✓ önbellek satırı
+11-08 21:28:16.214  4937  5063 I FeatureTour: — Kamera ekranı
+11-08 21:28:19.475  4937  5063 I FeatureTour: — 360 açılış
+11-08 21:28:19.476  4937  5063 I FeatureTour: ✓ 360 düzenleyici açıldı
+11-08 21:28:19.649  4937  9363 I X5Player: kaynak açıldı: SideBySideFrameSource INSV360
+11-08 21:28:19.867  4937  9363 I X5Player: ilk kare: 0
+11-08 21:28:22.476  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:25.803  4937  5063 I FeatureTour: — 360 görünüm
+11-08 21:28:26.408  4937  9363 I X5Player: ilk çizim 1080x809 çerçeve 0,102 1080x607 orta=150,198,242,255 tuval=false renk=false glHata=0 kaynak=SideBySideFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=[0.9643174976801205, -0.25119846525754785, -0.08361276649054979, 0.2636087307273668, 0.8817504187417129, 0.39118619113297015, -0.024539778977352555, -0.39926874420754066, 0.9165054659666118]
+11-08 21:28:26.523  4937  9363 I X5Player: yüzey bağlama 675 ms (oluşturma 1 ms)
+11-08 21:28:28.754  4937  5063 I FeatureTour: ✓ küçük gezegen  [ViewParams(yaw=0.0, pitch=-90.0, roll=0.0, fov=250.0, projection=WIDE)]
+11-08 21:28:30.056  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:30.435  4937  5063 I FeatureTour: — 360 çoklu açı
+11-08 21:28:32.118  4937  5063 I FeatureTour: ✓ yan yana düzen  [SIDE]
+11-08 21:28:33.384  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:33.771  4937  5063 I FeatureTour: — 360 sabitleme
+11-08 21:28:35.460  4937  5063 I FeatureTour: ✓ yön kilidi  [LOCK]
+11-08 21:28:36.721  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:37.104  4937  5063 I FeatureTour: — 360 Derin takip
+11-08 21:28:40.261  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:40.569  4937  5063 I FeatureTour: — 360 Dikiş
+11-08 21:28:43.740  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:44.115  4937  5063 I FeatureTour: — 360 Yapay zekâ
+11-08 21:28:47.288  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:47.655  4937  5063 I FeatureTour: — 360 Renk
+11-08 21:28:50.861  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:51.242  4937  5063 I FeatureTour: — 360 oynat
+11-08 21:28:52.062  4937  9363 I X5Player: oynat pts=0 hız=1.0 ters=false
+11-08 21:28:52.227  4937  9363 I X5Player: oynatma pts=100100 saat=164695 hız=1.0 atlanan=2
+11-08 21:28:55.405  4937  5063 I FeatureTour: ✓ 360 oynatma ilerledi  [2435766]
+11-08 21:28:55.406  4937  5063 I FeatureTour:   parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+11-08 21:28:56.183  4937  5063 I FeatureTour: SONUÇ: 0 sorun
+11-08 21:29:08.101  4937  9562 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 400x300
+11-08 21:29:37.124  4937  5063 I FlatMediaTest: out track 0: {track-id=1, level=4096, mime=video/avc, frame-count=105, profile=65536, language=```, color-standard=4, display-width=640, csd-1=java.nio.HeapByteBuffer[pos=0 lim=10 cap=10], color-transfer=3, durationUs=3499966, display-height=360, width=640, color-range=2, max-input-size=118573, frame-rate=30, height=360, csd-0=java.nio.HeapByteBuffer[pos=0 lim=22 cap=22]}
+11-08 21:29:37.125  4937  5063 I FlatMediaTest: out track 1: {max-bitrate=192000, sample-rate=48000, track-id=2, durationUs=3498666, mime=audio/mp4a-latm, profile=2, channel-count=2, bitrate=192000, language=```, aac-profile=2, max-input-size=661, csd-0=java.nio.HeapByteBuffer[pos=0 lim=2 cap=2]}
+11-08 21:29:37.125  4937  5063 I FlatMediaTest: mixed export dur=3499966 expected=3500000 frames=105 audio=164
+11-08 21:29:37.315  4937  5063 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 400x300
+11-08 21:29:41.164  4937  5063 I FlatMediaTest: chroma bg=ff000000 fg=ffdc2828
+11-08 21:29:41.696  4937  9924 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:29:41.820  4937  9924 I X5Player: ilk kare: 0
+11-08 21:29:48.475  4937  9924 I X5Player: ilk çizim 320x240 çerçeve 0,30 320x180 orta=129,128,129,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:29:48.614  4937  9924 I X5Player: yüzey bağlama 6793 ms (oluşturma 56 ms)
+11-08 21:29:48.855  4937  9924 I X5Player: oynat pts=0 hız=2.0 ters=false
+11-08 21:29:48.966  4937  9924 I X5Player: oynatma pts=33333 saat=222378 hız=2.0 atlanan=0
+11-08 21:29:50.294  4937  9924 I X5Player: oynatma pts=2900000 saat=2879458 hız=2.0 atlanan=0
+11-08 21:29:50.655  4937  5063 I FlatMediaTest: hız 2.0 ters=false: 0 -> 3000000 (3000000 µs, duvar 1500190 µs) hata=''
+11-08 21:29:50.923  4937  9941 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:29:51.039  4937  9941 I X5Player: ilk kare: 0
+11-08 21:29:55.279  4937  9941 I X5Player: ilk çizim 320x240 çerçeve 0,30 320x180 orta=129,128,129,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:29:55.382  4937  9941 I X5Player: yüzey bağlama 4342 ms (oluşturma 1 ms)
+11-08 21:29:55.610  4937  9941 I X5Player: oynat pts=0 hız=0.5 ters=false
+11-08 21:29:55.673  4937  9941 I X5Player: oynatma pts=33333 saat=31103 hız=0.5 atlanan=0
+11-08 21:29:57.411  4937  5063 I FlatMediaTest: hız 0.5 ters=false: 0 -> 766666 (766666 µs, duvar 1500211 µs) hata=''
+11-08 21:29:57.680  4937  9949 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:29:57.805  4937  9949 I X5Player: ilk kare: 0
+11-08 21:30:04.126  4937  9949 I X5Player: ilk çizim 320x240 çerçeve 0,30 320x180 orta=129,128,129,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:30:04.269  4937  9949 I X5Player: yüzey bağlama 6463 ms (oluşturma 61 ms)
+11-08 21:30:04.497  4937  9949 I X5Player: oynat pts=5000000 hız=1.0 ters=true
+11-08 21:30:06.298  4937  5063 I FlatMediaTest: hız 1.0 ters=true: 5000000 -> 3500000 (-1500000 µs, duvar 1500200 µs) hata=''
+11-08 21:30:06.498  4937  5063 I FlatMediaTest: hız önizleme: 2x 0->3000000  0.5x 0->766666  ters 5000000->3500000
+11-08 21:30:23.026  4937  5063 I FlatMediaTest: reverse first=156 last=24 dur=4133000 expected=4142024
+11-08 21:30:23.293  4937  5063 I FlatMediaTest: beats=40 gap=500000.0 first=0
+11-08 21:30:39.497  4937  5063 I FlatMediaTest: dissolve dur=2400000 mid=ff731884
+11-08 21:30:39.709  4937  5063 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 400x300
+11-08 21:30:44.075  4937  5063 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 400x300
+11-08 21:30:48.838  4937  5063 I FlatMediaTest: lut ffff23ff
+11-08 21:30:49.021  4937  5063 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 400x300
+11-08 21:30:53.240  4937  5063 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 400x300
+11-08 21:30:57.353  4937  5063 I FlatMediaTest: clip kind=FLAT 320x240 rot=90 dur=2000000 fps=30.0
+11-08 21:31:02.891  4937  5063 I FlatMediaTest: rot: tl=ff818081 tr=ffff0101 br=ff818081
+11-08 21:31:30.029  4937  5063 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 400x300
+11-08 21:31:33.673  4937  5063 I FlatMediaTest: photo tl=ff00dc00 br=ff1e1ec8
+11-08 21:31:33.843  4937 10679 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 400x300
+11-08 21:31:33.843  4937 10679 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:31:33.843  4937 10679 I X5Player: ilk kare: 0
+11-08 21:31:37.162  4937 10679 I X5Player: ilk çizim 320x240 çerçeve 0,30 320x180 orta=30,30,200,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:31:37.164  4937 10679 I X5Player: yüzey bağlama 3320 ms (oluşturma 1 ms)
+11-08 21:31:37.977  4937  5063 I FlatMediaTest: oynatıcı fotoğraf orta=ff1e1ec8 hata=''
+11-08 21:31:44.376  4937  5063 I FlatMediaTest: voice rms before=0.0 during=5646.304574701197
+11-08 21:31:50.365  4937  5063 I FlatMediaTest: gif 27804 B 240x180 AnimatedImageDrawable
+11-08 21:31:50.522  4937  5063 I FlatMediaTest: audio-only {max-bitrate=192000, sample-rate=48000, track-id=1, durationUs=1984000, mime=audio/mp4a-latm, profile=2, channel-count=2, bitrate=192000, language=```, aac-profile=2, max-input-size=532, csd-0=java.nio.HeapByteBuffer[pos=0 lim=2 cap=2]}
+11-08 21:31:57.537  4937  5063 I FlatMediaTest: shake frames=60 hits=59
+11-08 21:31:58.185  4937 11113 I X5Player: kaynak açıldı: FlatFrameSource FLAT
+11-08 21:31:58.251  4937 11113 I X5Player: ilk kare: 0
+11-08 21:32:03.089  4937 11113 I X5Player: ilk çizim 320x238 çerçeve 0,29 320x180 orta=129,128,129,255 tuval=false renk=false glHata=0 kaynak=FlatFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:32:03.326  4937 11113 I X5Player: yüzey bağlama 5074 ms (oluşturma 144 ms)
+11-08 21:32:03.668  4937  5063 I OscClientTest: 6666 doğrudan: 4
+11-08 21:32:03.810  4937  5063 I OscClientTest: dizin: dizin [VID_20260926_141617_00_142.insv, LRV_20260926_141617_01_142.lrv, IMG_20260926_150000_00_143.insp, VID_20260712_085744_00_031.insv, LRV_20260712_085744_01_031.lrv, IMG_20260712_090000_00_032.insp]
+11-08 21:32:35.181  4937  5063 I PerfTest: flat 720p düz: 29.4 sn, 0.14× gerçek zaman
+11-08 21:33:29.603  4937  5063 I PerfTest: flat 720p renk+keskinlik+gren: 54.4 sn, 0.07× gerçek zaman
+11-08 21:34:17.683  4937  5063 I PerfTest: 360 → 720p: 48.1 sn, 0.06× gerçek zaman
+11-08 21:34:17.811  4937 11832 I X5Player: kaynak açıldı: SideBySideFrameSource INSV360
+11-08 21:34:17.936  4937 11832 I X5Player: ilk kare: 0
+11-08 21:34:24.665  4937 11832 I X5Player: ilk çizim 960x540 çerçeve 0,0 960x540 orta=144,136,131,255 tuval=false renk=false glHata=0 kaynak=SideBySideFrameSource görünüm=ViewParams(yaw=180.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:34:24.817  4937 11832 I X5Player: yüzey bağlama 6880 ms (oluşturma 65 ms)
+11-08 21:34:24.817  4937 11832 I X5Player: oynat pts=0 hız=1.0 ters=false
+11-08 21:34:25.013  4937 11832 I X5Player: oynatma pts=133466 saat=195754 hız=1.0 atlanan=3
+11-08 21:34:28.091  4937 11832 I X5Player: oynatma pts=2669333 saat=2717789 hız=1.0 atlanan=3
+11-08 21:34:29.325  4937 11832 I X5Player: oynatma pts=3903900 saat=3946564 hız=1.0 atlanan=2
+11-08 21:34:29.818  4937  5063 I PlaybackTest: lrv playback: 13.8 fps · p95 127 ms · en uzun 196 ms · atlanan 65 images=67 errors=
+11-08 21:34:32.241  4937 11931 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:34:32.243  4937 11931 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:34:32.243  4937 11931 I X5Player: ilk kare: 0
+11-08 21:34:37.848  4937 11931 I X5Player: ilk çizim 1080x862 çerçeve 0,128 1080x607 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:34:37.859  4937 11931 I X5Player: yüzey bağlama 5616 ms (oluşturma 119 ms)
+11-08 21:34:39.507  4937  5063 I ScreenshotTest: ui_phone_none 1080x1920 varyans=2253
+11-08 21:34:40.092  4937 11990 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:34:40.093  4937 11990 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:34:40.093  4937 11990 I X5Player: ilk kare: 0
+11-08 21:34:44.496  4937 11990 I X5Player: ilk çizim 1080x852 çerçeve 0,123 1080x607 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:34:44.501  4937 11990 I X5Player: yüzey bağlama 4408 ms (oluşturma 1 ms)
+11-08 21:34:47.109  4937  5063 I ScreenshotTest: ui_phone_color 1080x1920 varyans=2118
+11-08 21:34:47.899  4937 12007 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:34:47.899  4937 12007 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:34:47.899  4937 12007 I X5Player: ilk kare: 0
+11-08 21:34:51.451  4937 12007 I X5Player: ilk çizim 1080x852 çerçeve 0,123 1080x607 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:34:51.456  4937 12007 I X5Player: yüzey bağlama 3556 ms (oluşturma 1 ms)
+11-08 21:34:54.838  4937  5063 I ScreenshotTest: ui_phone_speed 1080x1920 varyans=2065
+11-08 21:34:55.696  4937 12032 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:34:55.696  4937 12032 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:34:55.696  4937 12032 I X5Player: ilk kare: 0
+11-08 21:34:59.427  4937 12032 I X5Player: ilk çizim 1080x852 çerçeve 140,202 799x449 orta=40,70,110,255 tuval=true renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:34:59.432  4937 12032 I X5Player: yüzey bağlama 3735 ms (oluşturma 1 ms)
+11-08 21:35:02.600  4937  5063 I ScreenshotTest: ui_phone_smart 1080x1920 varyans=1680
+11-08 21:35:03.446  4937 12054 I ImageFrameSource: gl=true geldi=true alındı=true 2 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:35:03.451  4937 12054 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:35:03.452  4937 12054 I X5Player: ilk kare: 0
+11-08 21:35:08.238  4937 12054 I X5Player: ilk çizim 1080x585 çerçeve 20,0 1040x585 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:35:08.252  4937 12054 I X5Player: yüzey bağlama 4799 ms (oluşturma 16 ms)
+11-08 21:35:10.585  4937  5063 I ScreenshotTest: ui_phone_layer 1080x1920 varyans=2120
+11-08 21:35:11.279  4937 12091 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:35:11.280  4937 12091 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:35:11.280  4937 12091 I X5Player: ilk kare: 0
+11-08 21:35:15.220  4937 12091 I X5Player: ilk çizim 1080x585 çerçeve 20,0 1040x585 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:35:15.229  4937 12091 I X5Player: yüzey bağlama 3949 ms (oluşturma 1 ms)
+11-08 21:35:18.236  4937  5063 I ScreenshotTest: ui_phone_audio 1080x1920 varyans=2066
+11-08 21:35:19.008  4937 12112 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:35:19.008  4937 12112 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:35:19.009  4937 12112 I X5Player: ilk kare: 0
+11-08 21:35:22.512  4937 12112 I X5Player: ilk çizim 1080x852 çerçeve 0,123 1080x607 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:35:22.519  4937 12112 I X5Player: yüzey bağlama 3493 ms (oluşturma 2 ms)
+11-08 21:35:29.887  4937  5063 I ScreenshotTest: ui_phone_frame 1080x1920 varyans=1673
+11-08 21:35:30.571  4937 12141 I ImageFrameSource: gl=true geldi=true alındı=true 2 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:35:30.571  4937 12141 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:35:30.571  4937 12141 I X5Player: ilk kare: 0
+11-08 21:35:36.340  4937 12141 I X5Player: ilk çizim 1080x862 çerçeve 0,128 1080x607 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:35:36.344  4937 12141 I X5Player: yüzey bağlama 5772 ms (oluşturma 1 ms)
+11-08 21:35:43.637  4937  5063 I ScreenshotTest: ui_phone_export 1080x1920 varyans=1147
+11-08 21:35:46.605  4937 12211 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:35:46.605  4937 12211 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:35:46.605  4937 12211 I X5Player: ilk kare: 0
+11-08 21:35:51.624  4937 12211 I X5Player: ilk çizim 1227x800 çerçeve 0,56 1227x690 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:35:51.634  4937 12211 I X5Player: yüzey bağlama 5026 ms (oluşturma 0 ms)
+11-08 21:35:53.623  4937  5063 I ScreenshotTest: ui_tablet_none 1920x1600 varyans=4559
+11-08 21:35:54.373  4937 12236 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:35:54.373  4937 12236 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:35:54.373  4937 12236 I X5Player: ilk kare: 0
+11-08 21:35:57.726  4937 12236 I X5Player: ilk çizim 1227x800 çerçeve 0,56 1227x690 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:35:57.766  4937 12236 I X5Player: yüzey bağlama 3392 ms (oluşturma 1 ms)
+11-08 21:36:04.925  4937  5063 I ScreenshotTest: ui_tablet_color 1920x1600 varyans=4546
+11-08 21:36:05.653  4937 12261 I ImageFrameSource: gl=true geldi=true alındı=true 0 ms matris=1.00,0.00,0.00,0.00,0.00,-1.00,0.00,0.00,0.00,0.00,1.00,0.00,0.00,1.00,0.00,1.00 960x540
+11-08 21:36:05.653  4937 12261 I X5Player: kaynak açıldı: ImageFrameSource IMAGE
+11-08 21:36:05.653  4937 12261 I X5Player: ilk kare: 0
+11-08 21:36:09.919  4937 12261 I X5Player: ilk çizim 1227x800 çerçeve 0,56 1227x690 orta=40,70,110,255 tuval=false renk=false glHata=0 kaynak=ImageFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=null
+11-08 21:36:09.925  4937 12261 I X5Player: yüzey bağlama 4271 ms (oluşturma 0 ms)
+11-08 21:36:17.425  4937  5063 I ScreenshotTest: ui_tablet_frame 1920x1600 varyans=4579
+11-08 21:36:21.024  4937  5063 I ScreenshotTest: ui_dark_home 320x640 varyans=3448
+11-08 21:36:23.444  4937  5063 I ScreenshotTest: ui_dark_album 320x640 varyans=1929
+11-08 21:36:25.787  4937  5063 I ScreenshotTest: ui_dark_settings 320x640 varyans=1677
+11-08 21:36:28.593  4937  5063 I ScreenshotTest: ui_dark_camera 320x640 varyans=1610
+11-08 21:36:29.067  4937 12397 I X5Player: kaynak açıldı: SideBySideFrameSource INSV360
+11-08 21:36:29.194  4937 12397 I X5Player: ilk kare: 0
+11-08 21:36:33.270  4937 12397 I X5Player: ilk çizim 320x616 çerçeve 0,148 320x320 orta=246,248,250,255 tuval=false renk=false glHata=0 kaynak=SideBySideFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=250.0, projection=WIDE) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=[0.9643174976801205, -0.25119846525754785, -0.08361276649054979, 0.2636087307273668, 0.8817504187417129, 0.39118619113297015, -0.024539778977352555, -0.39926874420754066, 0.9165054659666118]
+11-08 21:36:33.412  4937 12397 I X5Player: yüzey bağlama 4217 ms (oluşturma 78 ms)
+11-08 21:36:34.979  4937  5063 I ScreenshotTest: ui_viewer 320x640 varyans=5075
+11-08 21:36:35.441  4937 12425 I X5Player: kaynak açıldı: SideBySideFrameSource INSV360
+11-08 21:36:35.577  4937 12425 I X5Player: ilk kare: 0
+11-08 21:36:40.377  4937 12425 I X5Player: ilk çizim 320x218 çerçeve 0,19 320x180 orta=139,188,251,255 tuval=false renk=false glHata=0 kaynak=SideBySideFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=[0.9643174976801205, -0.25119846525754785, -0.08361276649054979, 0.2636087307273668, 0.8817504187417129, 0.39118619113297015, -0.024539778977352555, -0.39926874420754066, 0.9165054659666118]
+11-08 21:36:40.526  4937 12425 I X5Player: yüzey bağlama 4948 ms (oluşturma 68 ms)
+11-08 21:36:41.467  4937  5063 I ScreenshotTest: ui_dark_editor 320x640 varyans=3840
+11-08 21:36:43.876  4937  5063 I ScreenshotTest: ui_light_home 320x640 varyans=3899
+11-08 21:36:46.167  4937  5063 I ScreenshotTest: ui_light_album 320x640 varyans=1374
+11-08 21:36:48.511  4937  5063 I ScreenshotTest: ui_light_settings 320x640 varyans=1426
+11-08 21:36:51.332  4937  5063 I ScreenshotTest: ui_light_camera 320x640 varyans=1426
+11-08 21:36:51.781  4937 12518 I X5Player: kaynak açıldı: SideBySideFrameSource INSV360
+11-08 21:36:51.909  4937 12518 I X5Player: ilk kare: 0
+11-08 21:36:55.849  4937 12518 I X5Player: ilk çizim 320x218 çerçeve 0,19 320x180 orta=139,188,251,255 tuval=false renk=false glHata=0 kaynak=SideBySideFrameSource görünüm=ViewParams(yaw=0.0, pitch=0.0, roll=0.0, fov=90.0, projection=RECTILINEAR) bakış=FlatLook(fit=FIT, crop=CropRect(l=0.0, t=0.0, r=1.0, b=1.0), flipH=false, flipV=false, chroma=ChromaKey(on=false, color=-16731840, similarity=0.3, smooth=0.08, spill=0.6), chromaBg=BLACK, person=null) temel=[0.9643174976801205, -0.25119846525754785, -0.08361276649054979, 0.2636087307273668, 0.8817504187417129, 0.39118619113297015, -0.024539778977352555, -0.39926874420754066, 0.9165054659666118]
+11-08 21:36:55.899  4937 12518 I X5Player: yüzey bağlama 3989 ms (oluşturma 65 ms)
+11-08 21:36:57.651  4937  5063 I ScreenshotTest: ui_light_editor 320x640 varyans=8166
+11-08 21:37:49.042  4937  5063 I StitchTest: t=3800 ms bölge=790 maliyet 0.923 -> 0.600
+11-08 21:37:49.042  4937  5063 I StitchTest: delta=-1.0,-0.3,-0.3,-0.8,-1.4,-1.7,-1.3,-0.5,0.1,0.3,0.4,1.0,1.4,1.7,1.7,2.6,3.3,4.3,4.0,2.8,1.2,0.4,0.1,-0.1,-0.1,-0.2,-0.6,-0.3,0.8,2.5,4.3,5.0,4.6,3.2,2.3,2.3,2.8,2.9,2.6,2.5,1.7,0.6,-0.8,-1.5,-1.9,-2.1,-2.1,-1.6
+11-08 21:37:49.042  4937  5063 I StitchTest: gain=0.98,0.98,0.99,0.98,0.99,0.99,1.00,1.01,1.01,1.01,1.02,1.02,1.01,1.01,1.02,1.03,1.04,1.03,1.03,1.03,1.03,1.02,1.01,1.00,1.00,0.99,0.99,0.99,0.99,1.00,1.00,0.99,0.99,0.99,0.99,1.00,1.00,1.00,0.99,0.98,0.97,0.96,0.96,0.95,0.96,0.97,0.97,0.97
+11-08 21:37:49.042  4937  5063 I StitchTest: t=9600 ms bölge=746 maliyet 0.960 -> 0.649
+11-08 21:37:49.042  4937  5063 I StitchTest: delta=-2.0,-1.9,-1.7,-1.3,-0.5,0.2,0.7,0.5,0.0,-1.0,-1.1,-0.7,0.3,1.1,1.4,1.2,0.5,-0.3,-0.8,-0.8,0.2,1.3,1.2,0.9,0.8,0.3,-0.0,-0.5,-0.3,0.2,0.8,1.2,1.1,0.8,0.6,0.9,1.2,1.3,0.5,-0.8,-1.6,-1.3,0.2,1.6,1.4,-0.3,-1.6,-2.1
+11-08 21:37:49.042  4937  5063 I StitchTest: gain=1.08,1.07,1.06,1.06,1.07,1.08,1.09,1.08,1.09,1.09,1.09,1.10,1.10,1.11,1.12,1.12,1.11,1.11,1.10,1.09,1.10,1.09,1.08,1.06,1.06,1.06,1.05,1.05,1.05,1.06,1.06,1.07,1.07,1.08,1.08,1.10,1.11,1.12,1.13,1.14,1.13,1.12,1.11,1.11,1.09,1.09,1.09,1.08

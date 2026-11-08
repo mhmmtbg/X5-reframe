@@ -1,0 +1,136 @@
+— Açılış
+✓ düzenleyici açıldı
+✓ klip süresi ~8 sn  [8000000]
+✓ ses izi var
+  parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+— Oynat ve duraklat
+✓ oynatma ilerledi (1×)  [konum 1966666]
+✓ duraklat düğmesi
+  parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+— Hız 2×
+✓ parça hızı 2×  [2.0]
+✓ önizleme 2× hızlı  [1,5 sn'de konum 2133333]
+  parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+— Hız eğrisi ve ters
+✓ eğri Kahraman  [HERO]
+✓ eğri Özel  [CUSTOM]
+✓ ters açık
+✓ ters kapalı
+  parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+— Kes
+✓ başlangıç 1 sn  [1000000]
+✓ bitiş kısaldı  [7000000]
+✓ kesme sıfırlandı
+  parçalar: 1, toplam 8.0 sn, seçili 0: FLAT
+— Böl
+✓ parça bölündü  [1 → 2]
+  parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+— Geçiş
+✓ geçiş Çapraz  [DISSOLVE]
+  parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+— Anahtar kare
+✓ anahtar kare eklendi  [0 → 1]
+✓ anahtar kareler temizlendi  [0]
+  parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+— Görünüm
+✓ oran 9:16  [PORTRAIT]
+✓ yerleşim Doldur  [FILL]
+✓ yerleşim Bulanık  [BLUR]
+✓ yatay ayna
+✓ kırpma 1:1  [CropRect(l=0.21875, t=0.0, r=0.78125, b=1.0)]
+✓ döndürme  [roll 90.0]
+✓ yeşil ekran açık
+✓ kişi ayırma açık  [BLUR]
+✓ kişi ayırma kapalı  [null]
+  parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+— Renk
+✓ filtre Canlı  [VIVID]
+  parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+— Metin
+✓ metin katmanı eklendi  [[Merhaba]]
+✓ yazı tipi  [SERIF]
+✓ giriş animasyonu  [POP]
+  parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+— Şablon ve çıkartma
+✓ şablon katmanı  [2]
+✓ çıkartma eklendi
+✓ altyazı seçenekleri
+  parçalar: 2, toplam 8.0 sn, seçili 1: FLAT
+— Ses
+✓ gürültü azaltma
+✓ parça ses yükselmesi  [500000]
+✓ müzik vuruşları  [14]
+✓ müziği kıs
+✓ ritme göre böl  [2 → 5]
+  parçalar: 5, toplam 8.0 sn, seçili 1: FLAT
+— Sabitleme
+✓ hareket analizi
+✓ sabitleme açık  [SMOOTH]
+  parçalar: 5, toplam 8.0 sn, seçili 1: FLAT
+— Akıllı kadraj
+✓ akıllı kadraj bitti
+✓ kadraj anahtar kareleri  [2]
+✓ geri al  [LANDSCAPE]
+✓ yinele  [PORTRAIT]
+  parçalar: 5, toplam 8.0 sn, seçili 1: FLAT
+— Sessizlikleri kes
+✓ sessizlik çıkarıldı  [8000000 → 6650000]
+  parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+— Tam ekran
+✓ tam ekranda araçlar gizli
+✓ araçlar geri geldi
+  parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+— Dışa aktar MP4
+✓ MP4 dışa aktarım bitti  [Done(uri=content://media/external_primary/video/media/1000000050, videoSec=6.65, tookSec=68.927)]
+✓ MP4 dosyası geçerli  [süre 6033277]
+  parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+— Dışa aktar GIF
+✓ GIF oluştu  [Done(uri=content://media/external_primary/images/media/1000000053, videoSec=6.65, tookSec=32.121)]
+  parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+— Dışa aktar ses
+✓ M4A oluştu  [Done(uri=content://media/external_primary/audio/media/1000000056, videoSec=6.65, tookSec=0.968)]
+  parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+— Anlık görüntü
+✓ anlık görüntü kaydedildi  [Anlık görüntü kaydedildi · 640×360 · Resimler/X5Reframe]
+  parçalar: 5, toplam 6.7 sn, seçili 1: FLAT
+— Kare dondur
+✓ kare dondurma parça ekledi  [5 → 7]
+✓ dondurulmuş kare 2 sn
+  parçalar: 7, toplam 8.7 sn, seçili 2: IMAGE
+— Ana sayfa
+✓ son projeler / devam kartı
+— Proje menüsü
+✓ proje çoğaltıldı
+— Projeyi aç
+✓ proje düzenleyicide açıldı
+— Albüm
+✓ albüm açıldı
+— Ayarlar
+✓ ayarlar açıldı
+✓ önbellek satırı
+— Kamera ekranı
+— 360 açılış
+✓ 360 düzenleyici açıldı
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+— 360 görünüm
+✓ küçük gezegen  [ViewParams(yaw=0.0, pitch=-90.0, roll=0.0, fov=250.0, projection=WIDE)]
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+— 360 çoklu açı
+✓ yan yana düzen  [SIDE]
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+— 360 sabitleme
+✓ yön kilidi  [LOCK]
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+— 360 Derin takip
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+— 360 Dikiş
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+— 360 Yapay zekâ
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+— 360 Renk
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+— 360 oynat
+✓ 360 oynatma ilerledi  [2435766]
+  parçalar: 1, toplam 19.2 sn, seçili 0: INSV360
+
+SONUÇ: 0 sorun
