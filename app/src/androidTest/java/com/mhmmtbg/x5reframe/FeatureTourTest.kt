@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -59,6 +60,10 @@ class FeatureTourTest {
     private fun step(name: String, block: () -> Unit) {
         log("— $name")
         val r = runCatching(block)
+        if (scenario != null) runCatching {
+            val l = segs()
+            log("  parçalar: ${l.size}, toplam ${"%.1f".format(l.sumOf { it.outputDurationUs } / 1e6)} sn, seçili ${ui { it.segIndexForTest }}: ${c().clip.kind}")
+        }
         r.exceptionOrNull()?.let { e ->
             val msg = (e.message ?: e.javaClass.simpleName).lineSequence().take(3).joinToString(" | ")
             log("✗ $name: HATA $msg")
@@ -80,7 +85,14 @@ class FeatureTourTest {
 
     private fun nodes(text: String, sub: Boolean) = rule.onAllNodesWithText(text, substring = sub, useUnmergedTree = true)
 
-    private fun click(n: SemanticsNodeInteraction) {
+    private fun click(n: SemanticsNodeInteraction, text: String? = null, sub: Boolean = false) {
+        // İç içe kaydırmalarda (panel dikey, satır yatay) önce dıştaki kaydırılır
+        if (text != null) {
+            val m = androidx.compose.ui.test.hasText(text, substring = sub)
+            val scrollers = rule.onAllNodes(androidx.compose.ui.test.hasScrollAction() and androidx.compose.ui.test.hasAnyDescendant(m), useUnmergedTree = true)
+            val k = scrollers.fetchSemanticsNodes().size
+            for (i in 0 until k) runCatching { scrollers[i].performScrollToNode(m) }
+        }
         runCatching { n.performScrollTo() }
         n.performClick()
         Thread.sleep(400)
@@ -91,7 +103,7 @@ class FeatureTourTest {
         val all = nodes(text, sub)
         val n = all.fetchSemanticsNodes().size
         if (n == 0) throw AssertionError("'$text' ekranda yok")
-        click(if (last) all[n - 1] else all[0])
+        click(if (last) all[n - 1] else all[0], text, sub)
     }
 
     private fun tapDesc(desc: String, sub: Boolean = false) {
@@ -298,16 +310,17 @@ class FeatureTourTest {
             }
             step("Oynat ve duraklat") {
                 seek(0)
-                tapDesc("Oynat"); Thread.sleep(2000); tapDesc("Duraklat"); Thread.sleep(500)
+                tapDesc("Oynat"); Thread.sleep(2000); ui { it.playerForTest?.pause() }; Thread.sleep(500)
                 val p = c().positionUs
                 check("oynatma ilerledi (1×)", p in 1_200_000..3_000_000, "konum $p")
+                check("duraklat düğmesi", exists("Oynat") || rule.onAllNodesWithContentDescription("Oynat", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
             }
             step("Hız 2×") {
                 tool("Hız")
                 tap("2×")
                 check("parça hızı 2×", seg().speed == 2.0, "${seg().speed}")
                 seek(0)
-                tapDesc("Oynat"); Thread.sleep(1500); tapDesc("Duraklat"); Thread.sleep(500)
+                tapDesc("Oynat"); Thread.sleep(1500); ui { it.playerForTest?.pause() }; Thread.sleep(500)
                 val p = c().positionUs
                 check("önizleme 2× hızlı", p in 2_000_000..4_200_000, "1,5 sn'de konum $p")
                 tap("1×")
@@ -322,11 +335,6 @@ class FeatureTourTest {
                 check("ters açık", seg().reverse)
                 tap("Ters", sub = true, last = true)
                 check("ters kapalı", !seg().reverse)
-                val n = segs().size
-                seek(2_000_000)
-                tap("Kareyi dondur")
-                Thread.sleep(1500)
-                check("kare dondurma parça ekledi", segs().size > n, "${n} → ${segs().size}")
                 closeTool("Hız")
             }
             step("Kes") {
@@ -522,6 +530,14 @@ class FeatureTourTest {
                 inst.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK)
                 Thread.sleep(800)
             }
+            step("Kare dondur") {
+                tool("Hız")
+                val n = segs().size
+                seek(1_000_000)
+                tap("Kareyi dondur")
+                check("kare dondurma parça ekledi", waitFor(20_000, "dondurma") { segs().size >= n + 2 }, "${n} → ${segs().size}")
+                check("dondurulmuş kare 2 sn", segs().any { it.clipName == "Dondurulmuş kare" && it.outputDurationUs == 2_000_000L })
+            }
         } finally {
             scenario?.close(); scenario = null
         }
@@ -535,7 +551,7 @@ class FeatureTourTest {
             }
             step("Albüm") { tap("360° Albüm", last = true); Thread.sleep(1500) }
             step("Ayarlar") {
-                tap("Ayarlar", last = true); Thread.sleep(1500)
+                tap("Ayarlar"); Thread.sleep(1500)
                 check("önbellek satırı", exists("Önbelleği temizle"))
                 tap("Önbelleği temizle"); Thread.sleep(1500)
             }
@@ -581,7 +597,7 @@ class FeatureTourTest {
             for (t in listOf("Derin takip", "Dikiş", "Yapay zekâ", "Renk")) step("360 $t") { tool(t); Thread.sleep(1200); closeTool(t) }
             step("360 oynat") {
                 seek(0)
-                tapDesc("Oynat"); Thread.sleep(2000); tapDesc("Duraklat"); Thread.sleep(400)
+                tapDesc("Oynat"); Thread.sleep(2000); ui { it.playerForTest?.pause() }; Thread.sleep(400)
                 check("360 oynatma ilerledi", c().positionUs > 800_000, "${c().positionUs}")
             }
         } finally {

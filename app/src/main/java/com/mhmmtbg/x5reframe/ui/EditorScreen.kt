@@ -1219,7 +1219,7 @@ private fun SmartPanel(c: EditorController, a: EditorActions) {
         }
         Text("Sessizlikler", style = MaterialTheme.typography.titleSmall)
         ActionButton("Sessizlikleri kes", Modifier.fillMaxWidth()) { a.removeSilences() }
-        Text("Konuşmalı videolarda uzun duraklamaları çıkarır; parça sesli bölümlere bölünür.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+        Text("Konuşmalı videolarda uzun duraklamaları tüm projede çıkarır; parçalar sesli bölümlere bölünür.", color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
     }
 }
 
@@ -1782,6 +1782,8 @@ internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi)
                 ActionButton("Yeni dışa aktarım", Modifier.fillMaxWidth()) { c.exportUi = EditorController.ExportUi.Idle }
             }
             else -> {
+              // Ayarlar kayar, Başlat düğmesi hep görünür (küçük ekranda altta kalıp erişilemiyordu)
+              Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 if (c.exportUi is EditorController.ExportUi.Failed) {
                     Text("Olmadı: ${(c.exportUi as EditorController.ExportUi.Failed).message}", color = Palette.Error, style = MaterialTheme.typography.bodyMedium)
                 }
@@ -1838,6 +1840,7 @@ internal fun ExportSheet(c: EditorController, a: EditorActions, seq: SequenceUi)
                         Segmented(listOf(true, false), whole, { if (it) "Tüm proje (${seq.segments.size})" else "Bu parça" }, { whole = it }, Modifier.weight(1f))
                     }
                 }
+              }
                 Button(
                     onClick = { a.startExport(whole, format) }, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp), elevation = null,
                     shape = RoundedCornerShape(10.dp),

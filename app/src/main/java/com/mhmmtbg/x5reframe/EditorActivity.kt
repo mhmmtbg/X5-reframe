@@ -688,29 +688,39 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
 
     /** Sessiz aralıkları kesip at: parça konuşulan / sesli bölümlere bölünür. */
     private fun removeSilences(c: EditorController) {
-        val track = c.clip.audioTrack ?: run { c.say("Bu klipte ses yok", false); return }
         storeCurrentEdit()
-        val seg = segments.getOrNull(segIndex) ?: return
+        val snapshot = segments
+        c.autoTask = "Sessizlikler aranıyor…" to 0f
         Thread {
-            val wave = com.mhmmtbg.x5reframe.media.Waveform.compute(this, c.clip.uri, track)
-            runOnUiThread {
-                if (wave == null) { c.say("Ses okunamadı", false); return@runOnUiThread }
-                val sil = com.mhmmtbg.x5reframe.auto.FlatAuto.silences(wave, seg.edit.inUs, seg.edit.outUs)
-                if (sil.isEmpty()) { c.say("Kesilecek sessizlik bulunamadı"); return@runOnUiThread }
+            // Tüm projedeki sesli parçalar taranır (yalnız seçili parça değil)
+            var count = 0; var removed = 0L
+            val out = ArrayList<com.mhmmtbg.x5reframe.project.Segment>()
+            snapshot.forEachIndexed { i, seg ->
+                runOnUiThread { c.autoTask = "Sessizlikler aranıyor… ${i + 1}/${snapshot.size}" to (i.toFloat() / snapshot.size) }
+                val clip = runCatching { clipCache[seg.clipUri.toString()] ?: ClipInfo.load(this, seg.clipUri, seg.lrvUri).also { clipCache[seg.clipUri.toString()] = it } }.getOrNull()
+                val track = clip?.audioTrack
+                val wave = if (track != null && !clip.isImage && !seg.reverse) com.mhmmtbg.x5reframe.media.Waveform.compute(this, clip.uri, track) else null
+                val sil = wave?.let { com.mhmmtbg.x5reframe.auto.FlatAuto.silences(it, seg.edit.inUs, seg.edit.outUs) }.orEmpty()
+                if (sil.isEmpty()) { out += seg; return@forEachIndexed }
                 val keep = ArrayList<LongRange>()
                 var a = seg.edit.inUs
                 for (r in sil) { if (r.first - a >= 300_000) keep += a..r.first; a = r.last }
                 if (seg.edit.outUs - a >= 300_000) keep += a..seg.edit.outUs
-                val parts = keep.mapIndexed { k, r ->
+                if (keep.isEmpty()) { out += seg; return@forEachIndexed }
+                count += sil.size; removed += sil.sumOf { it.last - it.first }
+                keep.forEachIndexed { k, r ->
                     val e = seg.edit.copy(inUs = r.first, outUs = r.last)
-                    if (k == 0) seg.copy(edit = e, transitionOut = com.mhmmtbg.x5reframe.project.Transition.CUT)
+                    out += if (k == 0) seg.copy(edit = e, transitionOut = if (keep.size == 1) seg.transitionOut else com.mhmmtbg.x5reframe.project.Transition.CUT)
                     else store.newSegment(seg.clipUri, seg.clipName, seg.durationUs, seg.lrvUri, e)
                         .copy(speed = seg.speed, volume = seg.volume, transitionOut = if (k == keep.size - 1) seg.transitionOut else com.mhmmtbg.x5reframe.project.Transition.CUT)
                 }
-                val removed = sil.sumOf { it.last - it.first }
-                val list = segments.toMutableList().apply { removeAt(segIndex); addAll(segIndex, parts) }
-                updateSegments(list, segIndex, reopen = true)
-                c.say("${sil.size} sessizlik kesildi · ${"%.1f".format(removed / 1e6)} sn kısaldı")
+            }
+            runOnUiThread {
+                c.autoTask = null
+                if (segments !== snapshot) { c.say("Proje bu sırada değişti; yeniden dene", false); return@runOnUiThread }
+                if (count == 0) { c.say("Kesilecek sessizlik bulunamadı"); return@runOnUiThread }
+                updateSegments(out, segIndex.coerceAtMost(out.size - 1), reopen = true)
+                c.say("$count sessizlik kesildi · ${"%.1f".format(removed / 1e6)} sn kısaldı")
             }
         }.start()
     }
