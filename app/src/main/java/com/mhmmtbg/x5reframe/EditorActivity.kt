@@ -54,6 +54,13 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
     private var loaded by mutableStateOf(false)
     /** Test için: klip açıldı ve düzenleyici hazır. */
     val isLoadedForTest get() = loaded && loadError == null
+    // ---- Arayüz testleri için okuma noktaları ----
+    internal val controllerForTest get() = controller
+    internal val segmentsForTest get() = segments
+    internal val segIndexForTest get() = segIndex
+    internal val playerForTest get() = player
+    internal val audioForTest get() = projectAudio
+    internal fun setMusicForTest(uri: android.net.Uri) = setAudio(projectAudio.copy(musicUri = uri, musicName = "test"))
 
     /** Oynatıcı sayfası (albümden açılınca) ya da düzenleyici. */
     private var viewer by mutableStateOf(false)
