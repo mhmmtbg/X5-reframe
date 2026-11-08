@@ -49,6 +49,37 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
         set(v) { if (field != v) { field = v; invalidate() } }
     var inUs = 0L
         set(v) { if (field != v) { field = v; invalidate() } }
+
+    // ---- Oynatırken akıcı kayma: kareler arasında konum ekran yenilemesine göre tahmin edilir ----
+    private var animating = false
+    private var animBasePts = 0L
+    private var animBaseNs = 0L
+    private var animRate = 1.0
+
+    /** Oynatıcıdan gelen her karede çağrılır; [rate] işaretli (ters oynatmada eksi). */
+    fun playTick(us: Long, rate: Double) {
+        animBasePts = us; animBaseNs = System.nanoTime(); animRate = rate
+        if (!animating) { animating = true; positionUs = us; postOnAnimation(animTick) }
+    }
+
+    fun stopPlayback(us: Long? = null) {
+        animating = false
+        removeCallbacks(animTick)
+        if (us != null) positionUs = us
+    }
+
+    private val animTick = object : Runnable {
+        override fun run() {
+            if (!animating) return
+            // Kare gecikirse en fazla 120 ms ileri tahmin et (donan oynatıcıda kayma sürmesin)
+            val el = ((System.nanoTime() - animBaseNs) / 1000).coerceAtMost(120_000)
+            val pred = (animBasePts + (el * animRate).toLong()).coerceIn(0, durationUs)
+            // Geri sıçramayı önle (küçük tahmin hatalarında görüntü titremesin)
+            val back = if (animRate >= 0) positionUs - pred else pred - positionUs
+            if (back !in 1L..80_000L) positionUs = pred
+            postOnAnimation(this)
+        }
+    }
     var outUs = 1L
         set(v) { if (field != v) { field = v; invalidate() } }
     var keyframes: List<Long> = emptyList()
@@ -363,6 +394,7 @@ class TimelineView @JvmOverloads constructor(context: Context, attrs: AttributeS
             MotionEvent.ACTION_DOWN -> {
                 parent?.requestDisallowInterceptTouchEvent(true)
                 scroller.forceFinished(true)
+                stopPlayback()
                 val xi = xOf(inUs) - handleW / 2
                 val xo = xOf(outUs) + handleW / 2
                 val slop = 20 * dp

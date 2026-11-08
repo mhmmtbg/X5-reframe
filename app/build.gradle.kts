@@ -11,8 +11,8 @@ android {
         applicationId = "com.mhmmtbg.x5reframe"
         minSdk = 29
         targetSdk = 34
-        versionCode = 47
-        versionName = "4.0.0"
+        versionCode = 48
+        versionName = "4.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

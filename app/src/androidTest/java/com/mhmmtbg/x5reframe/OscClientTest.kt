@@ -94,6 +94,18 @@ class OscClientTest {
                     }
                 }
             }
+            method == "GET" && path.endsWith("/") && path.startsWith("/DCIM") -> {
+                // Kameranın web sunucusu gibi dizin listesi (tablo: ad, tarih, boyut / "directory")
+                fun row(name: String, size: String) = "<tr><td><a href=\"$name\">$name</a></td><td>2026-07-12 08:57</td><td>$size</td></tr>"
+                val rows = when (path) {
+                    "/DCIM/" -> row("Camera01/", "directory") + row("Camera02/", "directory") + row("fileinfo_list.list", "120")
+                    "/DCIM/Camera01/" -> files.entries.joinToString("") { (n, d) -> row(n, d.size.toString()) }
+                    "/DCIM/Camera02/" -> hidden.entries.joinToString("") { (n, d) -> row(n, "%.1fK".format(java.util.Locale.US, d.size / 1000.0)) }
+                    else -> ""
+                }
+                val b = "<html><body><table><thead><tr><th>Name</th><th>Date</th><th>Size</th></tr></thead><tbody>$rows</tbody></table></body></html>".toByteArray()
+                out.write("HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: ${b.size}\r\nConnection: close\r\n\r\n".toByteArray()); out.write(b)
+            }
             method == "HEAD" && path.startsWith("/DCIM/") -> {
                 val data = (files + hidden)[path.substringAfterLast('/')]
                 if (data == null) out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
@@ -168,8 +180,9 @@ class OscClientTest {
     /** Kameranın kendi kanalını (TCP 6666) taklit eden sunucu: eşitleme + dosya listesi (ileti kodu 13). */
     private fun fakeNative(uris: List<String>): ServerSocket {
         val ss = ServerSocket(0)
-        thread(isDaemon = true) {
+        thread(isDaemon = true) { while (!ss.isClosed) {
             val s = runCatching { ss.accept() }.getOrNull() ?: return@thread
+            thread(isDaemon = true) {
             val inp = s.getInputStream(); val out = s.getOutputStream()
             fun send(p: ByteArray) { val n = p.size + 4; out.write(byteArrayOf(n.toByte(), (n shr 8).toByte(), 0, 0)); out.write(p); out.flush() }
             runCatching {
@@ -191,6 +204,7 @@ class OscClientTest {
                 }
             }
         }
+        } }
         return ss
     }
 
@@ -199,6 +213,9 @@ class OscClientTest {
         val uris = files.keys.filter { !it.startsWith("LRV") }.map { "/DCIM/Camera01/$it" } +
             listOf("/DCIM/Camera02/VID_20260712_085744_00_031.insv", "/DCIM/Camera02/IMG_20260712_090000_00_032.insp")
         val ns = fakeNative(uris)
+        // Kanal kendi başına çalışıyor mu (hata ayrıntısı için doğrudan)
+        val direct = runCatching { com.mhmmtbg.x5reframe.camera.InstaClient("127.0.0.1", ns.localPort).open().use { it.listFiles() } }
+        android.util.Log.i("OscClientTest", "6666 doğrudan: ${direct.exceptionOrNull()?.let { it.javaClass.simpleName + ": " + it.message } ?: direct.getOrNull()?.size}")
         val r = com.mhmmtbg.x5reframe.camera.CameraLister.listAll(client(),
             { com.mhmmtbg.x5reframe.camera.InstaClient("127.0.0.1", ns.localPort).open() }, "http://127.0.0.1:${server.localPort}", null)
         ns.close()
@@ -209,6 +226,20 @@ class OscClientTest {
         assertTrue("foto yok", "IMG_20260712_090000_00_032.insp" in names)
         assertEquals(4000L, r.files.first { it.name == "VID_20260712_085744_00_031.insv" }.size)
         assertEquals("2026:07:12 08:57:44", r.files.first { it.name.startsWith("VID_20260712") }.date)
+    }
+
+    /** Kameranın web sunucusundaki dizin listesi: alt klasörler ve LRV dahil her dosya, tam boyutlarıyla. */
+    @Test
+    fun listsEverythingThroughDirectoryListing() {
+        val r = com.mhmmtbg.x5reframe.camera.CameraLister.listAll(null, null, "http://127.0.0.1:${server.localPort}", null)
+        val names = r.files.map { it.name }.toSet()
+        android.util.Log.i("OscClientTest", "dizin: ${r.source} $names")
+        assertEquals("dizin", r.source)
+        assertEquals(6, names.size)
+        assertTrue("LRV_20260712_085744_01_031.lrv" in names && "IMG_20260712_090000_00_032.insp" in names)
+        assertFalse("fileinfo_list.list" in names)
+        assertEquals(4000L, r.files.first { it.name == "VID_20260712_085744_00_031.insv" }.size)
+        assertEquals(300_000L, r.files.first { it.name == "VID_20260926_141617_00_142.insv" }.size)
     }
 
     @Test

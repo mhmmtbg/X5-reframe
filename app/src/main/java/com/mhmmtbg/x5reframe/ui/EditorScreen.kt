@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
@@ -71,6 +72,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.drawscope.clipRect
+import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.viewinterop.AndroidView
 import com.mhmmtbg.x5reframe.model.Aspect
 import com.mhmmtbg.x5reframe.model.ViewParams
@@ -112,6 +115,8 @@ class EditorActions(
     val redraw: () -> Unit = {},
     val importLut: () -> Unit = {},
     val lutFiles: () -> List<java.io.File> = { emptyList() },
+    /** O anki kareyi verilen renk ayarlarıyla küçük çiz (filtre / LUT önizlemeleri). */
+    val renderVariants: (List<FloatArray?>, (List<androidx.compose.ui.graphics.ImageBitmap>) -> Unit) -> Unit = { _, _ -> },
     /** Normal video: görüntüden hareket analizi (sabitleme için). */
     val analyzeFlatStab: () -> Unit = {},
     /** Otomatik altyazı: kullanılabilir yöntemler (kimlik, açıklama) ve başlatma. */
@@ -157,7 +162,8 @@ fun EditorScreen(
     var showExportInit = startTool == "EXPORT"
     LaunchedEffect(tool) {
         c.layerTool = tool == Tool.LAYER
-        val canvas = (tool == Tool.FRAME || tool == Tool.SMART) && !c.clip.is360 && c.state.layout.count <= 1
+        // Kadraj ayarlanırken (araç açık ya da parmakla yakınlaştırırken) çerçevenin etrafı da görünsün
+        val canvas = (tool == Tool.FRAME || tool == Tool.SMART || tool == Tool.KEYFRAME) && !c.clip.is360 && c.state.layout.count <= 1
         if (canvas != c.canvasMode) { c.canvasMode = canvas; actions.redraw() }
     }
     LaunchedEffect(c.openToolRequest) {
@@ -168,22 +174,11 @@ fun EditorScreen(
     val s = c.state
 
     com.mhmmtbg.x5reframe.ui.theme.ThemedSystemBars()
-    Column(Modifier.fillMaxSize().background(Palette.Background)) {
-        TopBar(c, actions, onExport = { showExport = true })
-        val ex = c.exportUi
-        if (ex is EditorController.ExportUi.Running) {
-            LinearProgressIndicator(
-                progress = { ex.fraction },
-                modifier = Modifier.fillMaxWidth().height(3.dp),
-                color = Palette.Accent, trackColor = Palette.SurfaceHigh,
-            )
-        }
+    var fullscreen by rememberSaveable { mutableStateOf(false) }
 
-        // Önizleme
-        BoxWithConstraints(
-            Modifier.weight(1f).fillMaxWidth().background(Color.Black),
-            contentAlignment = Alignment.Center,
-        ) {
+    // ---- Parçalar (telefon ve tablet düzeninde aynı) ----
+    val preview: @Composable (Modifier) -> Unit = { mod ->
+        BoxWithConstraints(mod.fillMaxWidth().background(Color.Black), contentAlignment = Alignment.Center) {
             val ratio = s.aspect.w.toFloat() / s.aspect.h
             val fr = FrameGeometry.frameRect(maxWidth.value, maxHeight.value, ratio, c.canvasMode)
             val w = fr[2].dp
@@ -206,10 +201,8 @@ fun EditorScreen(
             FeedbackPill(c, Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
             ViewHud(c, Modifier.align(Alignment.BottomStart).padding(10.dp))
         }
-
-        Transport(c, actions)
-        SequenceStrip(seq)
-
+    }
+    val timeline: @Composable () -> Unit = {
         // Ortası sabit, kayan zaman çizelgesi
         AndroidView(
             factory = timelineFactory,
@@ -233,35 +226,83 @@ fun EditorScreen(
                 if (!c.playing) t.positionUs = c.positionUs
             },
         )
-        QuickBar(c, seq) { tool = it }
-
-        val open = tool
-        if (open != null && open != Tool.SNAPSHOT) {
-            Box(
-                Modifier.fillMaxWidth().heightIn(min = 120.dp, max = 230.dp).background(Palette.Surface)
-                    .verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)
-            ) {
-                when (open) {
-                    Tool.FRAME -> if (c.clip.is360) FramePanel(c) else FlatFramePanel(c)
-                    Tool.TRIM -> TrimPanel(c)
-                    Tool.SMART -> SmartPanel(c, actions)
-                    Tool.SPEED -> SpeedPanel(c, seq)
-                    Tool.STAB -> if (c.clip.is360) StabPanel(c) else FlatStabPanel(c, actions)
-                    Tool.MULTI -> MultiPanel(c)
-                    Tool.LAYER -> LayerPanel(c, actions)
-                    Tool.AUTO -> AutoPanel(c, actions)
-                    Tool.AUDIO -> AudioPanel(c, actions, seq)
-                    Tool.KEYFRAME -> KeyframePanel(c, actions)
-                    Tool.STITCH -> StitchPanel(c, actions)
-                    Tool.COLOR -> ColorPanel(c, actions, seq)
-                    Tool.AI -> AiPanel(c, actions)
-                    Tool.SNAPSHOT -> {}
-                }
+    }
+    val tools = if (c.clip.is360) Tool.values().toList() else FLAT_TOOLS
+    val selectTool: (Tool) -> Unit = { t ->
+        if (t == Tool.SNAPSHOT) actions.snapshot()
+        else tool = if (tool == t) null else t
+    }
+    val panel: @Composable (Tool, Modifier) -> Unit = { open, mod ->
+        Box(mod.fillMaxWidth().background(Palette.Surface).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 12.dp)) {
+            when (open) {
+                Tool.FRAME -> if (c.clip.is360) FramePanel(c) else FlatFramePanel(c)
+                Tool.TRIM -> TrimPanel(c)
+                Tool.SMART -> SmartPanel(c, actions)
+                Tool.SPEED -> SpeedPanel(c, seq)
+                Tool.STAB -> if (c.clip.is360) StabPanel(c) else FlatStabPanel(c, actions)
+                Tool.MULTI -> MultiPanel(c)
+                Tool.LAYER -> LayerPanel(c, actions)
+                Tool.AUTO -> AutoPanel(c, actions)
+                Tool.AUDIO -> AudioPanel(c, actions, seq)
+                Tool.KEYFRAME -> KeyframePanel(c, actions)
+                Tool.STITCH -> StitchPanel(c, actions)
+                Tool.COLOR -> ColorPanel(c, actions, seq)
+                Tool.AI -> AiPanel(c, actions)
+                Tool.SNAPSHOT -> {}
             }
         }
-        ToolBar(tool, if (c.clip.is360) Tool.values().toList() else FLAT_TOOLS) { t ->
-            if (t == Tool.SNAPSHOT) actions.snapshot()
-            else tool = if (tool == t) null else t
+    }
+    val transport: @Composable () -> Unit = { Transport(c, actions, fullscreen) { fullscreen = !fullscreen } }
+
+    BoxWithConstraints(Modifier.fillMaxSize().background(Palette.Background)) {
+        val wide = maxWidth >= 600.dp && maxWidth > maxHeight
+        val totalH = maxHeight
+        Column(Modifier.fillMaxSize()) {
+            if (!fullscreen) TopBar(c, actions, onExport = { showExport = true })
+            val ex = c.exportUi
+            if (ex is EditorController.ExportUi.Running) {
+                LinearProgressIndicator(
+                    progress = { ex.fraction },
+                    modifier = Modifier.fillMaxWidth().height(3.dp),
+                    color = Palette.Accent, trackColor = Palette.SurfaceHigh,
+                )
+            }
+            val open = tool?.takeIf { it != Tool.SNAPSHOT }
+            if (wide) {
+                // Tablet / yatay: solda büyük önizleme, sağda araçlar; zaman çizelgesi altta
+                Row(Modifier.weight(1f).fillMaxWidth()) {
+                    Column(Modifier.weight(1f).fillMaxHeight()) {
+                        preview(Modifier.weight(1f))
+                        transport()
+                    }
+                    if (!fullscreen) {
+                        Box(Modifier.width(1.dp).fillMaxHeight().background(Palette.Outline))
+                        Column(Modifier.width((maxWidth * 0.36f).coerceIn(300.dp, 460.dp)).fillMaxHeight().background(Palette.Surface)) {
+                            ToolBar(open, tools, navPadding = false, onSelect = selectTool)
+                            if (open != null) panel(open, Modifier.weight(1f))
+                            else ToolGrid(tools, selectTool, Modifier.weight(1f))
+                        }
+                    }
+                }
+                if (!fullscreen) {
+                    SequenceStrip(seq)
+                    timeline()
+                    QuickBar(c, seq) { tool = it }
+                    Spacer(Modifier.navigationBarsPadding())
+                }
+            } else {
+                preview(Modifier.weight(1f))
+                transport()
+                if (!fullscreen) {
+                    // Küçük ekranda bazı panellerde zaman çizelgesi gizlenir ki önizleme küçülmesin
+                    val needsTimeline = open == null || open in TIMELINE_TOOLS || totalH >= 760.dp
+                    if (open == null) SequenceStrip(seq)
+                    if (needsTimeline) timeline()
+                    if (open == null) QuickBar(c, seq) { tool = it }
+                    else panel(open, Modifier.height((totalH * 0.3f).coerceIn(150.dp, 340.dp)))
+                    ToolBar(open, tools, onSelect = selectTool)
+                } else Spacer(Modifier.navigationBarsPadding())
+            }
         }
     }
 
@@ -348,16 +389,19 @@ private fun ViewHud(c: EditorController, modifier: Modifier) {
     )
 }
 
+/** Zaman çizelgesi gerektiren araçlar (küçük ekranda panel açıkken bile çizelge görünür). */
+private val TIMELINE_TOOLS = setOf(Tool.TRIM, Tool.KEYFRAME, Tool.LAYER, Tool.AUDIO, Tool.AUTO)
+
 @Composable
-private fun Transport(c: EditorController, a: EditorActions) {
+private fun Transport(c: EditorController, a: EditorActions, fullscreen: Boolean, toggleFullscreen: () -> Unit) {
     Row(
-        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+        Modifier.fillMaxWidth().background(Palette.Background).padding(horizontal = 6.dp, vertical = 2.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             "${fmt(c.positionUs)} / ${fmt(c.clip.durationUs)}",
             fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, color = Palette.Muted,
-            modifier = Modifier.weight(1f), maxLines = 1, softWrap = false,
+            modifier = Modifier.weight(1f).padding(start = 6.dp), maxLines = 1, softWrap = false, overflow = TextOverflow.Clip,
         )
         IconButton(onClick = { c.previousKeyframeTime()?.let(a.seek) }, enabled = c.previousKeyframeTime() != null) {
             Icon(Glyphs.PrevKey, "Önceki anahtar kare", tint = if (c.previousKeyframeTime() != null) Palette.Text else Palette.Disabled)
@@ -365,38 +409,66 @@ private fun Transport(c: EditorController, a: EditorActions) {
         IconButton(onClick = { a.step(false) }) { Icon(Glyphs.FrameBack, "Bir kare geri", tint = Palette.Text) }
         FilledIconButton(
             onClick = a.playPause,
-            modifier = Modifier.size(52.dp),
+            modifier = Modifier.size(44.dp),
             colors = IconButtonDefaults.filledIconButtonColors(containerColor = Palette.Text, contentColor = Palette.Background),
         ) { Icon(if (c.playing) Glyphs.Pause else Glyphs.Play, if (c.playing) "Duraklat" else "Oynat") }
         IconButton(onClick = { a.step(true) }) { Icon(Glyphs.FrameFwd, "Bir kare ileri", tint = Palette.Text) }
         IconButton(onClick = { c.nextKeyframeTime()?.let(a.seek) }, enabled = c.nextKeyframeTime() != null) {
             Icon(Glyphs.NextKey, "Sonraki anahtar kare", tint = if (c.nextKeyframeTime() != null) Palette.Text else Palette.Disabled)
         }
-        Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End) {
             IconButton(onClick = { c.previewMuted = !c.previewMuted; a.setMuted(c.previewMuted) }) {
                 Icon(if (c.previewMuted) Glyphs.VolumeOff else Glyphs.VolumeOn, "Önizleme sesi", tint = Palette.Muted)
+            }
+            IconButton(onClick = toggleFullscreen) {
+                Icon(if (fullscreen) Glyphs.FullscreenExit else Glyphs.Fullscreen, if (fullscreen) "Tam ekrandan çık" else "Önizlemeyi büyüt", tint = Palette.Muted)
             }
         }
     }
 }
 
 @Composable
-private fun ToolBar(selected: Tool?, tools: List<Tool>, onSelect: (Tool) -> Unit) {
+private fun ToolBar(selected: Tool?, tools: List<Tool>, navPadding: Boolean = true, onSelect: (Tool) -> Unit) {
     Box(Modifier.fillMaxWidth().height(1.dp).background(Palette.Outline))
     Row(
         Modifier.fillMaxWidth().background(Palette.Background).horizontalScroll(rememberScrollState())
-            .navigationBarsPadding().padding(horizontal = 6.dp, vertical = 6.dp),
+            .then(if (navPadding) Modifier.navigationBarsPadding() else Modifier).padding(horizontal = 4.dp, vertical = 4.dp),
     ) {
         tools.forEach { t ->
             val on = t == selected
             Column(
-                Modifier.width(72.dp).clip(RoundedCornerShape(10.dp)).clickable { onSelect(t) }.padding(vertical = 8.dp),
+                Modifier.width(66.dp).clip(RoundedCornerShape(10.dp)).clickable { onSelect(t) }
+                    .background(if (on) Palette.SurfaceHigh else Color.Transparent).padding(vertical = 6.dp)
+                    .semantics { this.selected = on; role = androidx.compose.ui.semantics.Role.Tab },
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
-                Icon(t.icon, null, Modifier.size(24.dp), tint = if (on) Palette.AccentText else Palette.Text)
-                Spacer(Modifier.height(4.dp))
+                Icon(t.icon, null, Modifier.size(22.dp), tint = if (on) Palette.AccentText else Palette.Text)
+                Spacer(Modifier.height(3.dp))
                 Text(t.label, color = if (on) Palette.AccentText else Palette.Muted, style = MaterialTheme.typography.labelSmall,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
+    }
+}
+
+/** Tablet: araç seçilmemişken sağ bölmede büyük araç kutucukları. */
+@Composable
+private fun ToolGrid(tools: List<Tool>, onSelect: (Tool) -> Unit, modifier: Modifier) {
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("Araçlar", style = MaterialTheme.typography.titleSmall, modifier = Modifier.padding(start = 4.dp, bottom = 4.dp))
+        tools.chunked(3).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                row.forEach { t ->
+                    Column(
+                        Modifier.weight(1f).height(84.dp).clip(RoundedCornerShape(12.dp)).background(Palette.SurfaceHigh).clickable { onSelect(t) }.padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+                    ) {
+                        Icon(t.icon, null, Modifier.size(26.dp), tint = Palette.Text)
+                        Spacer(Modifier.height(6.dp))
+                        Text(t.label, style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
             }
         }
     }
@@ -577,11 +649,26 @@ private fun ColorPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
         Segmented(listOf(0, 1, 2, 3, 4), tab, { listOf("Filtre", "Işık", "Efekt", "Eğri", "HSL")[it] }, { tab = it }, Modifier.fillMaxWidth())
         when (tab) {
             0 -> {
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    com.mhmmtbg.x5reframe.model.ColorGrade.Filter.values().forEach { f ->
-                        Chip(f.label, f == g.filter) { c.setColor(g.copy(filter = f, filterStrength = 1f)); c.say("Filtre: ${f.label}") }
+                // Her filtre o anki karenin üstünde küçük önizleme olarak gösterilir
+                val filters = com.mhmmtbg.x5reframe.model.ColorGrade.Filter.values().toList()
+                val luts = a.lutFiles()
+                var thumbs by remember { mutableStateOf<List<androidx.compose.ui.graphics.ImageBitmap>>(emptyList()) }
+                val base = g.copy(filter = com.mhmmtbg.x5reframe.model.ColorGrade.Filter.NONE, filterStrength = 1f, lut = null)
+                LaunchedEffect(base, c.positionUs, luts.size, c.playing) {
+                    if (c.playing) return@LaunchedEffect
+                    delay(200)
+                    val variants = filters.map { f -> base.copy(filter = f, filterStrength = 1f).uniforms() } +
+                        luts.map { lf -> base.copy(lut = lf.absolutePath, lutStrength = 1f).uniforms() }
+                    a.renderVariants(variants) { thumbs = it }
+                }
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    filters.forEachIndexed { i, f ->
+                        PreviewTile(f.label, thumbs.getOrNull(i), f == g.filter && g.lut == null) {
+                            c.setColor(g.copy(filter = f, filterStrength = 1f, lut = null)); c.say("Filtre: ${f.label}")
+                        }
                     }
                 }
+                Text(g.filter.desc, color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
                 if (g.filter != com.mhmmtbg.x5reframe.model.ColorGrade.Filter.NONE) {
                     LabeledRow("Şiddet") {
                         Slider(
@@ -592,12 +679,14 @@ private fun ColorPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
                         Text("%${(g.filterStrength * 100).toInt()}", style = MaterialTheme.typography.labelMedium, modifier = Modifier.width(44.dp))
                     }
                 }
-                Text("LUT (.cube)", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
-                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Chip("Yok", g.lut == null) { c.setColor(g.copy(lut = null)) }
-                    a.lutFiles().forEach { f ->
-                        Chip(f.nameWithoutExtension, g.lut == f.absolutePath) { c.setColor(g.copy(lut = f.absolutePath, lutStrength = 1f)); c.say("LUT: ${f.nameWithoutExtension}") }
+                Text("LUT (.cube) — renk tablosu; profesyonel renk görünümleri", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    luts.forEachIndexed { i, f ->
+                        PreviewTile(f.nameWithoutExtension, thumbs.getOrNull(filters.size + i), g.lut == f.absolutePath) {
+                            c.setColor(g.copy(lut = f.absolutePath, lutStrength = 1f)); c.say("LUT: ${f.nameWithoutExtension}")
+                        }
                     }
+                    if (g.lut != null) Chip("LUT'u kaldır", false) { c.setColor(g.copy(lut = null)) }
                     Chip("+ İçe aktar", false) { a.importLut() }
                 }
                 if (g.lut != null) {
@@ -648,6 +737,25 @@ private fun ColorPanel(c: EditorController, a: EditorActions, seq: SequenceUi) {
             if (seq.segments.size > 1) ActionButton("Tüm parçalara uygula", Modifier.weight(1f)) { seq.applyColorToAll(g); c.say("Renk ${seq.segments.size} parçaya uygulandı") }
             if (!g.isIdentity) ActionButton("Sıfırla", Modifier.weight(0.6f)) { c.setColor(com.mhmmtbg.x5reframe.model.ColorGrade()); c.say("Renk sıfırlandı") }
         }
+    }
+}
+
+/** Seçenek kutucuğu: üstte o anki karenin bu seçenekle önizlemesi, altta adı. */
+@Composable
+private fun PreviewTile(label: String, image: androidx.compose.ui.graphics.ImageBitmap?, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier.width(72.dp).clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick)
+            .semantics { this.selected = selected; role = androidx.compose.ui.semantics.Role.Tab },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier.size(72.dp, 54.dp).clip(RoundedCornerShape(8.dp)).background(Palette.SurfaceHigh)
+                .border(if (selected) 2.dp else 1.dp, if (selected) Palette.Accent else Palette.Outline, RoundedCornerShape(8.dp)),
+        ) {
+            if (image != null) androidx.compose.foundation.Image(image, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+        }
+        Text(label, style = MaterialTheme.typography.labelSmall, color = if (selected) Palette.AccentText else Palette.Text,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 3.dp))
     }
 }
 
@@ -880,12 +988,28 @@ private fun FlatFramePanel(c: EditorController) {
     val s = c.state
     val v = c.currentView
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Önizlemedeki çizgilerin anlamı
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(Modifier.size(14.dp, 3.dp).background(Color.White))
+            Text("çıktı çerçevesi", color = Palette.Muted, style = MaterialTheme.typography.labelSmall)
+            Spacer(Modifier.width(8.dp))
+            Box(Modifier.size(14.dp, 3.dp).background(Color(0xFF3D6DF2)))
+            Text("videonun sınırı", color = Palette.Muted, style = MaterialTheme.typography.labelSmall)
+        }
         LabeledRow("Oran") {
             Segmented(Aspect.values().filter { it != Aspect.PANO }, s.aspect, { it.label }, { c.commit(s.copy(aspect = it)); c.say("Oran ${it.label}") }, Modifier.weight(1f))
         }
-        LabeledRow("Yerleşim") {
-            Segmented(com.mhmmtbg.x5reframe.model.FrameFit.values().toList(), s.fit, { it.label }, { c.commit(s.copy(fit = it)); c.say(it.label) }, Modifier.weight(1f))
+        Text("Yerleşim", color = Palette.Muted, style = MaterialTheme.typography.labelMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            com.mhmmtbg.x5reframe.model.FrameFit.values().forEach { f ->
+                FitTile(f, s.aspect.w.toFloat() / s.aspect.h, c.clip.displayAspect, f == s.fit) { c.commit(s.copy(fit = f)); c.say(f.label) }
+            }
         }
+        Text(when (s.fit) {
+            com.mhmmtbg.x5reframe.model.FrameFit.FIT -> "Sığdır: videonun tamamı görünür, boşluklar siyah kalır."
+            com.mhmmtbg.x5reframe.model.FrameFit.FILL -> "Doldur: çerçeve tamamen dolar, taşan kenarlar kesilir."
+            else -> "Bulanık arka plan: video tam görünür, boşluklar videonun bulanık hâliyle dolar."
+        }, color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
         val zoom = com.mhmmtbg.x5reframe.gl.ReframeProgram.flatZoom(v)
         LabeledRow("Yakınlaştır ${"%.1f".format(zoom)}×") {
             Slider(
@@ -930,6 +1054,39 @@ private fun FlatFramePanel(c: EditorController) {
         Segmented(personOpts, s.personBg, { it?.label ?: "Kapalı" }, { b -> c.commit(s.copy(personBg = b)); c.say(if (b == null) "Kişi ayırma kapalı" else "Arka plan: ${b.label}") }, Modifier.fillMaxWidth())
         if (s.personBg != null) Text("Cihaz içi yapay zekâ ile kişi algılanır (internet gerekmez). Önizleme oynarken her 3 karede bir güncellenir; dışa aktarımda her kare işlenir.",
             color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+/** Yerleşim seçeneğinin küçük çizimi: çerçeve (beyaz) içinde videonun nasıl durduğu. */
+@Composable
+private fun FitTile(fit: com.mhmmtbg.x5reframe.model.FrameFit, outAspect: Float, srcAspect: Float, selected: Boolean, onClick: () -> Unit) {
+    Column(
+        Modifier.clip(RoundedCornerShape(8.dp)).clickable(onClick = onClick).semantics { this.selected = selected; role = androidx.compose.ui.semantics.Role.Tab },
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        androidx.compose.foundation.Canvas(
+            Modifier.size(76.dp, 56.dp).clip(RoundedCornerShape(8.dp)).background(Palette.SurfaceHigh)
+                .border(if (selected) 2.dp else 1.dp, if (selected) Palette.Accent else Palette.Outline, RoundedCornerShape(8.dp)),
+        ) {
+            val pad = 8.dp.toPx()
+            val aw = size.width - 2 * pad; val ah = size.height - 2 * pad
+            // Çerçeve
+            var fw = aw; var fh = aw / outAspect
+            if (fh > ah) { fh = ah; fw = ah * outAspect }
+            val fx = (size.width - fw) / 2; val fy = (size.height - fh) / 2
+            // Video
+            val fitScale = minOf(fw / srcAspect, fh) ; val fillScale = maxOf(fw / srcAspect, fh)
+            val vh = if (fit == com.mhmmtbg.x5reframe.model.FrameFit.FILL) fillScale else fitScale
+            val vw = vh * srcAspect
+            clipRect(fx, fy, fx + fw, fy + fh) {
+                if (fit == com.mhmmtbg.x5reframe.model.FrameFit.BLUR) drawRect(Color(0xFF4A5B7A), androidx.compose.ui.geometry.Offset(fx, fy), androidx.compose.ui.geometry.Size(fw, fh))
+                drawRect(Color(0xFF3D6DF2), androidx.compose.ui.geometry.Offset(fx + (fw - vw) / 2, fy + (fh - vh) / 2), androidx.compose.ui.geometry.Size(vw, vh))
+                // Videoda basit bir manzara: güneş
+                drawCircle(Color(0xFFFFD43B), radius = vh * 0.14f, center = androidx.compose.ui.geometry.Offset(fx + fw / 2 + vw * 0.2f, fy + fh / 2 - vh * 0.15f))
+            }
+            drawRect(Color.White, androidx.compose.ui.geometry.Offset(fx, fy), androidx.compose.ui.geometry.Size(fw, fh), style = androidx.compose.ui.graphics.drawscope.Stroke(1.5.dp.toPx()))
+        }
+        Text(fit.label, style = MaterialTheme.typography.labelSmall, color = if (selected) Palette.AccentText else Palette.Text, modifier = Modifier.padding(top = 3.dp))
     }
 }
 

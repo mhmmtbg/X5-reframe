@@ -51,6 +51,16 @@ class HttpRangeSource(private val url: String, private val network: Network?, kn
         private fun open(url: String, network: Network?) = (network?.openConnection(URL(url)) ?: URL(url).openConnection()) as HttpURLConnection
 
         /** Dosya boyu (bulunamazsa -1). */
+        /** Küçük bir metin sayfası (dizin listesi) indir. */
+        fun getText(url: String, network: Network?): String {
+            val c = open(url, network)
+            c.connectTimeout = 4000; c.readTimeout = 8000
+            try {
+                if (c.responseCode !in 200..299) throw java.io.IOException("HTTP ${c.responseCode}")
+                return c.inputStream.use { it.readBytes() }.toString(Charsets.UTF_8)
+            } finally { c.disconnect() }
+        }
+
         fun head(url: String, network: Network?): Long {
             val c = open(url, network)
             return try {

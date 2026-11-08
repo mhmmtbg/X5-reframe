@@ -15,6 +15,7 @@ import android.view.WindowManager
 import androidx.activity.compose.setContent
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -1409,6 +1410,11 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         deepTrack = { c.trackTarget?.let { startDeepTrack(c, c.positionUs, c.currentView, it) } },
         resumeTrack = { c.trackResume?.let { (t, box) -> c.positionUs = t; player?.seekTo(t); startDeepTrack(c, t, c.activeViewAt(t), box) } },
         requestHistogram = { player?.requestHistogram { h -> controller?.histogram = h } },
+        renderVariants = { colors, done ->
+            val asp = c.state.aspect.let { it.w.toFloat() / it.h }
+            val w = 144; val h = (144 / asp).toInt().coerceIn(48, 256) / 2 * 2
+            player?.renderVariants(colors, w, h) { list -> done(list.map { b -> b.asImageBitmap() }) } ?: Unit
+        },
         toggleVoice = { toggleVoice() },
         smartReframe = { asp -> smartReframe(c, asp) },
         removeSilences = { removeSilences(c) },
@@ -1594,7 +1600,7 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
                 player?.seekTo(us)
             }
             private var peeked = false
-            override fun onScrubStart() { userScrubbing = true; player?.pause() }
+            override fun onScrubStart() { userScrubbing = true; timelineView?.stopPlayback(); player?.pause() }
             override fun onScrubEnd() {
                 userScrubbing = false
                 controller?.endTrimDrag()
@@ -1687,9 +1693,13 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         }
     }
 
+    private var lastFramePosUs = -1L
+
     override fun onPosition(us: Long) {
         if (userScrubbing) return
-        timelineView?.positionUs = us
+        lastFramePosUs = us
+        val p = player
+        if (p != null && p.playing) timelineView?.playTick(us, p.signedRate) else timelineView?.positionUs = us
         val c = controller ?: return
         maybeAdvance(c, us)
         c.recordSample(us)
@@ -1704,7 +1714,10 @@ class EditorActivity : AppCompatActivity(), Player.Listener {
         controller?.playing = playing
         if (!playing && controller?.recording == true) stopRecording()
         // Durunca konumu tam kareye eşitle
-        if (!playing) timelineView?.positionUs?.let { controller?.positionUs = it }
+        if (!playing) {
+            timelineView?.stopPlayback(lastFramePosUs.takeIf { it >= 0 })
+            timelineView?.positionUs?.let { controller?.positionUs = it }
+        }
         syncMusic(playing)
     }
 

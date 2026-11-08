@@ -183,13 +183,18 @@ class FlatMediaTest {
             p.attachSurface(reader.surface, 320, 240)
             Thread.sleep(800)
             p.seekTo(startUs)
-            Thread.sleep(700)
+            // Aramanın bitmesini bekle (emülatör yavaş olabilir)
+            val deadline = System.currentTimeMillis() + 5000
+            while (kotlin.math.abs(pos.get() - startUs) > 100_000 && System.currentTimeMillis() < deadline) Thread.sleep(50)
             val a = pos.get()
+            val t0 = System.nanoTime()
             p.play()
             Thread.sleep(ms)
             p.pause()
-            Thread.sleep(200)
+            val wall = (System.nanoTime() - t0) / 1000
+            Thread.sleep(300)
             val b = pos.get()
+            android.util.Log.i("FlatMediaTest", "hız $rate ters=$reverse: $a -> $b (${b - a} µs, duvar $wall µs) hata='$errors'")
             p.release(); Thread.sleep(200); reader.close(); rt.quitSafely()
             assertTrue("oynatıcı hatası: $errors", errors.isEmpty())
             return a to b

@@ -17,9 +17,16 @@ import java.util.UUID
  * Parçalar arası geçiş. [shader] 0 olanlar örtüşmesiz (kesme, siyaha geçiş); diğerlerinde iki parça
  * [OVERLAP_US] boyunca üst üste biner ve birlikte çizilir.
  */
-enum class Transition(val label: String, val shader: Int = 0) {
-    CUT("Kesme"), FADE("Siyaha geçiş"), DISSOLVE("Çapraz geçiş", 1), SLIDE("Kaydır", 2), SLIDE_UP("Yukarı kaydır", 3),
-    WIPE("Silme", 4), ZOOM("Yakınlaş", 5), CIRCLE("Daire", 6), BLUR("Bulanık", 7);
+enum class Transition(val label: String, val shader: Int = 0, val desc: String = "") {
+    CUT("Kesme", 0, "Geçiş yok: sonraki parça hemen başlar."),
+    FADE("Siyaha geçiş", 0, "Görüntü siyaha kararır, sonraki parça siyahtan açılır."),
+    DISSOLVE("Çapraz geçiş", 1, "İki parça 0,6 sn boyunca birbirine karışır."),
+    SLIDE("Kaydır", 2, "Yeni parça sağdan gelip eskisini sola iter."),
+    SLIDE_UP("Yukarı kaydır", 3, "Yeni parça alttan gelip eskisini yukarı iter."),
+    WIPE("Silme", 4, "Yumuşak kenarlı bir çizgi soldan sağa geçip görüntüyü değiştirir."),
+    ZOOM("Yakınlaş", 5, "Eski parça büyüyerek söner, yeni parça içinden belirir."),
+    CIRCLE("Daire", 6, "Yeni parça ortadan büyüyen bir daire içinde açılır."),
+    BLUR("Bulanık", 7, "Görüntü bulanıklaşır, netleşirken yeni parçaya geçer.");
 
     val overlaps: Boolean get() = shader != 0
 

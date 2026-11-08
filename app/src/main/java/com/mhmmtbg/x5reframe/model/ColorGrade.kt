@@ -100,18 +100,18 @@ data class ColorGrade(
         val split: FloatArray = FloatArray(6), val splitAmount: Float = 0f,
     )
 
-    enum class Filter(val label: String, val preset: Preset) {
-        NONE("Orijinal", Preset()),
-        VIVID("Canlı", Preset(contrast = 0.15f, vibrance = 0.45f, saturation = 0.1f)),
+    enum class Filter(val label: String, val preset: Preset, val desc: String) {
+        NONE("Orijinal", Preset(), "Renk değişikliği yok."),
+        VIVID("Canlı", Preset(contrast = 0.15f, vibrance = 0.45f, saturation = 0.1f), "Soluk renkleri canlandırır, kontrastı biraz artırır; doğa ve gökyüzü için."),
         CINEMA("Sinema", Preset(contrast = 0.2f, saturation = -0.1f, highlights = -0.2f, shadows = 0.1f,
-            split = floatArrayOf(-0.04f, 0.02f, 0.06f, 0.06f, 0.02f, -0.04f), splitAmount = 1f)),
-        WARM("Sıcak", Preset(temperature = 0.35f, vibrance = 0.15f, highlights = -0.1f)),
-        COOL("Soğuk", Preset(temperature = -0.35f, tint = -0.05f, contrast = 0.05f)),
+            split = floatArrayOf(-0.04f, 0.02f, 0.06f, 0.06f, 0.02f, -0.04f), splitAmount = 1f), "Gölgeler camgöbeği, açık tonlar turuncu; film havası."),
+        WARM("Sıcak", Preset(temperature = 0.35f, vibrance = 0.15f, highlights = -0.1f), "Sarı-turuncuya kaydırır; gün ışığı ve ten için."),
+        COOL("Soğuk", Preset(temperature = -0.35f, tint = -0.05f, contrast = 0.05f), "Maviye kaydırır; kar, deniz ve şehir için."),
         SUNSET("Gün batımı", Preset(temperature = 0.5f, tint = 0.1f, saturation = 0.15f, shadows = 0.1f,
-            split = floatArrayOf(0.02f, -0.02f, 0.05f, 0.07f, 0.03f, -0.03f), splitAmount = 1f)),
-        FADED("Solgun", Preset(contrast = -0.15f, saturation = -0.25f, fade = 0.35f)),
-        MONO("Siyah beyaz", Preset(saturation = -1f, contrast = 0.2f)),
-        NIGHT("Gece", Preset(exposure = 0.3f, shadows = 0.35f, highlights = -0.25f, temperature = -0.15f, saturation = -0.1f)),
+            split = floatArrayOf(0.02f, -0.02f, 0.05f, 0.07f, 0.03f, -0.03f), splitAmount = 1f), "Altın saat tonları: sıcak, pembe-turuncu."),
+        FADED("Solgun", Preset(contrast = -0.15f, saturation = -0.25f, fade = 0.35f), "Siyahlar griye açılır, renkler yumuşar; eski fotoğraf havası."),
+        MONO("Siyah beyaz", Preset(saturation = -1f, contrast = 0.2f), "Renkleri kaldırır, kontrastı artırır."),
+        NIGHT("Gece", Preset(exposure = 0.3f, shadows = 0.35f, highlights = -0.25f, temperature = -0.15f, saturation = -0.1f), "Karanlık sahneleri aydınlatır, ışıkların patlamasını önler."),
     }
 }
 

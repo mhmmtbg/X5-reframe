@@ -29,6 +29,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.foundation.layout.size
 import com.mhmmtbg.x5reframe.project.Segment
 import com.mhmmtbg.x5reframe.project.Transition
 import com.mhmmtbg.x5reframe.ui.theme.Palette
@@ -70,7 +73,8 @@ fun SequenceStrip(seq: SequenceUi) {
         itemsIndexed(seq.segments, key = { _, s -> s.id }) { i, seg ->
             var menu by remember { mutableStateOf(false) }
             val selected = i == seq.current
-            Box {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Box {
                 Column(
                     Modifier.width(92.dp).height(44.dp)
                         .background(if (selected) Palette.SurfaceHigh else Palette.Surface, RoundedCornerShape(8.dp))
@@ -102,23 +106,28 @@ fun SequenceStrip(seq: SequenceUi) {
                             onClick = { menu = false; seq.setSpeed(i, sp) },
                         )
                     }
-                    if (i < seq.segments.size - 1) {
-                        HorizontalDivider(color = Palette.Outline)
-                        Transition.values().forEach { tr ->
-                            DropdownMenuItem(
-                                text = { Text("Sonraki geçiş: ${tr.label}" + if (tr == seg.transitionOut) "  ✓" else "") },
-                                onClick = { menu = false; seq.setTransition(i, tr) },
-                            )
-                        }
-                    }
                     HorizontalDivider(color = Palette.Outline)
                     DropdownMenuItem(text = { Text("Sil", color = Palette.Error) }, onClick = { menu = false; seq.delete(i) })
                 }
+              }
+            if (i < seq.segments.size - 1) {
+                // Parçalar arasındaki geçiş düğmesi: dokununca canlandırmalı seçici açılır
+                var picker by remember { mutableStateOf(false) }
+                val on = seg.transitionOut != Transition.CUT
+                Box(
+                    Modifier.padding(start = 6.dp).size(28.dp, 28.dp)
+                        .background(if (on) Palette.Accent else Palette.SurfaceHigh, RoundedCornerShape(6.dp))
+                        .combinedClickable(onClick = { picker = true })
+                        .semantics { contentDescription = "Geçiş: ${seg.transitionOut.label}. Değiştirmek için dokun." },
+                    contentAlignment = Alignment.Center,
+                ) { Text(if (on) "◐" else "|", color = if (on) Palette.OnAccent else Palette.Muted, style = MaterialTheme.typography.labelMedium) }
+                if (picker) TransitionPicker(seg.transitionOut, { picker = false }) { tr -> picker = false; seq.setTransition(i, tr) }
+            }
             }
         }
         item {
             Box(
-                Modifier.width(52.dp).height(44.dp).border(1.dp, Palette.Outline, RoundedCornerShape(8.dp))
+                Modifier.width(56.dp).height(44.dp).border(1.dp, Palette.Outline, RoundedCornerShape(8.dp))
                     .background(Color.Transparent).combinedClickable(onClick = seq.add),
                 contentAlignment = Alignment.Center,
             ) { Text("+ Klip", style = MaterialTheme.typography.labelMedium, color = Palette.AccentText) }

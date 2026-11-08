@@ -91,6 +91,8 @@ class Player(
 
     @Volatile var playing = false
         private set
+    /** Oynatma hızı, işaretli (ters oynatmada eksi); zaman çizelgesi kaymasını tahmin etmek için. */
+    val signedRate: Double get() = if (reverseProvider()) -rate else rate
     private var playStartNs = 0L
     private var playStartPts = 0L
     val stats = FrameStats()
@@ -172,6 +174,7 @@ class Player(
         }
         playing = true
         rate = rateProvider(source.currentPts).coerceIn(0.05, 16.0)
+        android.util.Log.i("X5Player", "oynat pts=${source.currentPts} hız=$rate ters=${reverseProvider()}")
         anchor(source.currentPts)
         revTarget = -1
         stats.pause()
@@ -220,9 +223,12 @@ class Player(
         val target = pendingSeek
         if (target < 0 || released || !::source.isInitialized) return@Runnable
         pendingSeek = -1
+        val t0 = System.nanoTime()
         try {
             if (kotlin.math.abs(target - source.currentPts) > 1_000_000) program.resetStitch()
             val pts = source.seekAndShow(target, frameDurUs)
+            val ms = (System.nanoTime() - t0) / 1_000_000
+            if (ms > 300 || pts < 0) android.util.Log.i("X5Player", "arama $target → $pts, $ms ms")
             drawNow()
             if (pts >= 0) postPosition(pts)
             if (playing) {
@@ -239,10 +245,26 @@ class Player(
      * ses konumu; yoksa duvar saati. Her ikisi de sürekli ilerler, sıçramaz.
      */
     private fun clockUs(): Long {
-        if (audioActive && rate == 1.0) audio?.positionUs()?.let { return it }
         val el = (System.nanoTime() - playStartNs) / 1000
         return if (reverseProvider()) playStartPts - (el * rate).toLong() else playStartPts + (el * rate).toLong()
     }
+
+    /**
+     * Saati sese yumuşakça yaklaştır: ses saati ilk anlarda gecikmeli başlar ve sıçramalıdır;
+     * doğrudan kullanmak görüntüde takılma yaratır. Büyük farkta (ses yeniden başladıysa) bir kerede eşitlenir.
+     */
+    private fun syncToAudio() {
+        if (!audioActive || reverseProvider()) return
+        val a = audio?.positionUs() ?: return
+        val err = a - clockUs()
+        if (kotlin.math.abs(err) > 400_000) return // ses henüz oturmadı / yeniden başlıyor
+        playStartPts += err / 8
+    }
+
+    private var loopFrames = 0
+    /** Oynatırken karenin ekranda görüneceği an (System.nanoTime); 0 = hemen. */
+    private var presentAtNs = 0L
+    private var lastLogNs = 0L
 
     /** Hız eğrisinde hız değiştikçe saati yeni hıza bağla (sıçrama olmadan). */
     private fun updateRate(pts: Long) {
@@ -295,11 +317,20 @@ class Player(
                     skipped++
                     stats.frameDropped()
                 }
-                if (pts < 0) { stopAtEnd(); return }
-                // Karenin zamanı gelene kadar bekle (erken çözüldüyse).
-                val waitUs = pts - clockUs()
-                if (waitUs > 1000) Thread.sleep((waitUs / 1000).coerceAtMost(100), ((waitUs % 1000) * 1000).toInt())
+                if (pts < 0) { android.util.Log.i("X5Player", "akış sonu"); stopAtEnd(); return }
+                syncToAudio()
+                if (++loopFrames % 60 == 0 || System.nanoTime() - lastLogNs > 3_000_000_000L) {
+                    lastLogNs = System.nanoTime()
+                    android.util.Log.i("X5Player", "oynatma pts=$pts saat=${clockUs()} hız=$rate atlanan=$skipped")
+                }
+                // Karenin zamanı gelene kadar bekle (erken çözüldüyse). Son ~8 ms beklenmez: kare, gösterileceği
+                // an (sunum zamanı) bildirilerek ekrana verilir; ekran yenilemesine denk gelir, titreme olmaz.
+                val waitUs = ((pts - clockUs()) / rate).toLong()
+                val sleepUs = waitUs - 8_000
+                if (sleepUs > 1000) Thread.sleep((sleepUs / 1000).coerceAtMost(100), ((sleepUs % 1000) * 1000).toInt())
+                presentAtNs = System.nanoTime() + ((pts - clockUs()) / rate * 1000).toLong().coerceIn(0, 40_000_000)
                 drawNow()
+                presentAtNs = 0L
                 stats.frameShown()
                 postPosition(pts)
                 updateRate(pts)
@@ -338,6 +369,8 @@ class Player(
         val layers = layersProvider()
         overlay?.retain(layers)
         overlay?.draw(fw, fh, layers, t, outProvider(), fx, fy)
+        // Zaman damgası pencerede kalıcıdır: dururken "şimdi" verilir ki eski bir zaman kalmasın
+        runCatching { egl.setPresentationTime(window, if (presentAtNs > 0) presentAtNs else System.nanoTime()) }
         egl.swap(window)
     }
 
@@ -390,6 +423,35 @@ class Player(
             }
             main.post { onReady(hist) }
         }
+    }
+
+    /**
+     * O anki kareyi her renk ayarıyla ayrı ayrı küçük çizer (filtre / LUT önizlemeleri).
+     * Kadraj, yerleşim ve katmanlar o anki haliyle; yalnızca renk değişir.
+     */
+    fun renderVariants(colors: List<FloatArray?>, w: Int, h: Int, onReady: (List<android.graphics.Bitmap>) -> Unit) = handler.post {
+        if (released || !::source.isInitialized || !source.hasFrame) return@post
+        runCatching {
+            val pb = egl.createPbuffer(w, h)
+            egl.makeCurrent(pb)
+            program.look = lookProvider()
+            val t = source.currentPts
+            val buf = java.nio.ByteBuffer.allocateDirect(w * h * 4).order(java.nio.ByteOrder.nativeOrder())
+            val out = colors.map { col ->
+                program.color = col
+                program.drawScene(w, h, layoutProvider(), sceneProvider(t), source, baseProvider(t))
+                buf.rewind()
+                GLES30.glReadPixels(0, 0, w, h, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, buf)
+                buf.rewind()
+                val bmp = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+                bmp.copyPixelsFromBuffer(buf)
+                android.graphics.Bitmap.createBitmap(bmp, 0, 0, w, h, android.graphics.Matrix().apply { preScale(1f, -1f) }, false).also { bmp.recycle() }
+            }
+            program.color = colorProvider()
+            if (window != EGL14.EGL_NO_SURFACE) egl.makeCurrent(window) else egl.makeNothingCurrent()
+            egl.releaseSurface(pb)
+            main.post { onReady(out) }
+        }.onFailure { android.util.Log.w("X5Player", "önizleme çizilemedi: ${it.message}") }
     }
 
     /** O anki kareden küçük resim üretir (proje listesi için). */

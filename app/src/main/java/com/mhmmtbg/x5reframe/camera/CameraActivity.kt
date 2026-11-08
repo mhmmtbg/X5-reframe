@@ -208,7 +208,10 @@ class CameraActivity : AppCompatActivity() {
     }
 
     /** LRV'ler ayrı gösterilmez: her çekimin yanında indirilir (hızlı önizleme). */
-    private fun shots(): List<CamFile> = files.filter { !it.isLrv }.sortedByDescending { it.date }
+    private fun allShots(): List<CamFile> = files.filter { !it.isLrv }.sortedByDescending { it.date }
+    /** Üstteki sekme: 0 tümü, 1 video, 2 fotoğraf. */
+    private var kindTab by mutableStateOf(0)
+    private fun shots(): List<CamFile> = allShots().filter { f -> when (kindTab) { 1 -> f.isVideo; 2 -> f.isPhoto; else -> true } }
     private fun lrvFor(f: CamFile): CamFile? = files.firstOrNull { it.isLrv && it.shotKey == f.shotKey }
 
     private fun startDownload(list: List<CamFile>) {
@@ -251,7 +254,7 @@ class CameraActivity : AppCompatActivity() {
                         Text(listOfNotNull(
                             if (s.battery >= 0) "Pil %${(s.battery * 100).toInt()}" else null,
                             when (s.card) { "pass" -> "SD kart hazır"; "noCard" -> "SD kart yok"; "noSpace" -> "SD kart dolu"; "" -> null; else -> "SD: ${s.card}" },
-                            if (files.isNotEmpty()) "${shots().size} medya" else null,
+                            if (files.isNotEmpty()) "${allShots().size} medya" else null,
                         ).joinToString(" · "), color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
                     }
                 }
@@ -279,7 +282,7 @@ class CameraActivity : AppCompatActivity() {
                     }
                     Phase.READY -> {
                         val list = shots()
-                        if (list.isEmpty()) Text("Kamerada çekim yok.", color = Palette.Muted, modifier = Modifier.align(Alignment.Center))
+                        if (allShots().isEmpty()) Text("Kamerada çekim yok.", color = Palette.Muted, modifier = Modifier.align(Alignment.Center))
                         else androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
                         // Telefonda 3, tablette daha çok sütun
                         val cols = (maxWidth.value / 130f).toInt().coerceIn(3, 8)
@@ -289,8 +292,20 @@ class CameraActivity : AppCompatActivity() {
                             horizontalArrangement = Arrangement.spacedBy(2.dp), verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
                             item(span = { GridItemSpan(maxLineSpan) }) {
-                                Text("Dokun: önizle (indirmeden) · Uzun bas: seç ve telefona aktar", color = Palette.Muted,
-                                    style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp))
+                                Column {
+                                    // Insta360 albümündeki gibi tür sekmeleri
+                                    val all = allShots()
+                                    Row(Modifier.padding(horizontal = 12.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                                        listOf("Tümü" to all.size, "Video" to all.count { it.isVideo }, "Fotoğraf" to all.count { it.isPhoto }).forEachIndexed { k, (label, n) ->
+                                            Column(Modifier.clickable { kindTab = k }.padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text("$label $n", style = MaterialTheme.typography.titleSmall, color = if (kindTab == k) Palette.Text else Palette.Muted)
+                                                Box(Modifier.padding(top = 4.dp).width(28.dp).height(3.dp).background(if (kindTab == k) Palette.Accent else Color.Transparent, RoundedCornerShape(2.dp)))
+                                            }
+                                        }
+                                    }
+                                    Text("Dokun: önizle (indirmeden) · Uzun bas: seç ve telefona aktar", color = Palette.Muted,
+                                        style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp))
+                                }
                             }
                             groups.forEach { (day, dayList) ->
                             if (day.isNotEmpty()) item(span = { GridItemSpan(maxLineSpan) }, key = "d$day") {
@@ -312,7 +327,7 @@ class CameraActivity : AppCompatActivity() {
                             }
                             }
                             item(span = { GridItemSpan(maxLineSpan) }) {
-                                Text("${list.size} medya" + if (listSource == "osc") " · kameranın tam listesi alınamadı (OSC)" else "",
+                                Text("${list.size} medya" + when (listSource) { "osc" -> " · kameranın tam listesi alınamadı (yalnız OSC)"; "dizin" -> " · SD kart klasörlerinden"; else -> "" },
                                     color = Palette.Muted, style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                     modifier = Modifier.fillMaxWidth().padding(18.dp))
                             }
@@ -418,8 +433,7 @@ class CameraActivity : AppCompatActivity() {
             else Text(f.name, color = Palette.Muted, style = MaterialTheme.typography.labelSmall, maxLines = 3,
                 overflow = TextOverflow.Ellipsis, modifier = Modifier.align(Alignment.Center).padding(6.dp))
             // Alt şerit: tür simgesi, 360 rozeti, süre
-            Row(Modifier.align(Alignment.BottomEnd).fillMaxWidth().background(
-                androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color.Transparent, Color(0x99000000)))).padding(horizontal = 6.dp, vertical = 4.dp),
+            Row(Modifier.align(Alignment.BottomEnd).fillMaxWidth().background(Color(0x73000000)).padding(horizontal = 6.dp, vertical = 3.dp),
                 horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                 if (f.isVideo) Icon(Glyphs.Video, null, Modifier.size(14.dp), tint = Color.White)
                 if (is360) Text("360", color = Color.White, style = MaterialTheme.typography.labelSmall,

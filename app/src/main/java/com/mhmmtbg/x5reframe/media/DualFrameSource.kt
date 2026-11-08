@@ -39,8 +39,19 @@ class TrackDecoder(fd: FileDescriptor, track: Int, private val surface: Surface,
         if (toneMapToSdr && android.os.Build.VERSION.SDK_INT >= 33) {
             format.setInteger(MediaFormat.KEY_COLOR_TRANSFER_REQUEST, MediaFormat.COLOR_TRANSFER_SDR_VIDEO)
         }
-        codec = createCodec(format)
-        codec.configure(format, surface, null, 0)
+        // Hız: çoğu donanım kod çözücüsü saatini kare hızına göre ayarlar. Dışa aktarımda en yüksek hızı,
+        // önizlemede (hızlandırılmış oynatma için) 2 katı payı iste; desteklemeyen kod çözücüde ayarsız aç.
+        format.setInteger(MediaFormat.KEY_OPERATING_RATE, if (realtime) 120 else Short.MAX_VALUE.toInt())
+        var c = createCodec(format)
+        try {
+            c.configure(format, surface, null, 0)
+        } catch (e: Exception) {
+            runCatching { c.release() }
+            format.removeKey(MediaFormat.KEY_OPERATING_RATE)
+            c = createCodec(format)
+            c.configure(format, surface, null, 0)
+        }
+        codec = c
         codec.start()
     }
 
@@ -62,20 +73,22 @@ class TrackDecoder(fd: FileDescriptor, track: Int, private val surface: Surface,
                 android.util.Log.e("TrackDecoder", "12 sn çıktı yok (giriş bitti=$inputEos, son pts=$lastPts)")
                 throw IllegalStateException("Video çözücü yanıt vermiyor")
             }
-            if (!inputEos) {
-                val ii = codec.dequeueInputBuffer(1000)
-                if (ii >= 0) {
-                    val buf = codec.getInputBuffer(ii)!!
-                    val n = extractor.readSampleData(buf, 0)
-                    if (n < 0) {
-                        codec.queueInputBuffer(ii, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                        inputEos = true
-                    } else {
-                        codec.queueInputBuffer(ii, 0, n, extractor.sampleTime, 0)
-                        extractor.advance()
-                        queuedInput = true
-                    }
+            // Boş giriş tamponlarının hepsini doldur: kod çözücü önden çalışsın, çıktı beklerken boşta kalmasın
+            var fed = 0
+            while (!inputEos && fed < 8) {
+                val ii = codec.dequeueInputBuffer(if (fed == 0) 1000 else 0)
+                if (ii < 0) break
+                val buf = codec.getInputBuffer(ii)!!
+                val n = extractor.readSampleData(buf, 0)
+                if (n < 0) {
+                    codec.queueInputBuffer(ii, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    inputEos = true
+                } else {
+                    codec.queueInputBuffer(ii, 0, n, extractor.sampleTime, 0)
+                    extractor.advance()
+                    queuedInput = true
                 }
+                fed++
             }
             val oi = codec.dequeueOutputBuffer(info, 2000)
             if (oi == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {

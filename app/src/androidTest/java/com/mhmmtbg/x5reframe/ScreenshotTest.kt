@@ -72,14 +72,26 @@ class ScreenshotTest {
         p.color = android.graphics.Color.rgb(240, 180, 60); cv.drawCircle(700f, 180f, 90f, p)
         p.color = android.graphics.Color.rgb(30, 120, 70); cv.drawRect(0f, 380f, 960f, 540f, p)
         img.outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        for (tool in listOf("COLOR", "SPEED", "SMART", "LAYER", "AUDIO", "FRAME", "EXPORT")) {
-            val i = Intent(ctx, EditorActivity::class.java).setData(Uri.fromFile(img)).putExtra(EditorActivity.EXTRA_TOOL, tool)
-            ActivityScenario.launch<EditorActivity>(i).use {
-                Thread.sleep(3500)
-                shot("ui_tool_" + tool.lowercase())
+        fun sh(cmd: String) = inst.uiAutomation.executeShellCommand(cmd).use { android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes() }
+        // Telefon (1080×2340) ve tablet (2560×1600, yatay) ekran boyutlarında
+        try {
+            for ((dev, size, dpi) in listOf(Triple("phone", "1080x2340", 420), Triple("tablet", "2560x1600", 320))) {
+                sh("wm size $size"); sh("wm density $dpi")
+                Thread.sleep(1500)
+                val tools = if (dev == "phone") listOf("NONE", "COLOR", "SPEED", "SMART", "LAYER", "AUDIO", "FRAME", "EXPORT") else listOf("NONE", "COLOR", "FRAME")
+                for (tool in tools) {
+                    val i = Intent(ctx, EditorActivity::class.java).setData(Uri.fromFile(img))
+                    if (tool != "NONE") i.putExtra(EditorActivity.EXTRA_TOOL, tool)
+                    ActivityScenario.launch<EditorActivity>(i).use {
+                        Thread.sleep(3500)
+                        shot("ui_${dev}_" + tool.lowercase())
+                    }
+                }
             }
+        } finally {
+            sh("wm size reset"); sh("wm density reset")
+            inst.runOnMainSync { com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(ctx, com.mhmmtbg.x5reframe.ui.theme.ThemeMode.SYSTEM) }
         }
-        inst.runOnMainSync { com.mhmmtbg.x5reframe.ui.theme.ThemeMode.set(ctx, com.mhmmtbg.x5reframe.ui.theme.ThemeMode.SYSTEM) }
     }
 
     private fun shot(name: String): Bitmap {
