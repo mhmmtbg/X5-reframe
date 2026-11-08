@@ -1,0 +1,80 @@
+To honour the JVM settings for this build a single-use Daemon process will be forked. For more on this, please refer to https://docs.gradle.org/8.9/userguide/gradle_daemon.html#sec:disabling_the_daemon in the Gradle documentation.
+Daemon will be stopped at the end of the build 
+> Task :app:buildKotlinToolingMetadata
+> Task :app:checkKotlinGradlePluginConfigurationErrors
+> Task :app:preBuild UP-TO-DATE
+> Task :app:preReleaseBuild UP-TO-DATE
+> Task :app:generateReleaseResValues
+> Task :app:checkReleaseAarMetadata
+> Task :app:mapReleaseSourceSetPaths
+> Task :app:generateReleaseResources
+> Task :app:packageReleaseResources
+> Task :app:mergeReleaseResources
+> Task :app:createReleaseCompatibleScreenManifests
+> Task :app:extractDeepLinksRelease
+> Task :app:parseReleaseLocalResources
+> Task :app:processReleaseMainManifest
+> Task :app:processReleaseManifest
+> Task :app:processReleaseManifestForPackage
+> Task :app:javaPreCompileRelease
+> Task :app:preReleaseUnitTestBuild UP-TO-DATE
+> Task :app:javaPreCompileReleaseUnitTest
+> Task :app:extractProguardFiles
+> Task :app:mergeReleaseJniLibFolders
+> Task :app:desugarReleaseFileDependencies
+> Task :app:mergeReleaseStartupProfile
+> Task :app:mergeReleaseNativeLibs
+> Task :app:checkReleaseDuplicateClasses
+> Task :app:processReleaseResources
+> Task :app:mergeReleaseArtProfile
+
+> Task :app:stripReleaseDebugSymbols
+Unable to strip the following libraries, packaging them as they are: libface_detector_v2_jni.so, libmlkitcommonpipeline.so, libxeno_native.so.
+
+> Task :app:extractReleaseNativeSymbolTables
+> Task :app:mergeReleaseNativeDebugMetadata NO-SOURCE
+> Task :app:mergeReleaseShaders
+> Task :app:compileReleaseShaders NO-SOURCE
+> Task :app:generateReleaseAssets UP-TO-DATE
+> Task :app:mergeReleaseAssets
+> Task :app:extractReleaseVersionControlInfo
+> Task :app:compressReleaseAssets
+> Task :app:collectReleaseDependencies
+> Task :app:sdkReleaseDependencyData
+> Task :app:validateSigningRelease
+> Task :app:writeReleaseAppMetadata
+> Task :app:optimizeReleaseResources
+> Task :app:writeReleaseSigningConfigVersions
+> Task :app:mergeExtDexRelease
+> Task :app:compileReleaseKotlin
+w: file:///home/runner/work/X5-reframe/X5-reframe/app/src/main/java/com/mhmmtbg/x5reframe/insv/MediaProbe.kt:32:100 Parameter 'd' is never used, could be renamed to _
+w: file:///home/runner/work/X5-reframe/X5-reframe/app/src/main/java/com/mhmmtbg/x5reframe/media/AudioMix.kt:198:88 Name shadowed: n
+w: file:///home/runner/work/X5-reframe/X5-reframe/app/src/main/java/com/mhmmtbg/x5reframe/media/Exporter.kt:498:9 Parameter 'win' is never used
+w: file:///home/runner/work/X5-reframe/X5-reframe/app/src/main/java/com/mhmmtbg/x5reframe/media/Exporter.kt:498:41 Parameter 'egl' is never used
+w: file:///home/runner/work/X5-reframe/X5-reframe/app/src/main/java/com/mhmmtbg/x5reframe/ui/TimelineView.kt:538:85 'obtain(Int, Float, Float, Float): AccessibilityNodeInfo.RangeInfo!' is deprecated. Deprecated in Java
+w: file:///home/runner/work/X5-reframe/X5-reframe/app/src/main/java/com/mhmmtbg/x5reframe/ui/ViewerScreen.kt:210:85 Unnecessary safe call on a non-null receiver of type (() -> Unit)?
+
+> Task :app:compileReleaseJavaWithJavac NO-SOURCE
+> Task :app:processReleaseJavaRes
+> Task :app:bundleReleaseClassesToRuntimeJar
+> Task :app:bundleReleaseClassesToCompileJar
+> Task :app:generateReleaseLintVitalReportModel
+> Task :app:compileReleaseUnitTestKotlin
+> Task :app:dexBuilderRelease
+> Task :app:compileReleaseUnitTestJavaWithJavac NO-SOURCE
+> Task :app:processReleaseUnitTestJavaRes
+> Task :app:testReleaseUnitTest
+> Task :app:mergeReleaseGlobalSynthetics
+> Task :app:mergeReleaseJavaResource
+> Task :app:mergeDexRelease
+> Task :app:compileReleaseArtProfile
+> Task :app:packageRelease
+> Task :app:createReleaseApkListingFileRedirect
+> Task :app:lintVitalAnalyzeRelease
+> Task :app:lintVitalReportRelease
+> Task :app:lintVitalRelease
+> Task :app:assembleRelease
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/build-1794172462307.json
+
+BUILD SUCCESSFUL in 2m 30s
+55 actionable tasks: 55 executed

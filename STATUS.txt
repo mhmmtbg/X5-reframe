@@ -1,0 +1,9 @@
+commit=91e2b19b5c5c2ac5185a896d2d1d14857a624d13
+result=success
+total 70712
+drwxr-xr-x 3 runner runner     4096 Nov  8 21:16 .
+drwxr-xr-x 3 runner runner     4096 Nov  8 21:16 ..
+-rw-r--r-- 1 runner runner 72391870 Nov  8 21:16 app-release.apk
+drwxr-xr-x 4 runner runner     4096 Nov  8 21:16 baselineProfiles
+-rw-r--r-- 1 runner runner      712 Nov  8 21:16 output-metadata.json
+Sun Nov  8 21:16:52 UTC 2026
