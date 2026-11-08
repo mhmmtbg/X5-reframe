@@ -117,9 +117,20 @@ class Player(
                 android.util.Log.i("X5Player", "ilk kare: ${source.currentPts}")
                 drawNow()
                 postPosition(source.currentPts)
+                if (!source.poll()) handler.postDelayed(waitReady, 100)
             } catch (t: Throwable) {
                 error(t)
             }
+        }
+    }
+
+    /** Fotoğraf dokusu geç geldiyse gelince yeniden çiz (en fazla ~15 sn dene). */
+    private var readyTries = 0
+    private val waitReady: Runnable = object : Runnable {
+        override fun run() {
+            if (released || !::source.isInitialized) return
+            if (source.poll()) { android.util.Log.i("X5Player", "görüntü geç hazırlandı (${readyTries * 100} ms)"); drawNow(); return }
+            if (++readyTries < 150) handler.postDelayed(this, 100)
         }
     }
 
@@ -353,6 +364,7 @@ class Player(
     private fun drawNow() {
         if (window == EGL14.EGL_NO_SURFACE || !::source.isInitialized || !source.hasFrame) return
         egl.makeCurrent(window)
+        source.poll()
         val t = source.currentPts
         if (t != stitchPts) {
             // Oynatırken birkaç karede bir, dururken her yeni karede ölç.

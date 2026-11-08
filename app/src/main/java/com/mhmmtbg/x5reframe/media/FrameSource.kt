@@ -28,6 +28,12 @@ interface FrameSource {
     /** Düz videoda shader'ın ton eşlemesi yapması gereken HDR eğrisi (0 = SDR). */
     val hdrTransfer: Int get() = 0
 
+    /**
+     * Doku henüz dolmadıysa (fotoğraf yüzeye geç ulaştıysa) şimdi almayı dener; GL iş parçacığında çağrılır.
+     * @return doku hazır mı
+     */
+    fun poll(): Boolean = true
+
     fun seek(us: Long)
     fun next(render: Boolean): Long = next { render }
     fun next(renderIf: (Long) -> Boolean): Long

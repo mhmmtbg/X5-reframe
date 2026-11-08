@@ -93,6 +93,12 @@ class ImageFrameSource(bitmap: Bitmap, private val durationUs: Long, private val
     private val st = SurfaceTexture(texture)
     private val full = floatArrayOf(1f, 0f, 1f, 0f)
     private var nextPts = 0L
+    /** Görüntü yüzeye ulaştı mı / dokuya alındı mı (arayüz meşgulken çizim saniyeler sürebilir). */
+    @Volatile private var arrived = false
+    private var latched = false
+    private val callbackThread = HandlerThread("st-image").apply { start() }
+    /** Üretici yüzey: kare gelene kadar açık kalır (erken kapatılırsa kare hiç ulaşmayabilir). */
+    private val producer = Surface(st)
 
     override val hasFrame = true
     override var currentPts = 0L
@@ -103,18 +109,24 @@ class ImageFrameSource(bitmap: Bitmap, private val durationUs: Long, private val
     init {
         st.setDefaultBufferSize(bitmap.width, bitmap.height)
         // Kare yüzeye gerçekten ulaşınca dokuya al (donanım tuvali eşzamansız çizer).
-        val cb = HandlerThread("st-image").apply { start() }
         val ready = CountDownLatch(1)
-        st.setOnFrameAvailableListener({ ready.countDown() }, Handler(cb.looper))
-        val surface = Surface(st)
-        val canvas = surface.lockHardwareCanvas()
+        st.setOnFrameAvailableListener({ arrived = true; ready.countDown() }, Handler(callbackThread.looper))
+        val canvas = producer.lockHardwareCanvas()
         canvas.drawBitmap(bitmap, 0f, 0f, null)
-        surface.unlockCanvasAndPost(canvas)
+        producer.unlockCanvasAndPost(canvas)
         ready.await(2, TimeUnit.SECONDS)
+        poll()
+    }
+
+    override fun poll(): Boolean {
+        if (latched) return true
+        if (!arrived) return false
         st.updateTexImage()
         st.getTransformMatrix(texMatrix)
-        surface.release()
-        cb.quitSafely()
+        latched = true
+        producer.release()
+        callbackThread.quitSafely()
+        return true
     }
 
     override fun lensTexture(lens: Int) = texture
@@ -135,6 +147,7 @@ class ImageFrameSource(bitmap: Bitmap, private val durationUs: Long, private val
     }
 
     override fun release() {
+        if (!latched) { producer.release(); callbackThread.quitSafely() }
         st.release()
         android.opengl.GLES30.glDeleteTextures(1, intArrayOf(texture), 0)
     }

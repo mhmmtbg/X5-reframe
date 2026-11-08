@@ -1450,6 +1450,8 @@ private fun LayerPanel(c: EditorController, a: EditorActions) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 com.mhmmtbg.x5reframe.model.Layer.Anim.values().filter { it != com.mhmmtbg.x5reframe.model.Layer.Anim.TYPE }.forEach { an -> Chip(an.label, l.animOut == an) { c.updateLayer { it.copy(animOut = an) } } }
             }
+            Text("Giriş: ${l.animIn.desc}" + if (l.animOut != com.mhmmtbg.x5reframe.model.Layer.Anim.NONE) "  Çıkış: ${l.animOut.label.lowercase()}." else "",
+                color = Palette.Muted, style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 ActionButton("Baş: şimdi", Modifier.weight(1f)) { c.updateLayer { it.copy(startUs = c.positionUs) }; c.say("Katman ${fmt(c.positionUs)}'de başlar") }
                 ActionButton("Son: şimdi", Modifier.weight(1f)) {

@@ -44,7 +44,14 @@ data class Layer(
     enum class Align(val label: String) { LEFT("Sol"), CENTER("Orta"), RIGHT("Sağ") }
 
     /** Giriş / çıkış animasyonu (0,4 sn). */
-    enum class Anim(val label: String) { NONE("Yok"), FADE("Belir"), SLIDE_UP("Yukarı kay"), SLIDE_LEFT("Yandan gel"), POP("Büyü"), TYPE("Daktilo") }
+    enum class Anim(val label: String, val desc: String) {
+        NONE("Yok", "Hareketsiz görünür / kaybolur."),
+        FADE("Belir", "0,4 sn'de saydamlıktan açılır (çıkışta söner)."),
+        SLIDE_UP("Yukarı kay", "Biraz aşağıdan yukarı kayarak belirir."),
+        SLIDE_LEFT("Yandan gel", "Sağdan sola kayarak gelir."),
+        POP("Büyü", "Küçükten büyüyüp hafifçe sekerek oturur."),
+        TYPE("Daktilo", "Harfler soldan sağa yazılıyormuş gibi açılır (yalnız girişte)."),
+    }
 
     /** t anında animasyon durumu: saydamlık, kayma (x, y — çıktı oranı), ölçek, görünen karakter oranı. */
     fun animAt(t: Long, segEndUs: Long): FloatArray {

@@ -447,7 +447,13 @@ class Exporter(
         /** k. çıktı karesini o an bağlı çerçeve tamponuna çiz; kaynak bittiyse null. */
         fun frame(k: Long): Long? {
             val tSrc = job.sourceAt(k * frameDur)
-            if (!started) { if (source.seekAndShow(tSrc, frameDur) < 0) return null; started = true }
+            if (!started) {
+                if (source.seekAndShow(tSrc, frameDur) < 0) return null
+                started = true
+                // Fotoğraf dokusu geç gelebilir: en fazla 8 sn bekle (siyah kare yazılmasın)
+                var tries = 0
+                while (!source.poll() && tries++ < 80) Thread.sleep(100)
+            }
             while (source.currentPts + frameDur <= tSrc) {
                 if (source.next { it + frameDur > tSrc } < 0) return null
             }
