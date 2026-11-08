@@ -87,7 +87,7 @@ class FlatFrameSource(fd: FileDescriptor, clip: ClipInfo, realtime: Boolean = tr
  * Fotoğraf klibi: görüntü bir kez dokuya yüklenir, zaman sanal olarak [frameDurUs] adımlarla ilerler.
  * Böylece oynatıcı ve dışa aktarım fotoğrafı bir video gibi işler.
  */
-class ImageFrameSource(bitmap: Bitmap, private val durationUs: Long, private val frameDurUs: Long) : FrameSource {
+class ImageFrameSource(private var bitmap: Bitmap?, private val durationUs: Long, private val frameDurUs: Long) : FrameSource {
     private val texture = ReframeProgram.createOesTexture()
     private val texMatrix = FloatArray(16)
     private val st = SurfaceTexture(texture)
@@ -107,15 +107,61 @@ class ImageFrameSource(bitmap: Bitmap, private val durationUs: Long, private val
         private set
 
     init {
-        st.setDefaultBufferSize(bitmap.width, bitmap.height)
-        // Kare yüzeye gerçekten ulaşınca dokuya al (donanım tuvali eşzamansız çizer).
-        val ready = CountDownLatch(1)
-        st.setOnFrameAvailableListener({ arrived = true; ready.countDown() }, Handler(callbackThread.looper))
-        val canvas = producer.lockHardwareCanvas()
-        canvas.drawBitmap(bitmap, 0f, 0f, null)
-        producer.unlockCanvasAndPost(canvas)
-        ready.await(2, TimeUnit.SECONDS)
+        val bmp = bitmap!!
+        st.setDefaultBufferSize(bmp.width, bmp.height)
+        st.setOnFrameAvailableListener({ arrived = true }, Handler(callbackThread.looper))
+        // Görüntü kendi GL bağlamımızla yüzeye çizilir (donanım tuvali arayüz meşgulken saniyelerce gecikebiliyordu)
+        val win = runCatching { drawWithGl(bmp) }.onFailure { android.util.Log.w("ImageFrameSource", "GL ile çizilemedi: ${it.message}") }.getOrNull()
+        if (win == null) {
+            val canvas = producer.lockHardwareCanvas()
+            canvas.drawBitmap(bmp, 0f, 0f, null)
+            producer.unlockCanvasAndPost(canvas)
+        }
+        val until = System.nanoTime() + 3_000_000_000L
+        while (!arrived && System.nanoTime() < until) Thread.sleep(2)
         poll()
+        // Pencere yüzeyi ancak kare alındıktan sonra kapatılır (kapanış kuyruktaki kareyi siler)
+        win?.let { android.opengl.EGL14.eglDestroySurface(android.opengl.EGL14.eglGetCurrentDisplay(), it) }
+    }
+
+    /** Geçerli EGL bağlamıyla üretici yüzeye bir pencere yüzeyi açıp bit eşlemi çizer. */
+    private fun drawWithGl(bmp: Bitmap): android.opengl.EGLSurface {
+        val dpy = android.opengl.EGL14.eglGetCurrentDisplay()
+        val ctx = android.opengl.EGL14.eglGetCurrentContext()
+        check(ctx != android.opengl.EGL14.EGL_NO_CONTEXT) { "GL bağlamı yok" }
+        val draw = android.opengl.EGL14.eglGetCurrentSurface(android.opengl.EGL14.EGL_DRAW)
+        val read = android.opengl.EGL14.eglGetCurrentSurface(android.opengl.EGL14.EGL_READ)
+        val id = IntArray(1)
+        android.opengl.EGL14.eglQueryContext(dpy, ctx, android.opengl.EGL14.EGL_CONFIG_ID, id, 0)
+        val cfgs = arrayOfNulls<android.opengl.EGLConfig>(1); val n = IntArray(1)
+        android.opengl.EGL14.eglChooseConfig(dpy, intArrayOf(android.opengl.EGL14.EGL_CONFIG_ID, id[0], android.opengl.EGL14.EGL_NONE), 0, cfgs, 0, 1, n, 0)
+        check(n[0] > 0) { "EGL yapılandırması yok" }
+        val win = android.opengl.EGL14.eglCreateWindowSurface(dpy, cfgs[0], producer, intArrayOf(android.opengl.EGL14.EGL_NONE), 0)
+        check(win != android.opengl.EGL14.EGL_NO_SURFACE) { "pencere yüzeyi açılamadı" }
+        val tex = IntArray(1)
+        try {
+            android.opengl.EGL14.eglMakeCurrent(dpy, win, win, ctx)
+            // GL satırları aşağıdan yukarı: dikey çevrilmiş bit eşlem yüklenir ki yüzeyde düz görünsün
+            val flipped = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, android.graphics.Matrix().apply { preScale(1f, -1f) }, false)
+            android.opengl.GLES30.glGenTextures(1, tex, 0)
+            android.opengl.GLES30.glBindTexture(android.opengl.GLES30.GL_TEXTURE_2D, tex[0])
+            android.opengl.GLES30.glTexParameteri(android.opengl.GLES30.GL_TEXTURE_2D, android.opengl.GLES30.GL_TEXTURE_MIN_FILTER, android.opengl.GLES30.GL_LINEAR)
+            android.opengl.GLES30.glTexParameteri(android.opengl.GLES30.GL_TEXTURE_2D, android.opengl.GLES30.GL_TEXTURE_MAG_FILTER, android.opengl.GLES30.GL_LINEAR)
+            android.opengl.GLUtils.texImage2D(android.opengl.GLES30.GL_TEXTURE_2D, 0, flipped, 0)
+            if (flipped !== bmp) flipped.recycle()
+            val blit = com.mhmmtbg.x5reframe.gl.Blit()
+            blit.draw(tex[0], bmp.width, bmp.height)
+            blit.release()
+            android.opengl.EGL14.eglSwapBuffers(dpy, win)
+            return win
+        } catch (t: Throwable) {
+            android.opengl.EGL14.eglMakeCurrent(dpy, draw, read, ctx)
+            android.opengl.EGL14.eglDestroySurface(dpy, win)
+            throw t
+        } finally {
+            android.opengl.GLES30.glDeleteTextures(1, tex, 0)
+            android.opengl.EGL14.eglMakeCurrent(dpy, draw, read, ctx)
+        }
     }
 
     override fun poll(): Boolean {
@@ -125,6 +171,7 @@ class ImageFrameSource(bitmap: Bitmap, private val durationUs: Long, private val
         st.getTransformMatrix(texMatrix)
         latched = true
         producer.release()
+        bitmap?.recycle(); bitmap = null
         callbackThread.quitSafely()
         return true
     }
@@ -147,7 +194,7 @@ class ImageFrameSource(bitmap: Bitmap, private val durationUs: Long, private val
     }
 
     override fun release() {
-        if (!latched) { producer.release(); callbackThread.quitSafely() }
+        if (!latched) { producer.release(); callbackThread.quitSafely(); bitmap?.recycle(); bitmap = null }
         st.release()
         android.opengl.GLES30.glDeleteTextures(1, intArrayOf(texture), 0)
     }

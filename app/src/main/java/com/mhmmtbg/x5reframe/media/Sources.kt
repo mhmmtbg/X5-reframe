@@ -26,8 +26,8 @@ object Sources {
             }
             ClipKind.FLAT -> FlatFrameSource(fd, clip, realtime)
             ClipKind.IMAGE -> {
-                val bmp = MediaProbe.decodeImage(context, clip.uri)
-                try { ImageFrameSource(bmp, clip.durationUs, (1_000_000 / clip.frameRate).toLong()) } finally { bmp.recycle() }
+                // Bit eşlem kaynak tarafından tutulur: donanım tuvali onu eşzamansız çizer, kare dokuya ulaşınca bırakılır
+                ImageFrameSource(MediaProbe.decodeImage(context, clip.uri), clip.durationUs, (1_000_000 / clip.frameRate).toLong())
             }
         }
 }
