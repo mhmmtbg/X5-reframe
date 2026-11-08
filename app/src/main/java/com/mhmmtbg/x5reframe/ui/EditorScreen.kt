@@ -257,6 +257,7 @@ fun EditorScreen(
     BoxWithConstraints(Modifier.fillMaxSize().background(Palette.Background)) {
         val wide = maxWidth >= 600.dp && maxWidth > maxHeight
         val totalH = maxHeight
+        val sideW = (maxWidth * 0.36f).coerceIn(300.dp, 460.dp)
         Column(Modifier.fillMaxSize()) {
             if (!fullscreen) TopBar(c, actions, onExport = { showExport = true })
             val ex = c.exportUi
@@ -277,7 +278,7 @@ fun EditorScreen(
                     }
                     if (!fullscreen) {
                         Box(Modifier.width(1.dp).fillMaxHeight().background(Palette.Outline))
-                        Column(Modifier.width((maxWidth * 0.36f).coerceIn(300.dp, 460.dp)).fillMaxHeight().background(Palette.Surface)) {
+                        Column(Modifier.width(sideW).fillMaxHeight().background(Palette.Surface)) {
                             ToolBar(open, tools, navPadding = false, onSelect = selectTool)
                             if (open != null) panel(open, Modifier.weight(1f))
                             else ToolGrid(tools, selectTool, Modifier.weight(1f))
