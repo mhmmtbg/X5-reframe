@@ -1,0 +1,3 @@
+camera: Insta360 model: Insta360 X5
+telemetry json length: 9892542
+imu samples: 20016

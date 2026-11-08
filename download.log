@@ -1,0 +1,7 @@
+total 239736
+drwxr-xr-x 2 runner runner      4096 Nov  8 19:32 .
+drwxr-xr-x 9 runner runner      4096 Nov  8 19:32 ..
+-rw-r--r-- 1 runner runner 210162020 Nov  8 19:32 clip.insv
+-rw-r--r-- 1 runner runner  35311966 Nov  8 19:32 clip.lrv
+media/clip.insv: ISO Media, MPEG v4 system, 3GPP JVT AVC [ISO 14496-12:2005]
+media/clip.lrv:  ISO Media, MPEG v4 system, 3GPP JVT AVC [ISO 14496-12:2005]

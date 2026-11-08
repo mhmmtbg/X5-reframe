@@ -1,0 +1,5 @@
+total 239736
+drwxr-xr-x 2 runner runner      4096 Nov  8 19:32 .
+drwxr-xr-x 9 runner runner      4096 Nov  8 19:32 ..
+-rw-r--r-- 1 runner runner 210162020 Nov  8 19:32 clip.insv
+-rw-r--r-- 1 runner runner  35311966 Nov  8 19:32 clip.lrv
